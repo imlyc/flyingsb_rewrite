@@ -10,9 +10,10 @@ class TitleScene:
         self.surface = surface
         # macOS 上常见的中文字体路径
         candidates = [
-            "/System/Library/Fonts/PingFang.ttc",
             "/System/Library/Fonts/STHeiti Medium.ttc",
-            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/Supplemental/Songti.ttc",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         ]
         self.font = None
         for p in candidates:
