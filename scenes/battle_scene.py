@@ -105,6 +105,8 @@ class BattleScene(Scene):
     CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
     UNIT_TILES_PER_SEC = 5.0      # 单位走动速度 (格/秒)
     ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位
+    HUD_TOP_BUFFER = 96           # 镜头顶部预留 (px), 让 HUD 不挡角色
+    LOG_BOTTOM_BUFFER = 116       # 镜头底部预留 (px), 让日志不挡角色
 
     def __init__(
         self,
@@ -138,8 +140,8 @@ class BattleScene(Scene):
         self._menu_open = False
         self._menu_font = load_chinese_font(16)
 
-        # 镜头 (px), 初始对准当前行动单位
-        cx, cy = self.world_map.camera_offset_for(battle.current.x, battle.current.y)
+        # 镜头 (px), 初始对准当前行动单位 (HUD 安全区)
+        cx, cy = self._compute_camera_offset(battle.current.x, battle.current.y)
         self._cam_x = float(cx)
         self._cam_y = float(cy)
 
@@ -196,7 +198,7 @@ class BattleScene(Scene):
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
-        target_x, target_y = self.world_map.camera_offset_for(
+        target_x, target_y = self._compute_camera_offset(
             int(round(u.render_x)), int(round(u.render_y)))
         self._cam_x += (target_x - self._cam_x) * self.CAMERA_LERP
         self._cam_y += (target_y - self._cam_y) * self.CAMERA_LERP
@@ -328,6 +330,22 @@ class BattleScene(Scene):
         px = int(round(u.render_x * TILE)) - cam_x
         py = int(round(u.render_y * TILE)) - cam_y
         return pygame.Rect(px, py, TILE, TILE)
+
+    def _compute_camera_offset(self, focus_x: int, focus_y: int) -> tuple[int, int]:
+        """像 world_map.camera_offset_for, 但顶/底各留出 HUD/log 高度,
+        让 HUD 不挡角色 sprite. 露出的屏幕空间显示底色 (黑/深紫)."""
+        sw, sh = self.surface.get_size()
+        cx = focus_x * TILE + TILE // 2 - sw // 2
+        cy = focus_y * TILE + TILE // 2 - sh // 2
+        # X 轴: 标准夹紧
+        map_w_px = self.battle.map.w * TILE
+        cx = max(0, min(cx, max(0, map_w_px - sw)))
+        # Y 轴: 顶部允许 cam 到 -HUD_TOP_BUFFER, 底部允许 cam 走到 +LOG_BOTTOM_BUFFER
+        map_h_px = self.battle.map.h * TILE
+        min_cy = -self.HUD_TOP_BUFFER
+        max_cy = max(min_cy, map_h_px - sh + self.LOG_BOTTOM_BUFFER)
+        cy = max(min_cy, min(cy, max_cy))
+        return cx, cy
 
     def _units_animating(self) -> bool:
         for u in self.battle.all_units:
