@@ -39,10 +39,13 @@ def main() -> int:
         scene.draw()
         pygame.display.flip()
 
-        # 场景切换
+        # 场景切换: 清掉两端的 next_scene 指针, 否则旧引用会导致回跳 (闪屏)
         if scene.next_scene is not None:
+            nxt = scene.next_scene
+            scene.next_scene = None
             scene.on_exit()
-            scene = scene.next_scene
+            scene = nxt
+            scene.next_scene = None
             scene.on_enter()
 
     audio.stop_bgm()

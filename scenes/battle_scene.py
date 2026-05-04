@@ -1,2 +1,568 @@
-"""战斗场景占位."""
-# TODO
+"""战棋战斗场景 (战斗发生在世界地图上, 不切场景).
+
+操作:
+  方向键   走 1 格 + 转面向 (走不了就只转身); 走过的格子计入本回合可达范围
+  Enter    攻击当前面向格子上的敌人 (近战范围内). 没敌人则无动作.
+  ESC      调出行动菜单 (上=攻击 / 右=技能 / 下=结束 / 左=道具)
+           菜单内方向键直接选项, ESC 关闭
+  X        撤销移动, 把角色拉回本回合起点
+  朝向格高亮: 浅白 = 空格, 浅红 = 上面有敌人 (可 Enter 攻击)
+  胜负后任意键返回地图.
+
+视觉:
+  - 复用 WorldMapScene 的地形渲染 (相同的世界格子)
+  - 镜头跟随当前行动单位
+  - 蓝色半透明: 可移动; 红色: 可攻击的敌人格
+  - 头顶: 绿色 HP 数字, 下方蓝色 M{move}
+  - 脚下椭圆阴影; 浮动伤害数字 (橙色 1 秒)
+  - 左上 HUD: 当前 + 下一行动卡片
+  - 底部: 战斗日志
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pygame
+
+from core.audio_manager import AudioManager
+from core.battle import BattleUnit, DamageEvent, LevelUpReport, Phase, TacticsBattle
+from core.character import UNSET
+from scenes.base import Scene
+from scenes.menu import load_chinese_font
+
+if TYPE_CHECKING:
+    from scenes.world_map import WorldMapScene
+
+TILE = 32  # 世界 tile 大小, 与 world_map.TILE_SIZE 同步
+
+# HUD
+HUD_X = 12
+HUD_Y = 12
+HUD_W_CUR = 280
+HUD_W_NEXT = 220
+
+# 底部日志
+LOG_H = 100
+
+
+class FloatText:
+    """浮动伤害数字: 绿色大伤害 + 蓝色小剩余 HP, 1.2 秒上升淡出 (对照原版 d090/f120)."""
+    DURATION_MS = 1200
+    RISE_PX = 32
+    DAMAGE_COLOR = (90, 230, 110)    # 绿色
+    HP_COLOR = (90, 170, 255)        # 蓝色
+
+    def __init__(self, damage: int, remaining_hp: int,
+                 world_x: int, world_y: int, started_at: int) -> None:
+        self.damage = damage
+        self.remaining_hp = remaining_hp
+        self.world_x = world_x
+        self.world_y = world_y
+        self.started_at = started_at
+
+    def alive(self, now_ms: int) -> bool:
+        return now_ms - self.started_at < self.DURATION_MS
+
+    def draw(self, surface: pygame.Surface,
+             big_font: pygame.font.Font, small_font: pygame.font.Font,
+             cam_x: int, cam_y: int, now_ms: int) -> None:
+        t = (now_ms - self.started_at) / self.DURATION_MS
+        if t >= 1.0:
+            return
+        # 前 70% 不透明, 后 30% 淡出
+        alpha = int(255 * (1.0 if t < 0.7 else (1.0 - (t - 0.7) / 0.3)))
+        dy = int(self.RISE_PX * t)
+        cx, cy = self.world_x - cam_x, self.world_y - cam_y - dy
+        # 绿色伤害 (上)
+        big = big_font.render(str(self.damage), True, self.DAMAGE_COLOR)
+        big.set_alpha(alpha)
+        big_rect = big.get_rect(midbottom=(cx, cy))
+        surface.blit(big, big_rect)
+        # 蓝色剩余 HP (紧贴下方)
+        small = small_font.render(str(self.remaining_hp), True, self.HP_COLOR)
+        small.set_alpha(alpha)
+        small_rect = small.get_rect(midtop=(cx, big_rect.bottom - 2))
+        surface.blit(small, small_rect)
+
+
+class BattleScene(Scene):
+    PANEL_BG = (28, 22, 40)
+    PANEL_BORDER = (200, 180, 100)
+    TEXT = (240, 240, 240)
+    DIM = (160, 160, 160)
+    HIGHLIGHT = (255, 240, 120)
+    MOVE_TINT = (130, 100, 220, 110)   # 紫色, 对照原版 d055/d080
+    ATK_TINT = (220, 60, 60, 110)
+    FACE_EMPTY_TINT = (255, 255, 255, 110)   # 朝向空格 = 浅白
+    FACE_ENEMY_TINT = (255, 120, 120, 140)   # 朝向敌人 = 浅红
+    CURSOR_COLOR = (255, 240, 120)
+    HP_NUM_COLOR = (140, 240, 140)
+    MOVE_NUM_COLOR = (140, 200, 255)
+    SHADOW = (0, 0, 0, 110)
+
+    ENEMY_TURN_DELAY_MS = 350     # 走完 + 攻击命中后再停顿这么久
+    CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
+    UNIT_TILES_PER_SEC = 5.0      # 单位走动速度 (格/秒)
+    ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位
+
+    def __init__(
+        self,
+        surface: pygame.Surface,
+        audio: AudioManager,
+        battle: TacticsBattle,
+        world_map: "WorldMapScene",
+        return_scene: Scene,
+    ) -> None:
+        super().__init__(surface)
+        self.audio = audio
+        self.battle = battle
+        self.world_map = world_map
+        self.return_scene = return_scene
+        self.font = load_chinese_font(18)
+        self.small = load_chinese_font(13)
+        self.tiny = load_chinese_font(11)
+        self.float_font = load_chinese_font(20)
+        self.big = load_chinese_font(36)
+
+        # 攻击目标光标已废弃: PLAYER_MOVE 阶段 Enter 攻击朝向格
+        self._enemy_turn_started_at: int | None = None
+        self._battle_over_signaled = False
+        self._floats: list[FloatText] = []
+        # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
+        self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
+        self._victory_acknowledged = False   # 玩家已按过一次 (跳过胜利 banner)
+        self._float_big = load_chinese_font(22)
+        self._float_small = load_chinese_font(14)
+        # 行动菜单: ESC 弹出十字 4 选项 (上=攻 / 右=技 / 下=终 / 左=道)
+        self._menu_open = False
+        self._menu_font = load_chinese_font(16)
+
+        # 镜头 (px), 初始对准当前行动单位
+        cx, cy = self.world_map.camera_offset_for(battle.current.x, battle.current.y)
+        self._cam_x = float(cx)
+        self._cam_y = float(cy)
+
+        # 缓存
+        self._move_tint = self._make_tint(self.MOVE_TINT)
+        self._atk_tint = self._make_tint(self.ATK_TINT)
+        self._face_empty_tint = self._make_tint(self.FACE_EMPTY_TINT)
+        self._face_enemy_tint = self._make_tint(self.FACE_ENEMY_TINT)
+        self._shadow_surf = self._make_shadow()
+
+    def _make_tint(self, rgba: tuple) -> pygame.Surface:
+        s = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+        s.fill(rgba)
+        return s
+
+    def _make_shadow(self) -> pygame.Surface:
+        s = pygame.Surface((TILE, TILE // 2), pygame.SRCALPHA)
+        pygame.draw.ellipse(s, self.SHADOW, s.get_rect())
+        return s
+
+    # ------- 生命周期 -------
+    def on_enter(self) -> None:
+        try:
+            self.audio.play_bgm("battle0.wav")
+        except FileNotFoundError as e:
+            print(f"battle BGM 缺失: {e}")
+
+    # ------- 主循环 -------
+    def update(self, dt_ms: int) -> None:
+        now = pygame.time.get_ticks()
+
+        # 单位渲染坐标按速度向逻辑坐标插值 (玩家走动 + 敌方移动都靠这个)
+        step = self.UNIT_TILES_PER_SEC * dt_ms / 1000.0
+        for unit in self.battle.all_units:
+            if not unit.alive:
+                continue
+            for axis in ("x", "y"):
+                rattr = f"render_{axis}"
+                logical = getattr(unit, axis)
+                rval = getattr(unit, rattr)
+                delta = logical - rval
+                if abs(delta) <= step:
+                    setattr(unit, rattr, float(logical))
+                else:
+                    setattr(unit, rattr, rval + (step if delta > 0 else -step))
+
+        # 把 battle 的伤害事件转成浮动文字 (绿+蓝 双行)
+        for ev in self.battle.damage_events:
+            wx = ev.x * TILE + TILE // 2
+            wy = ev.y * TILE + 6
+            self._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now))
+        self.battle.damage_events.clear()
+        self._floats = [f for f in self._floats if f.alive(now)]
+
+        # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
+        u = self.battle.current
+        target_x, target_y = self.world_map.camera_offset_for(
+            int(round(u.render_x)), int(round(u.render_y)))
+        self._cam_x += (target_x - self._cam_x) * self.CAMERA_LERP
+        self._cam_y += (target_y - self._cam_y) * self.CAMERA_LERP
+
+        # 敌方回合: 等所有动画走完, 再短暂停顿, 再 post_enemy_turn (才会触发攻击 + 飘字)
+        if self.battle.phase == Phase.ENEMY_TURN:
+            if self._units_animating():
+                self._enemy_turn_started_at = None  # 还在走, 重置计时
+            else:
+                if self._enemy_turn_started_at is None:
+                    self._enemy_turn_started_at = now
+                if now - self._enemy_turn_started_at >= self.ENEMY_TURN_DELAY_MS:
+                    self._enemy_turn_started_at = None
+                    self.battle.post_enemy_turn()
+        elif (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
+              and not self._battle_over_signaled):
+            self._battle_over_signaled = True
+            wav = "Victory.wav" if self.battle.phase == Phase.VICTORY else "Gameover.wav"
+            try:
+                self.audio.play_bgm(wav, loops=0)
+            except FileNotFoundError:
+                pass
+
+    # ------- 输入 -------
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if event.type == pygame.QUIT:
+            return False
+        if event.type != pygame.KEYDOWN:
+            return True
+        if self.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
+            self._advance_end_screen()
+            return True
+        if self.battle.phase == Phase.ENEMY_TURN:
+            return True
+
+        # 菜单打开时: 方向键直接选项, ESC 关闭, 其它忽略
+        if self._menu_open:
+            self._handle_menu_key(event.key)
+            return True
+
+        # 方向键: 角色直接移动 + 转向
+        step = None
+        if event.key in (pygame.K_LEFT, pygame.K_a):    step = (-1, 0)
+        elif event.key in (pygame.K_RIGHT, pygame.K_d): step = (1, 0)
+        elif event.key in (pygame.K_UP, pygame.K_w):    step = (0, -1)
+        elif event.key in (pygame.K_DOWN, pygame.K_s):  step = (0, 1)
+        if step is not None:
+            self.battle.player_step(*step)
+            return True
+
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.battle.player_attack_facing()
+        elif event.key == pygame.K_ESCAPE:
+            self._menu_open = True
+        elif event.key == pygame.K_x:
+            self.battle.cancel_to_move()
+        return True
+
+    def _handle_menu_key(self, key: int) -> None:
+        """十字菜单: 上=攻击, 右=技能, 下=结束, 左=道具. ESC 关闭."""
+        if key in (pygame.K_ESCAPE, pygame.K_x):
+            self._menu_open = False
+            return
+        if key in (pygame.K_UP, pygame.K_w):
+            # 攻击 = 朝向格上的敌人 (与 Enter 等价, 提供菜单内冗余入口)
+            self._menu_open = False
+            if not self.battle.player_attack_facing():
+                self.battle._log(f"{self.battle.current.name} 朝向无敌人, 无法攻击")
+        elif key in (pygame.K_RIGHT, pygame.K_d):
+            # 技能 (SG 必杀, AOE 邻接全敌)
+            self._menu_open = False
+            self.battle.player_use_skill()  # 失败原因已 log
+        elif key in (pygame.K_DOWN, pygame.K_s):
+            self._menu_open = False
+            self.battle.player_end_turn()
+        elif key in (pygame.K_LEFT, pygame.K_a):
+            self._menu_open = False
+            self.battle._log(f"{self.battle.current.name} 翻找道具袋... (尚未实现)")
+
+    def _advance_end_screen(self) -> None:
+        """胜利后逐个翻升级框, 然后返回地图. 失败时直接返回."""
+        if self.battle.phase == Phase.DEFEAT:
+            self.next_scene = self.return_scene
+            return
+        # 第一次按键: 跳过胜利 banner
+        if not self._victory_acknowledged:
+            self._victory_acknowledged = True
+            self._levelup_idx = 0
+            if not self.battle.level_ups:
+                self.next_scene = self.return_scene
+            return
+        # 后续按键: 逐个翻升级框
+        self._levelup_idx += 1
+        if self._levelup_idx >= len(self.battle.level_ups):
+            self.next_scene = self.return_scene
+
+    # ------- 渲染 -------
+    def draw(self) -> None:
+        self.surface.fill((0, 0, 0))
+        cam_x, cam_y = int(self._cam_x), int(self._cam_y)
+
+        # 1) 复用世界地图的地形
+        self.world_map.draw_terrain(self.surface, cam_x, cam_y)
+        # 2) 移动 / 攻击高亮
+        self._draw_overlays(cam_x, cam_y)
+        # 3) 单位 (含影子, HP 数字)
+        self._draw_units(cam_x, cam_y)
+        # 4) 行动菜单 (ESC 弹出)
+        self._draw_action_menu(cam_x, cam_y)
+        # 5) 浮动伤害
+        self._draw_floats(cam_x, cam_y)
+        # 6) HUD (不滚动)
+        self._draw_hud()
+        # 7) 日志
+        self._draw_log()
+        # 8) 胜负
+        if self.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
+            self._draw_end_banner()
+
+    def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:
+        return pygame.Rect(x * TILE - cam_x, y * TILE - cam_y, TILE, TILE)
+
+    def _tile_center(self, x: int, y: int, cam_x: int, cam_y: int) -> tuple[int, int]:
+        r = self._tile_rect(x, y, cam_x, cam_y)
+        return r.centerx, r.centery
+
+    def _unit_rect(self, u, cam_x: int, cam_y: int) -> pygame.Rect:
+        """用 render_x/y (浮点 tile) 算单位的渲染像素 rect."""
+        px = int(round(u.render_x * TILE)) - cam_x
+        py = int(round(u.render_y * TILE)) - cam_y
+        return pygame.Rect(px, py, TILE, TILE)
+
+    def _units_animating(self) -> bool:
+        for u in self.battle.all_units:
+            if not u.alive:
+                continue
+            if (abs(u.render_x - u.x) > self.ANIM_EPSILON
+                    or abs(u.render_y - u.y) > self.ANIM_EPSILON):
+                return True
+        return False
+
+    def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
+        u = self.battle.current
+        if not u.is_player or self.battle.phase != Phase.PLAYER_MOVE:
+            return
+        # 蓝紫色: 本回合可达范围
+        for (x, y) in self.battle.turn_move_range:
+            self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
+        # 朝向格: 只在角色静止 (render 已到位) 时才显示
+        if (abs(u.render_x - u.x) > self.ANIM_EPSILON
+                or abs(u.render_y - u.y) > self.ANIM_EPSILON):
+            return
+        fx, fy = u.x + u.facing[0], u.y + u.facing[1]
+        if self.battle.map.in_bounds(fx, fy):
+            occ = self.battle.occupant(fx, fy)
+            tint = (self._face_enemy_tint
+                    if (occ is not None and occ.is_player != u.is_player)
+                    else self._face_empty_tint)
+            self.surface.blit(tint, self._tile_rect(fx, fy, cam_x, cam_y))
+
+    def _draw_units(self, cam_x: int, cam_y: int) -> None:
+        for u in self.battle.all_units:
+            if not u.alive:
+                continue
+            rect = self._unit_rect(u, cam_x, cam_y)
+            cx, cy = rect.centerx, rect.centery
+            # 视椎裁剪 (大致)
+            if rect.right < 0 or rect.left > self.surface.get_width():
+                continue
+            if rect.bottom < 0 or rect.top > self.surface.get_height():
+                continue
+            # 影子
+            shadow_rect = self._shadow_surf.get_rect(midbottom=(cx, cy + TILE // 2 - 2))
+            self.surface.blit(self._shadow_surf, shadow_rect)
+            # 单位方块
+            r = rect.inflate(-8, -8)
+            color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
+            pygame.draw.rect(self.surface, color, r)
+            pygame.draw.rect(self.surface, (0, 0, 0), r, 2)
+            if u is self.battle.current:
+                pygame.draw.rect(self.surface, self.HIGHLIGHT, rect.inflate(-2, -2), 2)
+                # 朝向小三角 (黄)
+                self._draw_facing_arrow(u, rect)
+            # 头顶 HP
+            hp = self.tiny.render(str(u.hp), True, self.HP_NUM_COLOR)
+            self.surface.blit(hp, hp.get_rect(midbottom=(cx, r.top - 1)))
+            # 当前单位 + 移动阶段: 蓝色 M{move}
+            if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
+                mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
+                self.surface.blit(mv, mv.get_rect(midtop=(cx, r.bottom + 1)))
+
+    def _draw_facing_arrow(self, u, tile_rect: pygame.Rect) -> None:
+        """在 tile 边框对应朝向的边上画一个小黄三角."""
+        cx, cy = tile_rect.centerx, tile_rect.centery
+        dx, dy = u.facing
+        offset = TILE // 2 - 2
+        tip = (cx + dx * offset, cy + dy * offset)
+        # 三角的两个底角: 沿垂直方向各偏 4px
+        if dx != 0:  # 左/右
+            base1 = (tip[0] - dx * 6, tip[1] - 5)
+            base2 = (tip[0] - dx * 6, tip[1] + 5)
+        else:        # 上/下
+            base1 = (tip[0] - 5, tip[1] - dy * 6)
+            base2 = (tip[0] + 5, tip[1] - dy * 6)
+        pygame.draw.polygon(self.surface, self.HIGHLIGHT, [tip, base1, base2])
+
+    def _draw_action_menu(self, cam_x: int, cam_y: int) -> None:
+        """十字 4 选项, 围在当前单位四周 (上=攻 / 右=技 / 下=终 / 左=道)."""
+        if not self._menu_open:
+            return
+        u = self.battle.current
+        ucx = u.x * TILE - cam_x + TILE // 2
+        ucy = u.y * TILE - cam_y + TILE // 2
+        box_w, box_h = 56, 36
+        offset = 48  # 距单位中心
+        # 4 个框的 (label, center_x, center_y, hint_key)
+        boxes = [
+            ("↑ 攻击", ucx, ucy - offset),
+            ("→ 技能", ucx + offset + box_w // 2, ucy),
+            ("↓ 结束", ucx, ucy + offset),
+            ("← 道具", ucx - offset - box_w // 2, ucy),
+        ]
+        for label, x, y in boxes:
+            rect = pygame.Rect(0, 0, box_w, box_h)
+            rect.center = (x, y)
+            # 半透明黑底 + 黄边
+            bg = pygame.Surface(rect.size, pygame.SRCALPHA)
+            bg.fill((0, 0, 0, 220))
+            self.surface.blit(bg, rect)
+            pygame.draw.rect(self.surface, self.HIGHLIGHT, rect, 2)
+            txt = self._menu_font.render(label, True, self.HIGHLIGHT)
+            self.surface.blit(txt, txt.get_rect(center=rect.center))
+
+    def _draw_floats(self, cam_x: int, cam_y: int) -> None:
+        now = pygame.time.get_ticks()
+        for f in self._floats:
+            f.draw(self.surface, self._float_big, self._float_small, cam_x, cam_y, now)
+
+    # ---- HUD ----
+    def _draw_hud(self) -> None:
+        self._draw_actor_card(HUD_X, HUD_Y, HUD_W_CUR, 70, self.battle.current,
+                              label="当前行动", highlight=True)
+        nxt = self.battle.next_actor()
+        if nxt is not None:
+            self._draw_actor_card(HUD_X + HUD_W_CUR + 12, HUD_Y, HUD_W_NEXT, 70, nxt,
+                                  label="下一行动", highlight=False)
+
+    def _draw_actor_card(self, x: int, y: int, w: int, h: int, u: BattleUnit,
+                         label: str, highlight: bool) -> None:
+        rect = pygame.Rect(x, y, w, h)
+        # 半透明底
+        bg = pygame.Surface(rect.size, pygame.SRCALPHA)
+        bg.fill((28, 22, 40, 220))
+        self.surface.blit(bg, rect)
+        pygame.draw.rect(self.surface,
+                         self.HIGHLIGHT if highlight else self.PANEL_BORDER,
+                         rect, 2 if highlight else 1)
+        avatar = pygame.Rect(x + 6, y + 6, h - 12, h - 12)
+        pygame.draw.rect(self.surface, u.color, avatar)
+        pygame.draw.rect(self.surface, (0, 0, 0), avatar, 1)
+        side = (u.name[0] if u.is_player else "敌")
+        t = self.font.render(side, True, (0, 0, 0))
+        self.surface.blit(t, t.get_rect(center=avatar.center))
+
+        tx = avatar.right + 10
+        ty = y + 4
+        tag = self.tiny.render(label, True,
+                               self.HIGHLIGHT if highlight else self.DIM)
+        self.surface.blit(tag, (tx, ty)); ty += 14
+        name_text = f"{u.name}  Lv{u.level}"
+        t = self.font.render(name_text, True, self.TEXT)
+        self.surface.blit(t, (tx, ty)); ty += 22
+        line = f"HP {u.hp}/{u.max_hp}   MP {u.mp}/{u.max_mp}"
+        t = self.small.render(line, True, self.TEXT)
+        self.surface.blit(t, (tx, ty)); ty += 16
+        self._draw_sg_icons(tx, ty, u.sg)
+        agi_text = f"敏 {u.agile}  移 {u.move}"
+        t = self.tiny.render(agi_text, True, self.DIM)
+        self.surface.blit(t, (tx + 80, ty + 1))
+
+    def _draw_sg_icons(self, x: int, y: int, sg: int, max_slots: int = 5) -> None:
+        if sg == UNSET:
+            t = self.small.render("SG ∞", True, self.HIGHLIGHT)
+            self.surface.blit(t, (x, y - 1))
+            return
+        label = self.tiny.render("SG", True, self.DIM)
+        self.surface.blit(label, (x, y))
+        slot_w = 6; gap = 2; ox = x + 22
+        slots = max(1, min(max_slots, max(1, sg // 5 if sg > 0 else 1)))
+        filled = min(slots, max(0, sg // 2))
+        for i in range(slots):
+            r = pygame.Rect(ox + i * (slot_w + gap), y + 2, slot_w, 10)
+            color = self.HIGHLIGHT if i < filled else self.DIM
+            pygame.draw.rect(self.surface, color, r)
+
+    def _draw_log(self) -> None:
+        sw, sh = self.surface.get_size()
+        rect = pygame.Rect(8, sh - LOG_H - 8, sw - 16, LOG_H)
+        bg = pygame.Surface(rect.size, pygame.SRCALPHA)
+        bg.fill((20, 14, 30, 210))
+        self.surface.blit(bg, rect)
+        pygame.draw.rect(self.surface, self.PANEL_BORDER, rect, 1)
+        max_lines = max(1, (LOG_H - 12) // 18)
+        msgs = self.battle.messages[-max_lines:]
+        for i, m in enumerate(msgs):
+            t = self.small.render(m, True, self.TEXT)
+            self.surface.blit(t, (rect.x + 8, rect.y + 6 + i * 18))
+
+    def _draw_end_banner(self) -> None:
+        if self.battle.phase == Phase.DEFEAT:
+            self._draw_simple_banner("战  败", (220, 90, 90), "游戏结束", "按任意键返回地图")
+            return
+        # VICTORY
+        if not self._victory_acknowledged:
+            sub = f"经验 +{self.battle.exp_gained}    金钱 +{self.battle.money_gained}"
+            self._draw_simple_banner("胜  利", (90, 220, 100), sub, "按任意键继续")
+            return
+        # 翻升级对话框
+        if 0 <= self._levelup_idx < len(self.battle.level_ups):
+            self._draw_levelup_dialog(self.battle.level_ups[self._levelup_idx])
+
+    def _draw_simple_banner(self, title: str, color: tuple, sub: str, hint: str) -> None:
+        sw, sh = self.surface.get_size()
+        big = self.big.render(title, True, color)
+        rect = big.get_rect(center=(sw // 2, sh // 2 - 30))
+        bg = rect.inflate(80, 40)
+        pygame.draw.rect(self.surface, (0, 0, 0), bg)
+        pygame.draw.rect(self.surface, color, bg, 3)
+        self.surface.blit(big, rect)
+        sub_t = self.font.render(sub, True, self.TEXT)
+        self.surface.blit(sub_t, sub_t.get_rect(center=(sw // 2, rect.bottom + 20)))
+        hint_t = self.small.render(hint, True, self.DIM)
+        self.surface.blit(hint_t, hint_t.get_rect(center=(sw // 2, rect.bottom + 46)))
+
+    def _draw_levelup_dialog(self, rep: "LevelUpReport") -> None:
+        """模仿原版 f144: 「<名字> 等级 up!」+ 「提升了 HP/攻击/防御 N」."""
+        sw, sh = self.surface.get_size()
+        lines = [f"{rep.name}  等级 up!  → Lv{rep.new_level}"]
+        if rep.hp_inc:  lines.append(f"  提升了 HP   +{rep.hp_inc}")
+        if rep.mp_inc:  lines.append(f"  提升了 MP   +{rep.mp_inc}")
+        if rep.atk_inc: lines.append(f"  提升了 攻击 +{rep.atk_inc}")
+        if rep.def_inc: lines.append(f"  提升了 防御 +{rep.def_inc}")
+
+        # 估算尺寸
+        title_surf = self.font.render(lines[0], True, self.HIGHLIGHT)
+        body_surfs = [self.font.render(l, True, self.TEXT) for l in lines[1:]]
+        line_h = 28
+        w = max(title_surf.get_width(), *(s.get_width() for s in body_surfs)) + 60
+        h = 24 + line_h * len(lines) + 28  # title + body + hint
+        box = pygame.Rect(0, 0, w, h)
+        box.center = (sw // 2, sh // 2)
+
+        # 半透明黑底 + 黄边
+        bg = pygame.Surface(box.size, pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 230))
+        self.surface.blit(bg, box)
+        pygame.draw.rect(self.surface, self.HIGHLIGHT, box, 2)
+
+        y = box.y + 14
+        self.surface.blit(title_surf, title_surf.get_rect(midtop=(box.centerx, y)))
+        y += line_h + 4
+        for s in body_surfs:
+            self.surface.blit(s, (box.x + 30, y))
+            y += line_h
+        # 翻页提示
+        idx = self._levelup_idx + 1
+        total = len(self.battle.level_ups)
+        hint = self.small.render(f"按任意键继续 ({idx}/{total})", True, self.DIM)
+        self.surface.blit(hint, hint.get_rect(midbottom=(box.centerx, box.bottom - 6)))
