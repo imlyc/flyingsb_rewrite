@@ -114,18 +114,20 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
 
 
 # ---------------- 敌人模板 ----------------
+# sprite 字段是 ase_ps 资源名 (不含 ps_ 前缀和扩展名, 例: 'CSKEL00' / 'CSKEL000'); None=保留色块
 ENEMY_TEMPLATES: dict[str, dict] = {
     "骷髅":   dict(level=3, max_hp=30, attack=10, defence=5,  agile=8,  move=3, exp_reward=40,  money_reward=15,
-                  color=(220, 220, 220)),
+                  color=(220, 220, 220), sprite="CSKEL00"),
     "黄色怪": dict(level=5, max_hp=50, attack=15, defence=8,  agile=6,  move=2, exp_reward=80,  money_reward=30,
-                  color=(220, 200,  60)),
+                  color=(220, 200,  60), sprite="CGHOU00"),
     "乌鸦怪": dict(level=2, max_hp=20, attack=8,  defence=3,  agile=12, move=4, exp_reward=30,  money_reward=10,
-                  color=( 80,  60,  90)),
+                  color=( 80,  60,  90), sprite="CCROW00"),
 }
 
 
 def make_enemy(name: str) -> BattleUnit:
     t = ENEMY_TEMPLATES[name]
+    sprite_key = f"ps_{t['sprite']}" if t.get("sprite") else None
     return BattleUnit(
         name=name,
         level=t["level"],
@@ -136,6 +138,7 @@ def make_enemy(name: str) -> BattleUnit:
         is_player=False,
         color=t["color"],
         exp_reward=t["exp_reward"], money_reward=t["money_reward"],
+        sprite_key=sprite_key,
     )
 
 
@@ -530,11 +533,13 @@ class TacticsBattle:
         best = min(cands, key=lambda p: abs(p[0] - target.x) + abs(p[1] - target.y))
         if best != (unit.x, unit.y):
             self._log(f"{unit.name} 移动到 {best}")
-            # 朝向 = 走的方向
-            unit.facing = (
-                (1 if best[0] > unit.x else -1 if best[0] < unit.x else unit.facing[0]),
-                (1 if best[1] > unit.y else -1 if best[1] < unit.y else unit.facing[1]),
-            )
+            # 朝向 = 走的主轴方向 (单轴, 避免旧轴值污染)
+            ddx = best[0] - unit.x
+            ddy = best[1] - unit.y
+            if abs(ddx) >= abs(ddy) and ddx != 0:
+                unit.facing = (1 if ddx > 0 else -1, 0)
+            elif ddy != 0:
+                unit.facing = (0, 1 if ddy > 0 else -1)
             unit.x, unit.y = best
         # 走到了能攻击的位置就计划攻击, 但留到 post_enemy_turn 才打
         if target.alive and (target.x, target.y) in self.attack_tiles(unit, unit.x, unit.y):
