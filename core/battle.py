@@ -70,6 +70,7 @@ class BattleUnit:
     sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
     # 渲染态 (UI 写入, 战斗逻辑不动)
     anim_time_ms: int = 0                                  # 行走帧累计时间, 静止时 0
+    idle_time_ms: int = 0                                  # 待机呼吸帧累计时间, 移动时 0
     turn_remaining_ms: int = 0                             # 90° 转向过渡剩余时间
     turn_from_facing: tuple[int, int] | None = None        # 过渡起始朝向
     # 渲染坐标 (浮点 tile 单位); UI 帧间向 x/y 插值, 实现走动动画

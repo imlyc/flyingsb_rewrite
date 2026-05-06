@@ -28,7 +28,7 @@ import pygame
 from core.audio_manager import AudioManager
 from core.battle import BattleUnit, DamageEvent, LevelUpReport, Phase, TacticsBattle
 from core.character import UNSET
-from core.sprites import facing_to_direction, get_character_sprite
+from core.sprites import facing_to_direction, get_character_sprite, get_idle_sprite, idle_key_from_walk_key
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -107,6 +107,7 @@ class BattleScene(Scene):
     UNIT_TILES_PER_SEC = 8.0      # 单位走动速度 (格/秒, 与世界地图节奏一致)
     WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
     TURN_FRAME_DURATION_MS = 80   # 90° 转向过渡帧时长
+    IDLE_FRAME_PERIOD_MS = 400    # 待机呼吸帧切换间隔 (慢一点更自然)
     ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位
     HUD_TOP_BUFFER = 96           # 镜头顶部预留 (px), 让 HUD 不挡角色
     LOG_BOTTOM_BUFFER = 116       # 镜头底部预留 (px), 让日志不挡角色
@@ -191,7 +192,11 @@ class BattleScene(Scene):
             ) is not None:
                 u.turn_from_facing = old_facing
                 u.turn_remaining_ms = self.TURN_FRAME_DURATION_MS
-        self.battle.player_step(dx, dy)
+        if self.battle.player_step(dx, dy) and (u.x, u.y) != (int(round(u.render_x)), int(round(u.render_y))):
+            # 步迈出去了 → 立即标记为走路态, 防止本帧 (anim_time_ms 刚被 update 清 0) 误用 idle 帧
+            if u.anim_time_ms <= 0:
+                u.anim_time_ms = 1
+            u.idle_time_ms = 0
 
     def _make_tint(self, rgba: tuple) -> pygame.Surface:
         s = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
@@ -231,11 +236,13 @@ class BattleScene(Scene):
                 else:
                     setattr(unit, rattr, rval + (step if delta > 0 else -step))
                     moving = True
-            # 行走帧时间累加 / 静止复位
+            # 行走帧时间 / 待机帧时间互补累加 (静止 = 走帧重置, 移动 = 待机帧重置)
             if moving:
                 unit.anim_time_ms += dt_ms
+                unit.idle_time_ms = 0
             else:
                 unit.anim_time_ms = 0
+                unit.idle_time_ms += dt_ms
             if unit.turn_remaining_ms > 0:
                 unit.turn_remaining_ms = max(0, unit.turn_remaining_ms - dt_ms)
 
@@ -451,9 +458,18 @@ class BattleScene(Scene):
                         facing_to_direction(u.turn_from_facing),
                         facing_to_direction(u.facing),
                     ) or cs.frame_for_facing(u.facing, 0)
-                else:
+                elif u.anim_time_ms > 0:
+                    # 移动中 → 走路帧
                     anim_idx = u.anim_time_ms // self.WALK_FRAME_PERIOD_MS
                     frame = cs.frame_for_facing(u.facing, int(anim_idx))
+                else:
+                    # 静止 → 待机呼吸帧
+                    try:
+                        idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
+                        phase = u.idle_time_ms // self.IDLE_FRAME_PERIOD_MS
+                        frame = idle.frame_for_facing(u.facing, int(phase))
+                    except FileNotFoundError:
+                        frame = cs.frame_for_facing(u.facing, 0)
                 if u.has_acted:
                     frame = frame.copy()
                     frame.set_alpha(140)

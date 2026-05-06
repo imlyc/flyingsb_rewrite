@@ -163,6 +163,56 @@ class CharacterSprite:
         return self.sheet.frame(TURN_FRAME_COL, row)
 
 
+# ----- 待机 (idle) atlas -----
+# atlas 索引 06 是待机 atlas, 布局与走路 atlas 不同:
+#   256×480 = 4 列 × 5 行, 单帧 64×96
+#   列 = 朝向, 行 0/1 交替为待机呼吸两帧, 行 2-4 暂未确认 (推测受击/躲避/倒地)
+DEFAULT_IDLE_DIRECTION_COLS: dict[Direction, int] = {
+    Direction.UP:    0,
+    Direction.DOWN:  1,
+    Direction.LEFT:  2,
+    Direction.RIGHT: 3,
+}
+IDLE_FRAME_COUNT = 2
+
+
+@dataclass
+class IdleSprite:
+    """4 朝向 × 2 帧 的待机呼吸 atlas (atlas 06 的前两行)."""
+    sheet: SpriteSheet
+    direction_cols: dict[Direction, int]
+
+    def frame(self, direction: Direction, phase: int = 0) -> pygame.Surface:
+        col = self.direction_cols[direction]
+        row = phase % IDLE_FRAME_COUNT
+        return self.sheet.frame(col, row)
+
+    def frame_for_facing(self, facing: tuple[int, int], phase: int = 0) -> pygame.Surface:
+        return self.frame(facing_to_direction(facing), phase)
+
+
+def idle_key_from_walk_key(walk_key: str) -> str:
+    """'ps_CSON100' -> 'ps_CSON106';  'ps_CMIRO00' -> 'ps_CMIRO06' (末两位换成 '06')."""
+    return walk_key[:-2] + "06"
+
+
+_IDLE_CACHE: dict[str, IdleSprite] = {}
+
+
+def get_idle_sprite(resource_name: str) -> IdleSprite:
+    if resource_name not in _IDLE_CACHE:
+        path = SPRITES_DIR / f"{resource_name}.pcx"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        surf = load_image(path, color_key=AUTO)
+        sheet = SpriteSheet(surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
+        _IDLE_CACHE[resource_name] = IdleSprite(
+            sheet=sheet,
+            direction_cols=DEFAULT_IDLE_DIRECTION_COLS,
+        )
+    return _IDLE_CACHE[resource_name]
+
+
 # 已知角色 atlas 默认尺寸 (大部分 384x384 = 4×6 of 64×96)
 DEFAULT_CHAR_FRAME_SIZE = (64, 96)
 
