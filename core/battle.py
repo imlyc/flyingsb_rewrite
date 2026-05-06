@@ -67,6 +67,11 @@ class BattleUnit:
     has_acted: bool = False
     exp_reward: int = 0
     money_reward: int = 0
+    sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
+    # 渲染态 (UI 写入, 战斗逻辑不动)
+    anim_time_ms: int = 0                                  # 行走帧累计时间, 静止时 0
+    turn_remaining_ms: int = 0                             # 90° 转向过渡剩余时间
+    turn_from_facing: tuple[int, int] | None = None        # 过渡起始朝向
     # 渲染坐标 (浮点 tile 单位); UI 帧间向 x/y 插值, 实现走动动画
     render_x: float = 0.0
     render_y: float = 0.0
@@ -79,6 +84,11 @@ class BattleUnit:
         """把渲染坐标瞬间对齐到逻辑位置 (无动画). 摆阵 / 复活时用."""
         self.render_x = float(self.x)
         self.render_y = float(self.y)
+
+
+def _try_sprite_key(name: str) -> str | None:
+    from core.character_sprites import CHARACTER_SPRITES, sprite_resource
+    return sprite_resource(name) if name in CHARACTER_SPRITES else None
 
 
 def unit_from_character(name: str, ch: Character) -> BattleUnit:
@@ -99,6 +109,7 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
         move=max(2, ch.Agile // 25),     # 99/25 ≈ 3, 49/25 ≈ 1 → max(2, .)
         is_player=True,
         color=(120, 200, 230),
+        sprite_key=_try_sprite_key(name),
     )
 
 

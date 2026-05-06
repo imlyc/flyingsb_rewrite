@@ -118,16 +118,28 @@ class WorldMapScene(Scene):
         # 90° 转向过渡帧状态
         self._turn_remaining_ms = 0
         self._turn_from_facing: tuple[int, int] | None = None
+        # 输入门: 进/回到地图时, 必须松开方向键再按才接受 (防止战斗结束瞬间自动续走)
+        self._input_gated = True
         self._leader_sprite = get_character_sprite(sprite_resource(self.party_leader))
 
     # ------- 生命周期 -------
     def on_enter(self) -> None:
+        # 战斗回到地图时也走这: 重置所有移动残留状态, 重新锁住输入门
+        self._input_gated = True
+        self.moving_dir = (0, 0)
+        self.subpx = 0.0
+        self.subpy = 0.0
+        self._anim_time_ms = 0
+        self._turn_remaining_ms = 0
         try:
             self.audio.play_bgm("world1.wav")
         except FileNotFoundError as e:
             print(f"world BGM 缺失: {e}")
 
     # ------- 输入 -------
+    DIR_KEYS = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN,
+                pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s)
+
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.QUIT:
             return False
@@ -135,6 +147,9 @@ class WorldMapScene(Scene):
             from scenes.menu import TitleScene
             self.next_scene = TitleScene(self.surface, self.audio)
             return True
+        # 输入门只能由"全新按下"的方向键事件解开 (避免战斗返回时长按状态自动续走)
+        if event.type == pygame.KEYDOWN and event.key in self.DIR_KEYS and self._input_gated:
+            self._input_gated = False
         return True
 
     # ------- 更新 -------
@@ -143,6 +158,9 @@ class WorldMapScene(Scene):
             self._turn_remaining_ms = max(0, self._turn_remaining_ms - dt_ms)
         if self.moving_dir != (0, 0):
             self._advance_movement(dt_ms)
+        # 战斗触发: 跳过本帧后续的输入轮询, 避免按键续写出残留 moving 状态被冻结
+        if self.next_scene is not None:
+            return
         # 到位 (或本来静止) 后, 检查输入是否要开始下一格移动.
         if self.moving_dir == (0, 0):
             self._poll_input_for_next_step(dt_ms)
@@ -168,6 +186,9 @@ class WorldMapScene(Scene):
             self._maybe_trigger_battle()
 
     def _poll_input_for_next_step(self, dt_ms: int) -> None:
+        if self._input_gated:
+            self._anim_time_ms = 0
+            return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
@@ -299,10 +320,12 @@ class WorldMapScene(Scene):
         return [
             BattleUnit(name="美娜",   level=1, max_hp=60, hp=60, max_mp=20, mp=20, sg=15,
                        attack=18, defence=10, agile=30, move=3, is_player=True,
-                       color=(120, 200, 230)),
+                       color=(120, 200, 230),
+                       sprite_key=sprite_resource("美娜")),
             BattleUnit(name="孙悟空", level=1, max_hp=80, hp=80, max_mp=10, mp=10, sg=20,
                        attack=22, defence=12, agile=50, move=4, is_player=True,
-                       color=(120, 200, 230)),
+                       color=(120, 200, 230),
+                       sprite_key=sprite_resource("孙悟空")),
         ]
 
     def _maybe_trigger_battle(self) -> None:

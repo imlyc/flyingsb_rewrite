@@ -28,6 +28,7 @@ import pygame
 from core.audio_manager import AudioManager
 from core.battle import BattleUnit, DamageEvent, LevelUpReport, Phase, TacticsBattle
 from core.character import UNSET
+from core.sprites import facing_to_direction, get_character_sprite
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -103,7 +104,9 @@ class BattleScene(Scene):
 
     ENEMY_TURN_DELAY_MS = 350     # 走完 + 攻击命中后再停顿这么久
     CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
-    UNIT_TILES_PER_SEC = 5.0      # 单位走动速度 (格/秒)
+    UNIT_TILES_PER_SEC = 8.0      # 单位走动速度 (格/秒, 与世界地图节奏一致)
+    WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
+    TURN_FRAME_DURATION_MS = 80   # 90° 转向过渡帧时长
     ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位
     HUD_TOP_BUFFER = 96           # 镜头顶部预留 (px), 让 HUD 不挡角色
     LOG_BOTTOM_BUFFER = 116       # 镜头底部预留 (px), 让日志不挡角色
@@ -139,6 +142,9 @@ class BattleScene(Scene):
         # 行动菜单: ESC 弹出十字 4 选项 (上=攻 / 右=技 / 下=终 / 左=道)
         self._menu_open = False
         self._menu_font = load_chinese_font(16)
+        # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
+        self._input_gated = True
+        self._last_current: BattleUnit | None = None
 
         # 镜头 (px), 初始对准当前行动单位 (HUD 安全区)
         cx, cy = self._compute_camera_offset(battle.current.x, battle.current.y)
@@ -151,6 +157,41 @@ class BattleScene(Scene):
         self._face_empty_tint = self._make_tint(self.FACE_EMPTY_TINT)
         self._face_enemy_tint = self._make_tint(self.FACE_ENEMY_TINT)
         self._shadow_surf = self._make_shadow()
+
+    def _poll_player_hold(self, dt_ms: int) -> None:
+        """PLAYER_MOVE 阶段, 当前单位渲染到位时, 按方向键走下一步 (与世界地图同样的连续移动手感)."""
+        # 当前单位换了 (上一回合结束) → 锁输入门, 防止上一回合按着的方向键自动续走
+        if self.battle.current is not self._last_current:
+            self._last_current = self.battle.current
+            self._input_gated = True
+        if self.battle.phase != Phase.PLAYER_MOVE or self._menu_open:
+            return
+        u = self.battle.current
+        if not u.is_player:
+            return
+        # 还在向逻辑位置插值, 不接受新输入 (避免叠加多步领先渲染)
+        if abs(u.render_x - u.x) > self.ANIM_EPSILON or abs(u.render_y - u.y) > self.ANIM_EPSILON:
+            return
+        if self._input_gated:
+            return
+        keys = pygame.key.get_pressed()
+        dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
+        dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
+        if dx == 0 and dy == 0:
+            return
+        if dx != 0:
+            dy = 0
+        old_facing = u.facing
+        new_facing = (dx, dy)
+        # 记录转向过渡 (在 player_step 改变 facing 之前判断)
+        if new_facing != old_facing:
+            cs = get_character_sprite(u.sprite_key) if u.sprite_key else None
+            if cs is not None and cs.turn_frame(
+                facing_to_direction(old_facing), facing_to_direction(new_facing)
+            ) is not None:
+                u.turn_from_facing = old_facing
+                u.turn_remaining_ms = self.TURN_FRAME_DURATION_MS
+        self.battle.player_step(dx, dy)
 
     def _make_tint(self, rgba: tuple) -> pygame.Surface:
         s = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
@@ -178,15 +219,28 @@ class BattleScene(Scene):
         for unit in self.battle.all_units:
             if not unit.alive:
                 continue
+            moving = False
             for axis in ("x", "y"):
                 rattr = f"render_{axis}"
                 logical = getattr(unit, axis)
                 rval = getattr(unit, rattr)
                 delta = logical - rval
                 if abs(delta) <= step:
-                    setattr(unit, rattr, float(logical))
+                    if rval != float(logical):
+                        setattr(unit, rattr, float(logical))
                 else:
                     setattr(unit, rattr, rval + (step if delta > 0 else -step))
+                    moving = True
+            # 行走帧时间累加 / 静止复位
+            if moving:
+                unit.anim_time_ms += dt_ms
+            else:
+                unit.anim_time_ms = 0
+            if unit.turn_remaining_ms > 0:
+                unit.turn_remaining_ms = max(0, unit.turn_remaining_ms - dt_ms)
+
+        # 当前玩家长按方向键 → 连续移动
+        self._poll_player_hold(dt_ms)
 
         # 把 battle 的伤害事件转成浮动文字 (绿+蓝 双行)
         for ev in self.battle.damage_events:
@@ -239,14 +293,12 @@ class BattleScene(Scene):
             self._handle_menu_key(event.key)
             return True
 
-        # 方向键: 角色直接移动 + 转向
-        step = None
-        if event.key in (pygame.K_LEFT, pygame.K_a):    step = (-1, 0)
-        elif event.key in (pygame.K_RIGHT, pygame.K_d): step = (1, 0)
-        elif event.key in (pygame.K_UP, pygame.K_w):    step = (0, -1)
-        elif event.key in (pygame.K_DOWN, pygame.K_s):  step = (0, 1)
-        if step is not None:
-            self.battle.player_step(*step)
+        # 方向键不再走 KEYDOWN (改为 update 里轮询长按), 避免按一下就瞬移领先动画.
+        # 但需要这一刻清掉输入门 — 否则战斗中换单位 / 返回地图时长按状态会被误读为"续按".
+        if event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN,
+                         pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s):
+            if self._input_gated:
+                self._input_gated = False
             return True
 
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
@@ -261,6 +313,7 @@ class BattleScene(Scene):
         """十字菜单: 上=攻击, 右=技能, 下=结束, 左=道具. ESC 关闭."""
         if key in (pygame.K_ESCAPE, pygame.K_x):
             self._menu_open = False
+            self._input_gated = True   # 关菜单后, 防止菜单时按下的方向键续走
             return
         if key in (pygame.K_UP, pygame.K_w):
             # 攻击 = 朝向格上的敌人 (与 Enter 等价, 提供菜单内冗余入口)
@@ -389,18 +442,35 @@ class BattleScene(Scene):
             # 影子
             shadow_rect = self._shadow_surf.get_rect(midbottom=(cx, cy + TILE // 2 - 2))
             self.surface.blit(self._shadow_surf, shadow_rect)
-            # 单位方块
+            # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块
             r = rect.inflate(-8, -8)
-            color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
-            pygame.draw.rect(self.surface, color, r)
-            pygame.draw.rect(self.surface, (0, 0, 0), r, 2)
+            if u.sprite_key:
+                cs = get_character_sprite(u.sprite_key)
+                if u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
+                    frame = cs.turn_frame(
+                        facing_to_direction(u.turn_from_facing),
+                        facing_to_direction(u.facing),
+                    ) or cs.frame_for_facing(u.facing, 0)
+                else:
+                    anim_idx = u.anim_time_ms // self.WALK_FRAME_PERIOD_MS
+                    frame = cs.frame_for_facing(u.facing, int(anim_idx))
+                if u.has_acted:
+                    frame = frame.copy()
+                    frame.set_alpha(140)
+                fw, fh = frame.get_size()
+                self.surface.blit(frame, (cx - fw // 2, cy + TILE // 2 - fh))
+            else:
+                color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
+                pygame.draw.rect(self.surface, color, r)
+                pygame.draw.rect(self.surface, (0, 0, 0), r, 2)
             if u is self.battle.current:
                 pygame.draw.rect(self.surface, self.HIGHLIGHT, rect.inflate(-2, -2), 2)
                 # 朝向小三角 (黄)
                 self._draw_facing_arrow(u, rect)
             # 头顶 HP
+            hp_top = (rect.top if u.sprite_key else r.top) - 1
             hp = self.tiny.render(str(u.hp), True, self.HP_NUM_COLOR)
-            self.surface.blit(hp, hp.get_rect(midbottom=(cx, r.top - 1)))
+            self.surface.blit(hp, hp.get_rect(midbottom=(cx, hp_top)))
             # 当前单位 + 移动阶段: 蓝色 M{move}
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
