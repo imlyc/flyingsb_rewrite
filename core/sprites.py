@@ -111,9 +111,24 @@ class SpriteSheet:
 
 
 # ----- 角色 atlas -----
-# 实测 ps_CSON100 row 1 (DOWN): col 0 站立, col 1 迈步, col 2..4 备用站姿,
-# col 5 转身 45°. 即走路循环只在前 2 列. 其它 atlas 暂沿用同样约定.
-DEFAULT_WALK_FRAMES = 2
+# 实测 ps_CSON100 / 用户确认:
+#   col 0..4 = 走路 5 帧 (cols 2 与 4 互为对称的迈步)
+#   col 5    = 转向 45° 过渡帧
+# 每个方向的 col 5 服务一个 90° 转向对:
+#   UP    col5 = UP↔RIGHT 过渡
+#   LEFT  col5 = UP↔LEFT  过渡
+#   DOWN  col5 = DOWN↔LEFT 过渡
+#   RIGHT col5 = DOWN↔RIGHT 过渡
+DEFAULT_WALK_FRAMES = 5
+TURN_FRAME_COL = 5
+
+# 90° 转向对 → 该过渡帧所在的 atlas 行 (用 Direction 枚举表示)
+TURN_TRANSITION_DIR: dict[frozenset[Direction], Direction] = {
+    frozenset({Direction.UP,   Direction.RIGHT}): Direction.UP,
+    frozenset({Direction.UP,   Direction.LEFT}):  Direction.LEFT,
+    frozenset({Direction.DOWN, Direction.LEFT}):  Direction.DOWN,
+    frozenset({Direction.DOWN, Direction.RIGHT}): Direction.RIGHT,
+}
 
 
 @dataclass
@@ -134,6 +149,18 @@ class CharacterSprite:
 
     def frame_for_facing(self, facing: tuple[int, int], anim_idx: int = 0) -> pygame.Surface:
         return self.frame(facing_to_direction(facing), anim_idx)
+
+    def turn_frame(
+        self, from_dir: Direction, to_dir: Direction
+    ) -> pygame.Surface | None:
+        """两 90° 朝向之间的过渡帧 (col 5). 同向或 180° 反向返回 None."""
+        if from_dir == to_dir:
+            return None
+        owner = TURN_TRANSITION_DIR.get(frozenset({from_dir, to_dir}))
+        if owner is None:
+            return None  # 180° 翻转, 无过渡帧
+        row = self.direction_rows[owner]
+        return self.sheet.frame(TURN_FRAME_COL, row)
 
 
 # 已知角色 atlas 默认尺寸 (大部分 384x384 = 4×6 of 64×96)

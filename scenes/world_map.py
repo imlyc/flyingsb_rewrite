@@ -22,6 +22,7 @@ MAP_W = 30
 MAP_H = 30
 WALK_SPEED_PX_PER_SEC = 320.0   # 10 tile/秒
 WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
+TURN_FRAME_DURATION_MS = 80      # 90° 转向时显示过渡帧的时长
 RANDOM_BATTLE_EVERY = 3
 RANDOM_BATTLE_CHANCE = 0.00
 PARTY_SIZE = 4
@@ -114,6 +115,9 @@ class WorldMapScene(Scene):
         self.party_leader = "孙悟空"
         self.facing: tuple[int, int] = (0, 1)  # 初始朝下
         self._anim_time_ms = 0    # 行走动画时间 (移动中累加, 静止归零)
+        # 90° 转向过渡帧状态
+        self._turn_remaining_ms = 0
+        self._turn_from_facing: tuple[int, int] | None = None
         self._leader_sprite = get_character_sprite(sprite_resource(self.party_leader))
 
     # ------- 生命周期 -------
@@ -135,6 +139,8 @@ class WorldMapScene(Scene):
 
     # ------- 更新 -------
     def update(self, dt_ms: int) -> None:
+        if self._turn_remaining_ms > 0:
+            self._turn_remaining_ms = max(0, self._turn_remaining_ms - dt_ms)
         if self.moving_dir != (0, 0):
             self._advance_movement(dt_ms)
         # 到位 (或本来静止) 后, 检查输入是否要开始下一格移动.
@@ -170,7 +176,16 @@ class WorldMapScene(Scene):
             return
         if dx != 0:  # 优先水平, 避免对角斜跳
             dy = 0
-        self.facing = (dx, dy)
+        new_facing = (dx, dy)
+        if new_facing != self.facing:
+            old_facing = self.facing
+            self.facing = new_facing
+            # 90° 转向触发过渡帧 (180° 反向无对应帧, turn_frame 返回 None 时直接跳过)
+            if self._leader_sprite.turn_frame(
+                facing_to_direction(old_facing), facing_to_direction(new_facing)
+            ) is not None:
+                self._turn_from_facing = old_facing
+                self._turn_remaining_ms = TURN_FRAME_DURATION_MS
         nx, ny = self.player_x + dx, self.player_y + dy
         if 0 <= nx < MAP_W and 0 <= ny < MAP_H and TILES[self.grid[ny][nx]].passable:
             # 落地新目标 tile, 像素位置仍在旧 tile, 用反向 sub 偏移表达
@@ -236,8 +251,15 @@ class WorldMapScene(Scene):
         self.draw_terrain(self.surface, cx, cy)
 
         # 玩家 sprite (底边居中对齐目标 tile 底, 像素位置含 subpx/y)
-        anim_idx = self._anim_time_ms // WALK_FRAME_PERIOD_MS  # 移动中按时间循环, 静止时为 0
-        frame = self._leader_sprite.frame_for_facing(self.facing, int(anim_idx))
+        if self._turn_remaining_ms > 0 and self._turn_from_facing is not None:
+            frame = self._leader_sprite.turn_frame(
+                facing_to_direction(self._turn_from_facing),
+                facing_to_direction(self.facing),
+            )
+            assert frame is not None  # 上面 _poll_input 已确保有过渡帧才进此分支
+        else:
+            anim_idx = self._anim_time_ms // WALK_FRAME_PERIOD_MS
+            frame = self._leader_sprite.frame_for_facing(self.facing, int(anim_idx))
         fw, fh = frame.get_size()
         px = self.player_x * TILE_SIZE + self.subpx
         py = self.player_y * TILE_SIZE + self.subpy
