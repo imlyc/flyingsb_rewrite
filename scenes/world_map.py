@@ -11,16 +11,19 @@ import pygame
 from core.audio_manager import AudioManager
 from core.battle import BattleMap, BattleUnit, TacticsBattle, make_enemy, unit_from_character
 from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
+from core.character_sprites import sprite_resource
 from core.save_manager import SaveData
+from core.sprites import facing_to_direction, get_character_sprite
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
 TILE_SIZE = 32
 MAP_W = 30
 MAP_H = 30
-MOVE_COOLDOWN_MS = 120  # 移动节流, 避免按住一下飞
+WALK_SPEED_PX_PER_SEC = 320.0   # 10 tile/秒
+WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
 RANDOM_BATTLE_EVERY = 3
-RANDOM_BATTLE_CHANCE = 0.30
+RANDOM_BATTLE_CHANCE = 0.00
 PARTY_SIZE = 4
 
 
@@ -97,12 +100,21 @@ class WorldMapScene(Scene):
         self.audio = audio
         self.save = save
         self.grid = _build_test_map()
-        self.player_x = 3   # 起点 (tile coords)
+        # 玩家 tile 坐标 (静止时); 移动时已经更新为目标 tile, 用 subpx/py 做插值.
+        self.player_x = 3
         self.player_y = 3
-        self.last_move_at = 0
+        # 当前像素相对目标 tile 的偏移 (从前一格滑入时为负), 静止时 (0, 0).
+        self.subpx = 0.0
+        self.subpy = 0.0
+        self.moving_dir: tuple[int, int] = (0, 0)
         self.font = load_chinese_font(20)
         self.steps = 0
         self.rng = random.Random()
+        # 队长角色 sprite
+        self.party_leader = "孙悟空"
+        self.facing: tuple[int, int] = (0, 1)  # 初始朝下
+        self._anim_time_ms = 0    # 行走动画时间 (移动中累加, 静止归零)
+        self._leader_sprite = get_character_sprite(sprite_resource(self.party_leader))
 
     # ------- 生命周期 -------
     def on_enter(self) -> None:
@@ -123,24 +135,52 @@ class WorldMapScene(Scene):
 
     # ------- 更新 -------
     def update(self, dt_ms: int) -> None:
+        if self.moving_dir != (0, 0):
+            self._advance_movement(dt_ms)
+        # 到位 (或本来静止) 后, 检查输入是否要开始下一格移动.
+        if self.moving_dir == (0, 0):
+            self._poll_input_for_next_step(dt_ms)
+
+    def _advance_movement(self, dt_ms: int) -> None:
+        """像素级推进 subpx/subpy 朝 (0,0). 到位后落地到目标 tile 并触发战斗判定."""
+        step = WALK_SPEED_PX_PER_SEC * (dt_ms / 1000.0)
+        # subpx/y 符号与 moving_dir 相反 (从前一格滑入), 朝 0 收敛
+        if self.subpx != 0:
+            if abs(self.subpx) <= step:
+                self.subpx = 0.0
+            else:
+                self.subpx += step if self.subpx < 0 else -step
+        if self.subpy != 0:
+            if abs(self.subpy) <= step:
+                self.subpy = 0.0
+            else:
+                self.subpy += step if self.subpy < 0 else -step
+        self._anim_time_ms += dt_ms
+        if self.subpx == 0 and self.subpy == 0:
+            self.moving_dir = (0, 0)
+            self.steps += 1
+            self._maybe_trigger_battle()
+
+    def _poll_input_for_next_step(self, dt_ms: int) -> None:
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
         if dx == 0 and dy == 0:
+            self._anim_time_ms = 0  # 完全静止, 复位到站立帧
             return
-        # 节流, 防止按一下走多格
-        now = pygame.time.get_ticks()
-        if now - self.last_move_at < MOVE_COOLDOWN_MS:
-            return
-        # 优先水平方向, 避免对角线斜跳
-        if dx != 0:
+        if dx != 0:  # 优先水平, 避免对角斜跳
             dy = 0
+        self.facing = (dx, dy)
         nx, ny = self.player_x + dx, self.player_y + dy
         if 0 <= nx < MAP_W and 0 <= ny < MAP_H and TILES[self.grid[ny][nx]].passable:
+            # 落地新目标 tile, 像素位置仍在旧 tile, 用反向 sub 偏移表达
             self.player_x, self.player_y = nx, ny
-            self.last_move_at = now
-            self.steps += 1
-            self._maybe_trigger_battle()
+            self.subpx = -dx * TILE_SIZE
+            self.subpy = -dy * TILE_SIZE
+            self.moving_dir = (dx, dy)
+        else:
+            # 撞墙: 原地踏步动画, 帧继续切换
+            self._anim_time_ms += dt_ms
 
     # ------- 渲染 -------
     def camera_offset_for(self, focus_x: int, focus_y: int) -> tuple[int, int]:
@@ -155,7 +195,17 @@ class WorldMapScene(Scene):
         return cx, cy
 
     def _camera_offset(self) -> tuple[int, int]:
-        return self.camera_offset_for(self.player_x, self.player_y)
+        # 用像素位置 (含 subpx/y) 让相机跟随平滑
+        sw, sh = self.surface.get_size()
+        focus_px = self.player_x * TILE_SIZE + self.subpx + TILE_SIZE / 2
+        focus_py = self.player_y * TILE_SIZE + self.subpy + TILE_SIZE / 2
+        cx = int(focus_px - sw / 2)
+        cy = int(focus_py - sh / 2)
+        max_cx = MAP_W * TILE_SIZE - sw
+        max_cy = MAP_H * TILE_SIZE - sh
+        cx = max(0, min(cx, max(0, max_cx)))
+        cy = max(0, min(cy, max(0, max_cy)))
+        return cx, cy
 
     def draw_terrain(self, surface: pygame.Surface, cam_x: int, cam_y: int) -> None:
         """只画地形格子 (BattleScene 战斗时复用)."""
@@ -185,13 +235,15 @@ class WorldMapScene(Scene):
         cx, cy = self._camera_offset()
         self.draw_terrain(self.surface, cx, cy)
 
-        # 玩家
-        prect = pygame.Rect(
-            self.player_x * TILE_SIZE - cx + 4,
-            self.player_y * TILE_SIZE - cy + 4,
-            TILE_SIZE - 8, TILE_SIZE - 8,
-        )
-        pygame.draw.rect(self.surface, self.PLAYER_COLOR, prect)
+        # 玩家 sprite (底边居中对齐目标 tile 底, 像素位置含 subpx/y)
+        anim_idx = self._anim_time_ms // WALK_FRAME_PERIOD_MS  # 移动中按时间循环, 静止时为 0
+        frame = self._leader_sprite.frame_for_facing(self.facing, int(anim_idx))
+        fw, fh = frame.get_size()
+        px = self.player_x * TILE_SIZE + self.subpx
+        py = self.player_y * TILE_SIZE + self.subpy
+        blit_x = int(px - cx + TILE_SIZE / 2 - fw / 2)
+        blit_y = int(py + TILE_SIZE - cy - fh)
+        self.surface.blit(frame, (blit_x, blit_y))
 
         self._draw_hud()
 
