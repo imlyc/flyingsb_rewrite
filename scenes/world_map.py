@@ -12,6 +12,7 @@ from core.audio_manager import AudioManager
 from core.battle import BattleMap, BattleUnit, TacticsBattle, make_enemy, unit_from_character
 from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
 from core.character_sprites import sprite_resource
+from core.movement_input import DirectionalHold
 from core.save_manager import SaveData
 from core.sprites import facing_to_direction, get_character_sprite
 from scenes.base import Scene
@@ -121,11 +122,8 @@ class WorldMapScene(Scene):
         self._turn_from_facing: tuple[int, int] | None = None
         # 输入门: 进/回到地图时, 必须松开方向键再按才接受 (防止战斗结束瞬间自动续走)
         self._input_gated = True
-        # 按键边沿检测: tap (短按) 只转向不走; 持续按住超过 WALK_HOLD_DELAY_MS 才连走.
-        # _walking: 一旦开始连走就置 True, 后续无需再等阈值, 直到方向变化/松键才清空.
-        self._held_dir: tuple[int, int] = (0, 0)
-        self._held_ms: int = 0
-        self._walking: bool = False
+        # 方向键长按检测器 (tap 只转向 / 持续按住超阈值才连走)
+        self._hold = DirectionalHold()
         self._leader_sprite = get_character_sprite(sprite_resource(self.party_leader))
 
     # ------- 生命周期 -------
@@ -137,9 +135,7 @@ class WorldMapScene(Scene):
         self.subpy = 0.0
         self._anim_time_ms = 0
         self._turn_remaining_ms = 0
-        self._held_dir = (0, 0)
-        self._held_ms = 0
-        self._walking = False
+        self._hold.reset()
         try:
             self.audio.play_bgm("world1.wav")
         except FileNotFoundError as e:
@@ -195,39 +191,28 @@ class WorldMapScene(Scene):
             self._maybe_trigger_battle()
 
     def _poll_input_for_next_step(self, dt_ms: int) -> None:
-        """复刻原版语义: 引擎里 <DIR> (转向) 与 <WALK> (走步) 是两个独立 primitive.
-        - 按键边沿 (新按下 / 切换方向): 若朝向不一致 → 仅转身; 若已对齐 → 直接走一步
-        - 持续按住同一方向 < WALK_HOLD_DELAY_MS: 不动 (tap 不会自动走)
-        - 持续按住 ≥ WALK_HOLD_DELAY_MS: 开始连走
+        """复刻原版语义: 引擎里 <DIR> 与 <WALK> 是独立 primitive.
+        tap 仅转向; 持续按住超 WALK_HOLD_DELAY_MS 才自动连走.
+        见 core.movement_input.DirectionalHold.
         """
         if self._input_gated:
-            self._held_dir = (0, 0)
-            self._held_ms = 0
-            self._walking = False
+            self._hold.reset()
             self._anim_time_ms = 0
             return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
         if dx == 0 and dy == 0:
-            self._held_dir = (0, 0)
-            self._held_ms = 0
-            self._walking = False
+            self._hold.reset()
             self._anim_time_ms = 0
             return
         if dx != 0:  # 优先水平, 避免对角斜跳
             dy = 0
         new_dir = (dx, dy)
-        edge = (new_dir != self._held_dir)
-        if edge:
-            self._held_dir = new_dir
-            self._held_ms = 0
-            self._walking = False
-        else:
-            self._held_ms += dt_ms
+        edge = self._hold.tick(new_dir, dt_ms)
 
         if new_dir != self.facing:
-            # 朝向不一致: 转身 (只在边沿处理一次, 持续按住期间不重复转)
+            # 朝向不一致: 边沿时转身 (含过渡帧), 不前进
             if edge:
                 old_facing = self.facing
                 self.facing = new_dir
@@ -239,11 +224,10 @@ class WorldMapScene(Scene):
             self._anim_time_ms = 0
             return
 
-        # 朝向已对齐. 触发走步条件: 边沿 / 已在连走 / 持续按住超阈值
-        if not (edge or self._walking or self._held_ms >= WALK_HOLD_DELAY_MS):
+        # 朝向已对齐: 是否走一步
+        if not self._hold.should_walk(edge, WALK_HOLD_DELAY_MS):
             self._anim_time_ms = 0
             return
-        self._walking = True
         nx, ny = self.player_x + dx, self.player_y + dy
         if 0 <= nx < MAP_W and 0 <= ny < MAP_H and TILES[self.grid[ny][nx]].passable:
             self.player_x, self.player_y = nx, ny

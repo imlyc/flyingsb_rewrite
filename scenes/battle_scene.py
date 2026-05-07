@@ -28,6 +28,7 @@ import pygame
 from core.audio_manager import AudioManager
 from core.battle import BattleUnit, DamageEvent, LevelUpReport, Phase, TacticsBattle
 from core.character import UNSET
+from core.movement_input import DirectionalHold
 from core.sprites import facing_to_direction, get_character_sprite, get_idle_sprite, idle_key_from_walk_key
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
@@ -158,11 +159,8 @@ class BattleScene(Scene):
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None
-        # 按键边沿检测 (tap 只转向, 持续按住 ≥ WALK_HOLD_DELAY_MS 才连走).
-        # _walking: 一旦开始连走就置 True, 后续无需再等阈值, 直到方向变化/松键才清空.
-        self._held_dir: tuple[int, int] = (0, 0)
-        self._held_ms: int = 0
-        self._walking: bool = False
+        # 方向键长按检测器 (tap 只转向 / 持续按住超阈值才连走)
+        self._hold = DirectionalHold()
 
         # 镜头 (px): 初始位置沿用世界地图最后一帧的 camera, 进战斗瞬间不跳; 之后由 update lerp 漂到战斗专用偏移.
         wm_cam = world_map._camera_offset()
@@ -187,9 +185,7 @@ class BattleScene(Scene):
         if self.battle.current is not self._last_current:
             self._last_current = self.battle.current
             self._input_gated = True
-            self._held_dir = (0, 0)
-            self._held_ms = 0
-            self._walking = False
+            self._hold.reset()
         if self.battle.phase != Phase.PLAYER_MOVE or self._menu_open:
             return
         u = self.battle.current
@@ -204,20 +200,12 @@ class BattleScene(Scene):
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
         if dx == 0 and dy == 0:
-            self._held_dir = (0, 0)
-            self._held_ms = 0
-            self._walking = False
+            self._hold.reset()
             return
         if dx != 0:
             dy = 0
         new_dir = (dx, dy)
-        edge = (new_dir != self._held_dir)
-        if edge:
-            self._held_dir = new_dir
-            self._held_ms = 0
-            self._walking = False
-        else:
-            self._held_ms += dt_ms
+        edge = self._hold.tick(new_dir, dt_ms)
 
         if new_dir != u.facing:
             # 朝向不一致: 边沿时转身 (含过渡帧), 不前进
@@ -232,10 +220,9 @@ class BattleScene(Scene):
                 u.facing = new_dir
             return
 
-        # 朝向已对齐: 边沿/已在连走/按住够久 → 走一步
-        if not (edge or self._walking or self._held_ms >= self.WALK_HOLD_DELAY_MS):
+        # 朝向已对齐: 是否走一步
+        if not self._hold.should_walk(edge, self.WALK_HOLD_DELAY_MS):
             return
-        self._walking = True
         if self.battle.player_step(dx, dy) and (u.x, u.y) != (int(round(u.render_x)), int(round(u.render_y))):
             if u.anim_time_ms <= 0:
                 u.anim_time_ms = 1
