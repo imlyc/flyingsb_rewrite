@@ -147,10 +147,10 @@ class BattleScene(Scene):
         self._input_gated = True
         self._last_current: BattleUnit | None = None
 
-        # 镜头 (px), 初始对准当前行动单位 (HUD 安全区)
-        cx, cy = self._compute_camera_offset(battle.current.x, battle.current.y)
-        self._cam_x = float(cx)
-        self._cam_y = float(cy)
+        # 镜头 (px): 初始位置沿用世界地图最后一帧的 camera, 进战斗瞬间不跳; 之后由 update lerp 漂到战斗专用偏移.
+        wm_cam = world_map._camera_offset()
+        self._cam_x = float(wm_cam[0])
+        self._cam_y = float(wm_cam[1])
 
         # 缓存
         self._move_tint = self._make_tint(self.MOVE_TINT)
