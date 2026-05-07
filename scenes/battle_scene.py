@@ -117,6 +117,7 @@ class BattleScene(Scene):
     WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
     TURN_FRAME_DURATION_MS = 80   # 90° 转向过渡帧时长
     IDLE_FRAME_PERIOD_MS = 400    # 待机呼吸帧切换间隔 (慢一点更自然)
+    WALK_HOLD_DELAY_MS = 80       # 按住方向键超过此时长才自动连走 (tap 只转向)
     # 受击表现: 原版是硬切, 不做位移/混合插值. 只靠 reaction 帧本身的姿态 + 停留时长 +
     # 浮动伤害数字制造冲击感. 加位移插值反而违和 (角色保持躺姿却平移回原位).
     ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位
@@ -157,6 +158,11 @@ class BattleScene(Scene):
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None
+        # 按键边沿检测 (tap 只转向, 持续按住 ≥ WALK_HOLD_DELAY_MS 才连走).
+        # _walking: 一旦开始连走就置 True, 后续无需再等阈值, 直到方向变化/松键才清空.
+        self._held_dir: tuple[int, int] = (0, 0)
+        self._held_ms: int = 0
+        self._walking: bool = False
 
         # 镜头 (px): 初始位置沿用世界地图最后一帧的 camera, 进战斗瞬间不跳; 之后由 update lerp 漂到战斗专用偏移.
         wm_cam = world_map._camera_offset()
@@ -171,11 +177,19 @@ class BattleScene(Scene):
         self._shadow_surf = self._make_shadow()
 
     def _poll_player_hold(self, dt_ms: int) -> None:
-        """PLAYER_MOVE 阶段, 当前单位渲染到位时, 按方向键走下一步 (与世界地图同样的连续移动手感)."""
-        # 当前单位换了 (上一回合结束) → 锁输入门, 防止上一回合按着的方向键自动续走
+        """PLAYER_MOVE 阶段方向键处理. 复刻原版语义:
+        - 朝向不一致, 按键边沿: 仅转身, 不前进
+        - 朝向一致, 按键边沿: 立即走一步
+        - 持续按住同一方向 < WALK_HOLD_DELAY_MS: 不动 (tap 不会自动走)
+        - 持续按住 ≥ WALK_HOLD_DELAY_MS: 开始连走
+        """
+        # 当前单位换了 (上一回合结束) → 锁输入门 + 清持有状态
         if self.battle.current is not self._last_current:
             self._last_current = self.battle.current
             self._input_gated = True
+            self._held_dir = (0, 0)
+            self._held_ms = 0
+            self._walking = False
         if self.battle.phase != Phase.PLAYER_MOVE or self._menu_open:
             return
         u = self.battle.current
@@ -190,21 +204,39 @@ class BattleScene(Scene):
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
         if dx == 0 and dy == 0:
+            self._held_dir = (0, 0)
+            self._held_ms = 0
+            self._walking = False
             return
         if dx != 0:
             dy = 0
-        old_facing = u.facing
-        new_facing = (dx, dy)
-        # 记录转向过渡 (在 player_step 改变 facing 之前判断)
-        if new_facing != old_facing:
-            cs = get_character_sprite(u.sprite_key) if u.sprite_key else None
-            if cs is not None and cs.turn_frame(
-                facing_to_direction(old_facing), facing_to_direction(new_facing)
-            ) is not None:
-                u.turn_from_facing = old_facing
-                u.turn_remaining_ms = self.TURN_FRAME_DURATION_MS
+        new_dir = (dx, dy)
+        edge = (new_dir != self._held_dir)
+        if edge:
+            self._held_dir = new_dir
+            self._held_ms = 0
+            self._walking = False
+        else:
+            self._held_ms += dt_ms
+
+        if new_dir != u.facing:
+            # 朝向不一致: 边沿时转身 (含过渡帧), 不前进
+            if edge:
+                old_facing = u.facing
+                cs = get_character_sprite(u.sprite_key) if u.sprite_key else None
+                if cs is not None and cs.turn_frame(
+                    facing_to_direction(old_facing), facing_to_direction(new_dir)
+                ) is not None:
+                    u.turn_from_facing = old_facing
+                    u.turn_remaining_ms = self.TURN_FRAME_DURATION_MS
+                u.facing = new_dir
+            return
+
+        # 朝向已对齐: 边沿/已在连走/按住够久 → 走一步
+        if not (edge or self._walking or self._held_ms >= self.WALK_HOLD_DELAY_MS):
+            return
+        self._walking = True
         if self.battle.player_step(dx, dy) and (u.x, u.y) != (int(round(u.render_x)), int(round(u.render_y))):
-            # 步迈出去了 → 立即标记为走路态, 防止本帧 (anim_time_ms 刚被 update 清 0) 误用 idle 帧
             if u.anim_time_ms <= 0:
                 u.anim_time_ms = 1
             u.idle_time_ms = 0

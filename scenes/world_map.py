@@ -23,6 +23,7 @@ MAP_H = 30
 WALK_SPEED_PX_PER_SEC = 320.0   # 10 tile/秒
 WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
 TURN_FRAME_DURATION_MS = 80      # 90° 转向时显示过渡帧的时长
+WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
 RANDOM_BATTLE_EVERY = 3
 RANDOM_BATTLE_CHANCE = 0.00
 PARTY_SIZE = 4
@@ -120,6 +121,11 @@ class WorldMapScene(Scene):
         self._turn_from_facing: tuple[int, int] | None = None
         # 输入门: 进/回到地图时, 必须松开方向键再按才接受 (防止战斗结束瞬间自动续走)
         self._input_gated = True
+        # 按键边沿检测: tap (短按) 只转向不走; 持续按住超过 WALK_HOLD_DELAY_MS 才连走.
+        # _walking: 一旦开始连走就置 True, 后续无需再等阈值, 直到方向变化/松键才清空.
+        self._held_dir: tuple[int, int] = (0, 0)
+        self._held_ms: int = 0
+        self._walking: bool = False
         self._leader_sprite = get_character_sprite(sprite_resource(self.party_leader))
 
     # ------- 生命周期 -------
@@ -131,6 +137,9 @@ class WorldMapScene(Scene):
         self.subpy = 0.0
         self._anim_time_ms = 0
         self._turn_remaining_ms = 0
+        self._held_dir = (0, 0)
+        self._held_ms = 0
+        self._walking = False
         try:
             self.audio.play_bgm("world1.wav")
         except FileNotFoundError as e:
@@ -186,30 +195,57 @@ class WorldMapScene(Scene):
             self._maybe_trigger_battle()
 
     def _poll_input_for_next_step(self, dt_ms: int) -> None:
+        """复刻原版语义: 引擎里 <DIR> (转向) 与 <WALK> (走步) 是两个独立 primitive.
+        - 按键边沿 (新按下 / 切换方向): 若朝向不一致 → 仅转身; 若已对齐 → 直接走一步
+        - 持续按住同一方向 < WALK_HOLD_DELAY_MS: 不动 (tap 不会自动走)
+        - 持续按住 ≥ WALK_HOLD_DELAY_MS: 开始连走
+        """
         if self._input_gated:
+            self._held_dir = (0, 0)
+            self._held_ms = 0
+            self._walking = False
             self._anim_time_ms = 0
             return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
         if dx == 0 and dy == 0:
-            self._anim_time_ms = 0  # 完全静止, 复位到站立帧
+            self._held_dir = (0, 0)
+            self._held_ms = 0
+            self._walking = False
+            self._anim_time_ms = 0
             return
         if dx != 0:  # 优先水平, 避免对角斜跳
             dy = 0
-        new_facing = (dx, dy)
-        if new_facing != self.facing:
-            old_facing = self.facing
-            self.facing = new_facing
-            # 90° 转向触发过渡帧 (180° 反向无对应帧, turn_frame 返回 None 时直接跳过)
-            if self._leader_sprite.turn_frame(
-                facing_to_direction(old_facing), facing_to_direction(new_facing)
-            ) is not None:
-                self._turn_from_facing = old_facing
-                self._turn_remaining_ms = TURN_FRAME_DURATION_MS
+        new_dir = (dx, dy)
+        edge = (new_dir != self._held_dir)
+        if edge:
+            self._held_dir = new_dir
+            self._held_ms = 0
+            self._walking = False
+        else:
+            self._held_ms += dt_ms
+
+        if new_dir != self.facing:
+            # 朝向不一致: 转身 (只在边沿处理一次, 持续按住期间不重复转)
+            if edge:
+                old_facing = self.facing
+                self.facing = new_dir
+                if self._leader_sprite.turn_frame(
+                    facing_to_direction(old_facing), facing_to_direction(new_dir)
+                ) is not None:
+                    self._turn_from_facing = old_facing
+                    self._turn_remaining_ms = TURN_FRAME_DURATION_MS
+            self._anim_time_ms = 0
+            return
+
+        # 朝向已对齐. 触发走步条件: 边沿 / 已在连走 / 持续按住超阈值
+        if not (edge or self._walking or self._held_ms >= WALK_HOLD_DELAY_MS):
+            self._anim_time_ms = 0
+            return
+        self._walking = True
         nx, ny = self.player_x + dx, self.player_y + dy
         if 0 <= nx < MAP_W and 0 <= ny < MAP_H and TILES[self.grid[ny][nx]].passable:
-            # 落地新目标 tile, 像素位置仍在旧 tile, 用反向 sub 偏移表达
             self.player_x, self.player_y = nx, ny
             self.subpx = -dx * TILE_SIZE
             self.subpy = -dy * TILE_SIZE
