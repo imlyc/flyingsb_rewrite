@@ -454,9 +454,12 @@ class BattleScene(Scene):
             self.surface.blit(tint, self._tile_rect(fx, fy, cam_x, cam_y))
 
     def _draw_units(self, cam_x: int, cam_y: int) -> None:
-        for u in self.battle.all_units:
-            if not u.alive:
-                continue
+        # Y-排序: render_y 大的 (屏幕下方) 后画 → 在前. 同 y 时把当前行动单位放最后, 防被遮.
+        units = sorted(
+            (u for u in self.battle.all_units if u.alive),
+            key=lambda u: (u.render_y, u is self.battle.current),
+        )
+        for u in units:
             rect = self._unit_rect(u, cam_x, cam_y)
             cx, cy = rect.centerx, rect.centery
             # 视椎裁剪 (大致)
