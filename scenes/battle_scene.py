@@ -117,6 +117,8 @@ class BattleScene(Scene):
     WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
     TURN_FRAME_DURATION_MS = 80   # 90° 转向过渡帧时长
     IDLE_FRAME_PERIOD_MS = 400    # 待机呼吸帧切换间隔 (慢一点更自然)
+    # 受击表现: 原版是硬切, 不做位移/混合插值. 只靠 reaction 帧本身的姿态 + 停留时长 +
+    # 浮动伤害数字制造冲击感. 加位移插值反而违和 (角色保持躺姿却平移回原位).
     ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位
     HUD_TOP_BUFFER = 96           # 镜头顶部预留 (px), 让 HUD 不挡角色
     LOG_BOTTOM_BUFFER = 116       # 镜头底部预留 (px), 让日志不挡角色
@@ -284,15 +286,10 @@ class BattleScene(Scene):
         self.battle.damage_events.clear()
         self._floats = [f for f in self._floats if f.alive(now)]
 
-        # 倒计时受击/闪避动画; 结束时还原朝向 (但阵亡的单位保持面向攻击者)
+        # 推进 reaction 序列 (受击 / 闪避). 结束后还原朝向 (阵亡保持面向攻击者)
         for unit in self.battle.all_units:
-            if unit.reaction_remaining_ms > 0:
-                unit.reaction_remaining_ms = max(0, unit.reaction_remaining_ms - dt_ms)
-                if unit.reaction_remaining_ms == 0:
-                    unit.reaction_kind = None
-                    if unit.alive and unit.reaction_saved_facing is not None:
-                        unit.facing = unit.reaction_saved_facing
-                    unit.reaction_saved_facing = None
+            if unit.reaction_seq is not None:
+                self._advance_reaction(unit, dt_ms)
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -493,11 +490,16 @@ class BattleScene(Scene):
             r = rect.inflate(-8, -8)
             if u.sprite_key:
                 cs = get_character_sprite(u.sprite_key)
-                # 受击/闪避优先级最高 (覆盖走路 / 转身 / 待机)
-                if u.reaction_kind is not None and u.reaction_remaining_ms > 0:
+                react_off = (0, 0)
+                # reaction 序列优先级最高: 用脚本指定的 atlas-06 帧 + 像素位移
+                if u.reaction_seq is not None and u.reaction_frame is not None:
                     try:
                         idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
-                        frame = idle.reaction_for_facing(u.facing, u.reaction_kind)
+                        col = u.reaction_frame % 4
+                        row = u.reaction_frame // 4
+                        frame = idle.sheet.frame(col, row)
+                        ox, oy = u.reaction_offset
+                        react_off = (int(round(ox)), int(round(oy)))
                     except FileNotFoundError:
                         frame = cs.frame_for_facing(u.facing, 0)
                 elif u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
@@ -521,7 +523,9 @@ class BattleScene(Scene):
                     frame = frame.copy()
                     frame.set_alpha(140)
                 fw, fh = frame.get_size()
-                self.surface.blit(frame, (cx - fw // 2, cy + TILE // 2 - fh))
+                self.surface.blit(frame,
+                                  (cx - fw // 2 + react_off[0],
+                                   cy + TILE // 2 - fh + react_off[1]))
             else:
                 color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
                 pygame.draw.rect(self.surface, color, r)
@@ -538,6 +542,48 @@ class BattleScene(Scene):
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, r.bottom + 1)))
+
+    def _advance_reaction(self, u, dt_ms: int) -> None:
+        """逐步执行 reaction_seq.py 里的脚本: SET_FRAME / MOVE / END."""
+        from core.reaction_seq import REACTION_TICK_MS
+        u.reaction_step_elapsed_ms += dt_ms
+        seq = u.reaction_seq
+        while u.reaction_step_idx < len(seq):
+            step = seq[u.reaction_step_idx]
+            if step[0] == 'frame':
+                u.reaction_frame = step[1]
+                u.reaction_step_idx += 1
+                u.reaction_step_elapsed_ms = 0
+                u.reaction_step_start_off = u.reaction_offset
+                continue
+            # ('move', dx, dy, ticks)
+            _, dx, dy, ticks = step
+            duration = ticks * REACTION_TICK_MS
+            sx, sy = u.reaction_step_start_off
+            if duration <= 0:
+                # 瞬间位移 (例如最终归位)
+                u.reaction_offset = (sx + dx, sy + dy)
+                u.reaction_step_idx += 1
+                u.reaction_step_start_off = u.reaction_offset
+                u.reaction_step_elapsed_ms = 0
+                continue
+            if u.reaction_step_elapsed_ms >= duration:
+                u.reaction_offset = (sx + dx, sy + dy)
+                u.reaction_step_idx += 1
+                u.reaction_step_start_off = u.reaction_offset
+                u.reaction_step_elapsed_ms -= duration
+                continue
+            # 中段线性插值
+            t = u.reaction_step_elapsed_ms / duration
+            u.reaction_offset = (sx + dx * t, sy + dy * t)
+            return
+        # 序列完成
+        u.reaction_seq = None
+        u.reaction_frame = None
+        u.reaction_offset = (0.0, 0.0)
+        if u.alive and u.reaction_saved_facing is not None:
+            u.facing = u.reaction_saved_facing
+        u.reaction_saved_facing = None
 
     def _draw_facing_arrow(self, u, tile_rect: pygame.Rect) -> None:
         """在 tile 边框对应朝向的边上画一个小黄三角."""
