@@ -219,23 +219,41 @@ class BattleScene(Scene):
     def update(self, dt_ms: int) -> None:
         now = pygame.time.get_ticks()
 
-        # 单位渲染坐标按速度向逻辑坐标插值 (玩家走动 + 敌方移动都靠这个)
+        # 单位渲染坐标按速度向当前路径节点插值 (玩家走动 + 敌方移动都靠这个).
+        # 有 move_path 时, 沿格逐步走, 防止两轴并行 lerp 出 45° 飞行.
         step = self.UNIT_TILES_PER_SEC * dt_ms / 1000.0
         for unit in self.battle.all_units:
             if not unit.alive:
                 continue
+            # 当前 lerp 目标: 路径头节点 / 否则 unit 逻辑位置
+            if unit.move_path:
+                tgt_x, tgt_y = unit.move_path[0]
+            else:
+                tgt_x, tgt_y = unit.x, unit.y
             moving = False
-            for axis in ("x", "y"):
-                rattr = f"render_{axis}"
-                logical = getattr(unit, axis)
+            for axis_name, target in (("x", tgt_x), ("y", tgt_y)):
+                rattr = f"render_{axis_name}"
                 rval = getattr(unit, rattr)
-                delta = logical - rval
+                delta = target - rval
                 if abs(delta) <= step:
-                    if rval != float(logical):
-                        setattr(unit, rattr, float(logical))
+                    if rval != float(target):
+                        setattr(unit, rattr, float(target))
                 else:
                     setattr(unit, rattr, rval + (step if delta > 0 else -step))
                     moving = True
+            # 到达当前节点 → 弹出, 切换 facing 到下一段方向
+            if (unit.move_path
+                    and abs(unit.render_x - unit.move_path[0][0]) < self.ANIM_EPSILON
+                    and abs(unit.render_y - unit.move_path[0][1]) < self.ANIM_EPSILON):
+                arrived = unit.move_path.pop(0)
+                if unit.move_path:
+                    nxt = unit.move_path[0]
+                    ddx = nxt[0] - arrived[0]
+                    ddy = nxt[1] - arrived[1]
+                    if abs(ddx) >= abs(ddy) and ddx != 0:
+                        unit.facing = (1 if ddx > 0 else -1, 0)
+                    elif ddy != 0:
+                        unit.facing = (0, 1 if ddy > 0 else -1)
             # 行走帧时间 / 待机帧时间互补累加 (静止 = 走帧重置, 移动 = 待机帧重置)
             if moving:
                 unit.anim_time_ms += dt_ms

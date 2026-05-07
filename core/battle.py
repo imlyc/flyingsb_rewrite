@@ -73,6 +73,7 @@ class BattleUnit:
     idle_time_ms: int = 0                                  # 待机呼吸帧累计时间, 移动时 0
     turn_remaining_ms: int = 0                             # 90° 转向过渡剩余时间
     turn_from_facing: tuple[int, int] | None = None        # 过渡起始朝向
+    move_path: list[tuple[int, int]] = field(default_factory=list)   # render 待经过的剩余路径节点 (不含起点; 含终点)
     # 渲染坐标 (浮点 tile 单位); UI 帧间向 x/y 插值, 实现走动动画
     render_x: float = 0.0
     render_y: float = 0.0
@@ -302,6 +303,35 @@ class TacticsBattle:
                 dist[(nx, ny)] = d + 1
                 q.append((nx, ny))
         return set(dist.keys())
+
+    def bfs_path(self, unit: BattleUnit, dst: tuple[int, int]) -> list[tuple[int, int]]:
+        """从 unit 当前位置到 dst 的最短路径 (不含起点, 含终点). 不通时返回空."""
+        start = (unit.x, unit.y)
+        if start == dst:
+            return []
+        parent: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+        q = deque([start])
+        while q:
+            cur = q.popleft()
+            if cur == dst:
+                path: list[tuple[int, int]] = []
+                node: tuple[int, int] | None = cur
+                while node is not None and parent[node] is not None:
+                    path.append(node)
+                    node = parent[node]
+                path.reverse()
+                return path
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nxt = (cur[0] + dx, cur[1] + dy)
+                if nxt in parent:
+                    continue
+                if not self.map.passable(*nxt):
+                    continue
+                if self.occupant(*nxt, ignore=unit) is not None:
+                    continue
+                parent[nxt] = cur
+                q.append(nxt)
+        return []
 
     def attack_tiles(self, unit: BattleUnit, x: int, y: int) -> set[tuple[int, int]]:
         r = unit.attack_range
@@ -534,13 +564,18 @@ class TacticsBattle:
         best = min(cands, key=lambda p: abs(p[0] - target.x) + abs(p[1] - target.y))
         if best != (unit.x, unit.y):
             self._log(f"{unit.name} 移动到 {best}")
-            # 朝向 = 走的主轴方向 (单轴, 避免旧轴值污染)
-            ddx = best[0] - unit.x
-            ddy = best[1] - unit.y
-            if abs(ddx) >= abs(ddy) and ddx != 0:
-                unit.facing = (1 if ddx > 0 else -1, 0)
-            elif ddy != 0:
-                unit.facing = (0, 1 if ddy > 0 else -1)
+            # 计算真实路径让 render 沿格逐步走 (避免两轴并行 lerp 出 45° 飞行)
+            path = self.bfs_path(unit, best)
+            unit.move_path = list(path)
+            # 朝向 = 第一段方向
+            if path:
+                step0 = path[0]
+                ddx = step0[0] - unit.x
+                ddy = step0[1] - unit.y
+                if abs(ddx) >= abs(ddy) and ddx != 0:
+                    unit.facing = (1 if ddx > 0 else -1, 0)
+                elif ddy != 0:
+                    unit.facing = (0, 1 if ddy > 0 else -1)
             unit.x, unit.y = best
         # 走到了能攻击的位置就计划攻击, 但留到 post_enemy_turn 才打
         if target.alive and (target.x, target.y) in self.attack_tiles(unit, unit.x, unit.y):
