@@ -54,13 +54,17 @@ class FloatText:
     DAMAGE_COLOR = (90, 230, 110)    # 绿色
     HP_COLOR = (90, 170, 255)        # 蓝色
 
+    MISS_COLOR = (220, 220, 220)     # 白色 MISS
+
     def __init__(self, damage: int, remaining_hp: int,
-                 world_x: int, world_y: int, started_at: int) -> None:
+                 world_x: int, world_y: int, started_at: int,
+                 miss: bool = False) -> None:
         self.damage = damage
         self.remaining_hp = remaining_hp
         self.world_x = world_x
         self.world_y = world_y
         self.started_at = started_at
+        self.miss = miss
 
     def alive(self, now_ms: int) -> bool:
         return now_ms - self.started_at < self.DURATION_MS
@@ -75,6 +79,11 @@ class FloatText:
         alpha = int(255 * (1.0 if t < 0.7 else (1.0 - (t - 0.7) / 0.3)))
         dy = int(self.RISE_PX * t)
         cx, cy = self.world_x - cam_x, self.world_y - cam_y - dy
+        if self.miss:
+            big = big_font.render("MISS", True, self.MISS_COLOR)
+            big.set_alpha(alpha)
+            surface.blit(big, big.get_rect(midbottom=(cx, cy)))
+            return
         # 绿色伤害 (上)
         big = big_font.render(str(self.damage), True, self.DAMAGE_COLOR)
         big.set_alpha(alpha)
@@ -267,13 +276,23 @@ class BattleScene(Scene):
         # 当前玩家长按方向键 → 连续移动
         self._poll_player_hold(dt_ms)
 
-        # 把 battle 的伤害事件转成浮动文字 (绿+蓝 双行)
+        # 把 battle 的伤害事件转成浮动文字 (绿+蓝 双行 / MISS)
         for ev in self.battle.damage_events:
             wx = ev.x * TILE + TILE // 2
             wy = ev.y * TILE + 6
-            self._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now))
+            self._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss))
         self.battle.damage_events.clear()
         self._floats = [f for f in self._floats if f.alive(now)]
+
+        # 倒计时受击/闪避动画; 结束时还原朝向 (但阵亡的单位保持面向攻击者)
+        for unit in self.battle.all_units:
+            if unit.reaction_remaining_ms > 0:
+                unit.reaction_remaining_ms = max(0, unit.reaction_remaining_ms - dt_ms)
+                if unit.reaction_remaining_ms == 0:
+                    unit.reaction_kind = None
+                    if unit.alive and unit.reaction_saved_facing is not None:
+                        unit.facing = unit.reaction_saved_facing
+                    unit.reaction_saved_facing = None
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -474,7 +493,14 @@ class BattleScene(Scene):
             r = rect.inflate(-8, -8)
             if u.sprite_key:
                 cs = get_character_sprite(u.sprite_key)
-                if u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
+                # 受击/闪避优先级最高 (覆盖走路 / 转身 / 待机)
+                if u.reaction_kind is not None and u.reaction_remaining_ms > 0:
+                    try:
+                        idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
+                        frame = idle.reaction_for_facing(u.facing, u.reaction_kind)
+                    except FileNotFoundError:
+                        frame = cs.frame_for_facing(u.facing, 0)
+                elif u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
                     frame = cs.turn_frame(
                         facing_to_direction(u.turn_from_facing),
                         facing_to_direction(u.facing),

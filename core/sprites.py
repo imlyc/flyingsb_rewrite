@@ -164,9 +164,13 @@ class CharacterSprite:
 
 
 # ----- 待机 (idle) atlas -----
-# atlas 索引 06 是待机 atlas, 布局与走路 atlas 不同:
+# atlas 索引 06 布局 (实测确认):
 #   256×480 = 4 列 × 5 行, 单帧 64×96
-#   列 = 朝向, 行 0/1 交替为待机呼吸两帧, 行 2-4 暂未确认 (推测受击/躲避/倒地)
+#   列 = 朝向 (UP=0, DOWN=1, LEFT=2, RIGHT=3)
+#   行 0/1 = 待机呼吸两帧
+#   行 2 = 受到轻击 (小幅缩起 / 前倾)
+#   行 3 = 闪避 miss (侧身 / 后仰 / 下蹲让开)
+#   行 4 = 受到重击 (大幅反应 / 扑倒)
 DEFAULT_IDLE_DIRECTION_COLS: dict[Direction, int] = {
     Direction.UP:    0,
     Direction.DOWN:  1,
@@ -175,10 +179,16 @@ DEFAULT_IDLE_DIRECTION_COLS: dict[Direction, int] = {
 }
 IDLE_FRAME_COUNT = 2
 
+# row 2/3/4 的语义键
+REACTION_LIGHT = "light"
+REACTION_DODGE = "dodge"
+REACTION_HEAVY = "heavy"
+REACTION_ROWS = {REACTION_LIGHT: 2, REACTION_DODGE: 3, REACTION_HEAVY: 4}
+
 
 @dataclass
 class IdleSprite:
-    """4 朝向 × 2 帧 的待机呼吸 atlas (atlas 06 的前两行)."""
+    """4 朝向 × 5 行的 atlas 06: 呼吸两帧 + 轻击/闪避/重击 各 1 帧."""
     sheet: SpriteSheet
     direction_cols: dict[Direction, int]
 
@@ -189,6 +199,13 @@ class IdleSprite:
 
     def frame_for_facing(self, facing: tuple[int, int], phase: int = 0) -> pygame.Surface:
         return self.frame(facing_to_direction(facing), phase)
+
+    def reaction_frame(self, direction: Direction, kind: str) -> pygame.Surface:
+        """根据 kind 取受击/闪避帧 (kind ∈ REACTION_ROWS)."""
+        return self.sheet.frame(self.direction_cols[direction], REACTION_ROWS[kind])
+
+    def reaction_for_facing(self, facing: tuple[int, int], kind: str) -> pygame.Surface:
+        return self.reaction_frame(facing_to_direction(facing), kind)
 
 
 def idle_key_from_walk_key(walk_key: str) -> str:

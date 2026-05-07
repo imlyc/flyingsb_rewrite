@@ -21,11 +21,14 @@ from core.character import UNSET, Character
 # ---------------- 事件 / 升级 ----------------
 @dataclass
 class DamageEvent:
-    """单次伤害事件, UI 用来弹绿+蓝双行飘字."""
-    damage: int           # 本次伤害 (绿色大字)
-    remaining_hp: int     # 受击后剩余 HP (蓝色小字)
+    """单次战斗事件, UI 用来弹飘字 (伤害数字 / MISS).
+    miss=True 时 damage 无意义, UI 显示 'MISS'.
+    """
+    damage: int           # 本次伤害 (绿色大字; miss 时忽略)
+    remaining_hp: int     # 受击后剩余 HP (蓝色小字; miss 时忽略)
     x: int
     y: int
+    miss: bool = False
 
 
 @dataclass
@@ -42,6 +45,13 @@ class LevelUpReport:
 
 # 简易升级规则: 单位本场获得的经验 ÷ EXP_PER_LEVEL = 升级数
 EXP_PER_LEVEL = 25
+
+# 闪避 / 重击判定参数
+BASE_MISS_RATE = 0.05            # 同等敏捷时的基础闪避率
+AGILE_MISS_FACTOR = 0.005        # 敏捷差每 1 点对闪避率的贡献
+MAX_MISS_RATE = 0.30
+HEAVY_HIT_RATIO = 0.20           # 单次伤害 ≥ 受击者最大 HP 这个比例视为重击
+REACTION_ANIM_MS = 400           # 受击/闪避帧持续时长
 
 
 # ---------------- 单位 ----------------
@@ -77,6 +87,10 @@ class BattleUnit:
     # 渲染坐标 (浮点 tile 单位); UI 帧间向 x/y 插值, 实现走动动画
     render_x: float = 0.0
     render_y: float = 0.0
+    # 受击/闪避动画 (UI 计时, 战斗逻辑只设定)
+    reaction_kind: str | None = None         # "light" / "dodge" / "heavy"
+    reaction_remaining_ms: int = 0
+    reaction_saved_facing: tuple[int, int] | None = None   # 进入受击前的朝向, 动画结束后还原
 
     @property
     def alive(self) -> bool:
@@ -526,22 +540,53 @@ class TacticsBattle:
         self.end_unit_turn()
         return True
 
+    def _miss_chance(self, attacker: BattleUnit, defender: BattleUnit) -> float:
+        diff = defender.agile - attacker.agile
+        return max(0.0, min(MAX_MISS_RATE, BASE_MISS_RATE + diff * AGILE_MISS_FACTOR))
+
+    def _set_reaction(self, defender: BattleUnit, kind: str, attacker: BattleUnit | None = None) -> None:
+        # 第一次触发时保存原朝向; 期间被多次受击不要覆盖 saved_facing
+        if defender.reaction_saved_facing is None:
+            defender.reaction_saved_facing = defender.facing
+        if attacker is not None:
+            dx = attacker.x - defender.x
+            dy = attacker.y - defender.y
+            if abs(dx) >= abs(dy) and dx != 0:
+                defender.facing = (1 if dx > 0 else -1, 0)
+            elif dy != 0:
+                defender.facing = (0, 1 if dy > 0 else -1)
+        defender.reaction_kind = kind
+        defender.reaction_remaining_ms = REACTION_ANIM_MS
+
+    def _apply_damage(self, attacker: BattleUnit, defender: BattleUnit, dmg: int, label: str) -> None:
+        defender.hp = max(0, defender.hp - dmg)
+        self.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
+        kind = "heavy" if dmg >= max(1, int(defender.max_hp * HEAVY_HIT_RATIO)) else "light"
+        self._set_reaction(defender, kind, attacker)
+        tag = "重击" if kind == "heavy" else "命中"
+        self._log(f"{attacker.name} → {defender.name}: {dmg} {label}{tag}"
+                  + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
+
     def _strike_skill(self, attacker: BattleUnit, defender: BattleUnit) -> None:
+        # 必杀不能被闪避, 强制重击表现
         raw = attacker.attack - defender.defence + self.rng.randint(-5, 5)
         dmg = max(1, raw * 2)
         defender.hp = max(0, defender.hp - dmg)
         self.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
+        self._set_reaction(defender, "heavy", attacker)
         self._log(f"  {attacker.name} → {defender.name}: {dmg} 必杀伤害"
                   + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
 
     # ---- 攻击 ----
     def _strike(self, attacker: BattleUnit, defender: BattleUnit) -> None:
+        if self.rng.random() < self._miss_chance(attacker, defender):
+            self._set_reaction(defender, "dodge", attacker)
+            self.damage_events.append(DamageEvent(0, defender.hp, defender.x, defender.y, miss=True))
+            self._log(f"{attacker.name} → {defender.name}: MISS (闪避)")
+            return
         raw = attacker.attack - defender.defence + self.rng.randint(-5, 5)
         dmg = max(1, raw)
-        defender.hp = max(0, defender.hp - dmg)
-        self.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
-        self._log(f"{attacker.name} → {defender.name}: {dmg} 伤害"
-                  + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
+        self._apply_damage(attacker, defender, dmg, "")
 
     # ---- 敌方 AI ----
     def _ai_take_turn(self, unit: BattleUnit) -> None:
