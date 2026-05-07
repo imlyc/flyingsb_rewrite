@@ -115,7 +115,7 @@ class BattleScene(Scene):
     CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
     UNIT_TILES_PER_SEC = 8.0      # 单位走动速度 (格/秒, 与世界地图节奏一致)
     WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
-    TURN_FRAME_DURATION_MS = 80   # 90° 转向过渡帧时长
+    TURN_FRAME_DURATION_MS = 40   # 90° 转向过渡帧时长
     IDLE_FRAME_PERIOD_MS = 400    # 待机呼吸帧切换间隔 (慢一点更自然)
     WALK_HOLD_DELAY_MS = 80       # 按住方向键超过此时长才自动连走 (tap 只转向)
     # 受击表现: 原版是硬切, 不做位移/混合插值. 只靠 reaction 帧本身的姿态 + 停留时长 +
