@@ -418,11 +418,15 @@ class TacticsBattle:
             self._enter_current()
 
     def post_enemy_turn(self) -> None:
-        """UI 在 ENEMY_TURN 走动动画结束后调用: 执行 AI 待发的攻击, 然后下一回合."""
+        """UI 在 ENEMY_TURN 走动动画结束后调用: 启动攻击动画 (走 attack_seq), UI 推完才结束回合.
+        如果没有待发攻击 (= 没攻击范围或 AI 选择不攻击), 直接 end_unit_turn.
+        """
         if self.phase != Phase.ENEMY_TURN:
             return
         if self._pending_enemy_attack is not None and self._pending_enemy_attack.alive:
-            self._strike(self.current, self._pending_enemy_attack)
+            self._begin_attack(self.current, self._pending_enemy_attack)
+            self._pending_enemy_attack = None
+            return  # UI 跑 attack_seq, 命中点回调 _apply_pending_attack, 'end' 回调 post_attack_anim
         self._pending_enemy_attack = None
         if self._check_end():
             return
@@ -685,6 +689,7 @@ class TacticsBattle:
                     unit.facing = (1 if ddx > 0 else -1, 0)
                 elif ddy != 0:
                     unit.facing = (0, 1 if ddy > 0 else -1)
+                unit.reaction_saved_facing = None    # 同 _face_toward, 防 reaction 恢复覆盖
             unit.x, unit.y = best
         # 走到了能攻击的位置就计划攻击, 但留到 post_enemy_turn 才打
         if target.alive and (target.x, target.y) in self.attack_tiles(unit, unit.x, unit.y):
@@ -692,13 +697,17 @@ class TacticsBattle:
             self._pending_enemy_attack = target
 
     def _face_toward(self, unit: BattleUnit, target: BattleUnit) -> None:
-        """让 unit 朝向 target 所在格 (用于攻击前)."""
+        """让 unit 朝向 target 所在格 (用于攻击前).
+        清掉 reaction_saved_facing — 若 unit 还有未结束的受击反应,
+        防止反应结束时把 facing 恢复成旧值, 覆盖 AI 设的攻击朝向.
+        """
         dx = target.x - unit.x
         dy = target.y - unit.y
         if abs(dx) >= abs(dy):
             unit.facing = (1 if dx > 0 else -1 if dx < 0 else unit.facing[0], 0)
         else:
             unit.facing = (0, 1 if dy > 0 else -1)
+        unit.reaction_saved_facing = None
 
     # ---- 工具 ----
     def _log(self, msg: str) -> None:

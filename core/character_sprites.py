@@ -62,6 +62,11 @@ ATTACK_PROFILES: dict[str, dict] = {
     "美娜":     {"style": "B", "fm": "fm_CMIRO_G0"},
     # 沙悟净 atlas 实际 5 帧/方向 (推测 ATK_C, 未解码), 用 ATK_A 取前 4 帧凑合
     "沙悟净":   {"style": "A", "fm": "fm_CSAO_G0"},
+    # 敌人: 各自 fm_*_G0 都是 24 帧 = 6/dir × 4 dir, 匹配 ATK_B
+    # 原版敌人有专门的 32-frame seq (8/dir), 我们暂用 ATK_B 复用玩家 pipeline
+    "骷髅":     {"style": "B", "fm": "fm_CSKEL_G0"},
+    "黄色怪":   {"style": "B", "fm": "fm_CGHOU_G0"},
+    "乌鸦怪":   {"style": "B", "fm": "fm_CCROW_G0"},
 }
 
 

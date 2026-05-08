@@ -464,11 +464,14 @@ class BattleScene(Scene):
         return cx, cy
 
     def _units_animating(self) -> bool:
+        """是否有任何单位还在播放动画 (移动 / 攻击 / 受击). 用于决定是否能推进回合."""
         for u in self.battle.all_units:
             if not u.alive:
                 continue
             if (abs(u.render_x - u.x) > self.ANIM_EPSILON
                     or abs(u.render_y - u.y) > self.ANIM_EPSILON):
+                return True
+            if u.attack_seq is not None or u.reaction_seq is not None:
                 return True
         return False
 
