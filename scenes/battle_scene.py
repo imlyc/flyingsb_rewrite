@@ -617,10 +617,20 @@ class BattleScene(Scene):
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
 
+    # 跳过过的未实现 op, 每个种类只 log 一次 (避免日志刷屏)
+    _SKIPPED_OPS_SEEN: set = set()
+
     def _advance_attack(self, u, dt_ms: int) -> None:
         """推进攻击者 attack_seq 一帧.
-        指令: ('move', dx, dy, ticks) | ('fm', atlas, frame, ticks) |
-              ('idle', ...) | ('impact',) | ('jump', state) | ('end',)
+        op tuple 形态 (定义见 core/raw_attack_seqs.py 文档):
+          ('move', dx_px, dy_px, ticks)         攻击者像素位移 (插值)
+          ('fm', atlas_slot, frame_idx, ticks)  切 fm atlas 帧 (atlas_slot = 全局 idx)
+          ('idle', atlas_idx, frame, ticks)     切 ps_*06 atlas 帧 (少见)
+          ('impact',)                           命中点, 触发受击/闪余动画 + 扣血
+          ('end',)                              序列结束
+          ('jump', state)                       状态机跳转 (-1000 spawn / -105 update / -1001 等), 暂时全部 skip
+          ('sound', sound_id, op_hex)           播音效, 暂未实现 (skip)
+          ('raw', op_hex, a, b, c, d)           dumper 占位: 0x0aXX 家族未解码 op (skip + warn)
         """
         from core.attack_seq import ATTACK_TICK_MS
         seq = u.attack_seq
@@ -661,11 +671,6 @@ class BattleScene(Scene):
                     u.attack_step_elapsed_ms -= duration
                     continue
                 return
-            if kind == 'idle':
-                # 暂未使用 (idle 帧切换), 跳过
-                u.attack_step_idx += 1
-                u.attack_step_elapsed_ms = 0
-                continue
             if kind == 'impact':
                 self.battle._apply_pending_attack(u)
                 u.attack_step_idx += 1
@@ -674,7 +679,16 @@ class BattleScene(Scene):
             if kind == 'end':
                 self.battle.post_attack_anim(u)
                 return
-            # 'jump' 等其它状态忽略
+            # ↓ 未实现 op: skip + 首次出现时 log (raw=未解码字节码, jump=状态机控制流, sound=音效, idle=切 idle atlas)
+            if kind == 'raw':
+                key = ('raw', step[1] if len(step) > 1 else None)
+            elif kind == 'jump':
+                key = ('jump', step[1] if len(step) > 1 else None)
+            else:
+                key = (kind,)
+            if key not in self._SKIPPED_OPS_SEEN:
+                self._SKIPPED_OPS_SEEN.add(key)
+                print(f"[attack_seq] 跳过未实现 op {step!r} (此后同种 op 不再提示)")
             u.attack_step_idx += 1
             u.attack_step_elapsed_ms = 0
         # 序列耗尽兜底
