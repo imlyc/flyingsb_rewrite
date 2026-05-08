@@ -93,6 +93,19 @@ class BattleUnit:
     reaction_offset: tuple[float, float] = (0.0, 0.0)   # 当前像素位移 (dx, dy)
     reaction_frame: int | None = None         # atlas 06 的帧索引 (0-19), None=不画
     reaction_saved_facing: tuple[int, int] | None = None   # 进入受击前的朝向
+    # 攻击者动画: 由 attack_seq.py 驱动. 攻击者播 → impact 步骤触发受击者反应 → 序列结束才回合结束
+    attack_seq: list | None = None
+    attack_step_idx: int = 0
+    attack_step_elapsed_ms: int = 0
+    attack_step_start_off: tuple[float, float] = (0.0, 0.0)
+    attack_offset: tuple[float, float] = (0.0, 0.0)
+    attack_fm_atlas: int | None = None        # 0 / 1 等, 选择哪个 fm_ atlas
+    attack_fm_frame: int | None = None
+    # 待发的攻击 (impact 步骤时才真正应用伤害)
+    pending_attack_target: "BattleUnit | None" = None
+    pending_attack_kind: str = ""             # "hit" / "dodge"
+    pending_attack_dmg: int = 0
+    pending_attack_skill: bool = False        # 是否必杀
 
     @property
     def alive(self) -> bool:
@@ -475,7 +488,7 @@ class TacticsBattle:
         return True
 
     def player_attack_facing(self) -> bool:
-        """攻击当前面向格子上的敌人 (Enter 键). 攻击后回合结束."""
+        """攻击当前面向格子上的敌人 (Enter 键). 启动 attack_seq, UI 推完才结束回合."""
         u = self.current
         if self.phase != Phase.PLAYER_MOVE or not u.is_player:
             return False
@@ -483,14 +496,17 @@ class TacticsBattle:
         target = self.occupant(fx, fy)
         if target is None or target.is_player == u.is_player:
             return False
-        # 必须在攻击距离内 (近战默认 1 格 = 朝向格已满足)
         if (fx, fy) not in self.attack_tiles(u, u.x, u.y):
             return False
-        self._strike(u, target)
-        if self._check_end():
-            return True
-        self.end_unit_turn()
+        self._begin_attack(u, target)
         return True
+
+    def post_attack_anim(self, attacker: BattleUnit) -> None:
+        """UI 在 attack_seq 跑到 'end' 步骤后调: 清攻击状态, 检查胜负, 结束回合."""
+        self._clear_pending_attack(attacker)
+        if self._check_end():
+            return
+        self.end_unit_turn()
 
     def cancel_to_move(self) -> bool:
         """把单位拉回本回合起点位置 (X 键)."""
@@ -576,7 +592,7 @@ class TacticsBattle:
                   + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
 
     def _strike_skill(self, attacker: BattleUnit, defender: BattleUnit) -> None:
-        # 必杀不能被闪避, 强制重击表现
+        # 必杀不能被闪避, 强制重击表现 (技能不走 attack_seq, 立即生效)
         raw = attacker.attack - defender.defence + self.rng.randint(-5, 5)
         dmg = max(1, raw * 2)
         defender.hp = max(0, defender.hp - dmg)
@@ -585,7 +601,49 @@ class TacticsBattle:
         self._log(f"  {attacker.name} → {defender.name}: {dmg} 必杀伤害"
                   + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
 
-    # ---- 攻击 ----
+    # ---- 普攻 (走 attack_seq 动画) ----
+    def _begin_attack(self, attacker: BattleUnit, defender: BattleUnit) -> None:
+        """决定攻击结果, 设置 attack_seq + 待发伤害 (UI 推进序列, impact 时调 _apply_pending_attack)."""
+        from core.attack_seq import attack_seq_for
+        if self.rng.random() < self._miss_chance(attacker, defender):
+            kind, dmg = "dodge", 0
+        else:
+            raw = attacker.attack - defender.defence + self.rng.randint(-5, 5)
+            kind, dmg = "hit", max(1, raw)
+        attacker.pending_attack_target = defender
+        attacker.pending_attack_kind = kind
+        attacker.pending_attack_dmg = dmg
+        attacker.pending_attack_skill = False
+        attacker.attack_seq = attack_seq_for(attacker.name, attacker.facing)
+        attacker.attack_step_idx = 0
+        attacker.attack_step_elapsed_ms = 0
+        attacker.attack_step_start_off = (0.0, 0.0)
+        attacker.attack_offset = (0.0, 0.0)
+        attacker.attack_fm_atlas = None
+        attacker.attack_fm_frame = None
+
+    def _apply_pending_attack(self, attacker: BattleUnit) -> None:
+        """attack_seq 跑到 'impact' 步骤时由 UI 调. 实际扣血 + 触发受击/闪避动画."""
+        target = attacker.pending_attack_target
+        if target is None or not target.alive:
+            return
+        if attacker.pending_attack_kind == "dodge":
+            self.damage_events.append(DamageEvent(0, target.hp, target.x, target.y, miss=True))
+            self._set_reaction(target, "dodge", attacker)
+            self._log(f"{attacker.name} → {target.name}: MISS (闪避)")
+        else:
+            self._apply_damage(attacker, target, attacker.pending_attack_dmg, "")
+
+    def _clear_pending_attack(self, attacker: BattleUnit) -> None:
+        attacker.pending_attack_target = None
+        attacker.pending_attack_kind = ""
+        attacker.pending_attack_dmg = 0
+        attacker.attack_seq = None
+        attacker.attack_offset = (0.0, 0.0)
+        attacker.attack_fm_atlas = None
+        attacker.attack_fm_frame = None
+
+    # 兼容旧 API: 立即结算 (测试 / 必杀沿用)
     def _strike(self, attacker: BattleUnit, defender: BattleUnit) -> None:
         if self.rng.random() < self._miss_chance(attacker, defender):
             self.damage_events.append(DamageEvent(0, defender.hp, defender.x, defender.y, miss=True))

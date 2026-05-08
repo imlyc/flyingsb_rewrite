@@ -29,7 +29,13 @@ from core.audio_manager import AudioManager
 from core.battle import BattleUnit, DamageEvent, LevelUpReport, Phase, TacticsBattle
 from core.character import UNSET
 from core.movement_input import DirectionalHold
-from core.sprites import facing_to_direction, get_character_sprite, get_idle_sprite, idle_key_from_walk_key
+from core.sprites import (
+    DEFAULT_IDLE_DIRECTION_COLS,
+    facing_to_direction,
+    get_character_sprite,
+    get_idle_sprite,
+    idle_key_from_walk_key,
+)
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -191,6 +197,9 @@ class BattleScene(Scene):
         u = self.battle.current
         if not u.is_player:
             return
+        # 攻击/受击动画期间禁止新输入
+        if u.attack_seq is not None or u.reaction_seq is not None:
+            return
         # 还在向逻辑位置插值, 不接受新输入 (避免叠加多步领先渲染)
         if abs(u.render_x - u.x) > self.ANIM_EPSILON or abs(u.render_y - u.y) > self.ANIM_EPSILON:
             return
@@ -309,6 +318,10 @@ class BattleScene(Scene):
         for unit in self.battle.all_units:
             if unit.reaction_seq is not None:
                 self._advance_reaction(unit, dt_ms)
+        # 推进 attack 序列 (攻击者动画). 'impact' 步触发受击者反应; 'end' 结束攻击者回合
+        for unit in self.battle.all_units:
+            if unit.attack_seq is not None:
+                self._advance_attack(unit, dt_ms)
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -346,6 +359,10 @@ class BattleScene(Scene):
             self._advance_end_screen()
             return True
         if self.battle.phase == Phase.ENEMY_TURN:
+            return True
+        # 攻击/受击动画期间不接键
+        cur = self.battle.current
+        if cur.attack_seq is not None:
             return True
 
         # 菜单打开时: 方向键直接选项, ESC 关闭, 其它忽略
@@ -521,6 +538,41 @@ class BattleScene(Scene):
                         react_off = (int(round(ox)), int(round(oy)))
                     except FileNotFoundError:
                         frame = cs.frame_for_facing(u.facing, 0)
+                # 攻击中: 用 fm 逐帧 BBox + anchor (从 fm_frames.py 逆向得到)
+                elif u.attack_seq is not None:
+                    from core.character_sprites import attack_fm_atlas
+                    from core.attack_seq import frames_per_dir
+                    from core.sprites import get_fm_surface
+                    from core.fm_frames import FM_FRAMES, cols_in_atlas
+                    fm_name = attack_fm_atlas(u.name)
+                    fm_data = None
+                    if fm_name and u.attack_fm_frame is not None:
+                        # 我们的资源文件名带 fm_ 前缀, 但 exe 元数据键不带
+                        atlas_key = fm_name.lower().removeprefix("fm_")
+                        atlas_frames = FM_FRAMES.get(atlas_key)
+                        if atlas_frames:
+                            n = frames_per_dir(u.name)
+                            cols = cols_in_atlas(atlas_key)
+                            list_idx = (u.attack_fm_frame // n) * cols + (u.attack_fm_frame % n)
+                            if 0 <= list_idx < len(atlas_frames):
+                                fm_data = atlas_frames[list_idx]
+                    if fm_data is not None:
+                        try:
+                            fx, fy, fw, fh, anc_x, anc_y = fm_data
+                            surf = get_fm_surface(fm_name)
+                            frame = surf.subsurface(pygame.Rect(fx, fy, fw, fh))
+                            # fm 帧用自己的 anchor, 不走默认 bottom-center
+                            u._fm_anchor = (anc_x, anc_y)   # 标记给下面 blit 用
+                        except (FileNotFoundError, ValueError):
+                            frame = cs.frame_for_facing(u.facing, 0)
+                    else:
+                        # fallback: ps_*06 row 2 (出招前倾姿态)
+                        try:
+                            idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
+                            col = DEFAULT_IDLE_DIRECTION_COLS[facing_to_direction(u.facing)]
+                            frame = idle.sheet.frame(col, 2)
+                        except (FileNotFoundError, IndexError):
+                            frame = cs.frame_for_facing(u.facing, 0)
                 elif u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
                     frame = cs.turn_frame(
                         facing_to_direction(u.turn_from_facing),
@@ -538,13 +590,29 @@ class BattleScene(Scene):
                         frame = idle.frame_for_facing(u.facing, int(phase))
                     except FileNotFoundError:
                         frame = cs.frame_for_facing(u.facing, 0)
-                if u.has_acted:
+                if u.has_acted and u.attack_seq is None:
+                    # 攻击中不要变半透明 (会让玩家误以为已结束行动)
                     frame = frame.copy()
                     frame.set_alpha(140)
                 fw, fh = frame.get_size()
-                self.surface.blit(frame,
-                                  (cx - fw // 2 + react_off[0],
-                                   cy + TILE // 2 - fh + react_off[1]))
+                # 攻击位移 (类似受击位移, 二者互斥)
+                ax, ay = u.attack_offset if u.attack_seq is not None else (0, 0)
+                fm_anchor = getattr(u, "_fm_anchor", None)
+                if u.attack_seq is not None and fm_anchor is not None:
+                    # fm 帧: anchor (ax, ay) 是 sprite 内 feet 位置
+                    # ps_*idle sprite 底部含 ~8px 阴影空白, feet 在 sprite 内 y≈88 (96-8)
+                    # 为对齐 idle 的 feet, fm blit 也上移 SHADOW_PAD
+                    SHADOW_PAD = 8
+                    anc_x, anc_y = fm_anchor
+                    self.surface.blit(frame,
+                                      (cx - anc_x + int(round(ax)),
+                                       cy + TILE // 2 - anc_y - SHADOW_PAD + int(round(ay))))
+                    u._fm_anchor = None
+                else:
+                    # 默认: bottom-center anchor
+                    self.surface.blit(frame,
+                                      (cx - fw // 2 + react_off[0] + int(round(ax)),
+                                       cy + TILE // 2 - fh + react_off[1] + int(round(ay))))
             else:
                 color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
                 pygame.draw.rect(self.surface, color, r)
@@ -561,6 +629,69 @@ class BattleScene(Scene):
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, r.bottom + 1)))
+
+    def _advance_attack(self, u, dt_ms: int) -> None:
+        """推进攻击者 attack_seq 一帧.
+        指令: ('move', dx, dy, ticks) | ('fm', atlas, frame, ticks) |
+              ('idle', ...) | ('impact',) | ('jump', state) | ('end',)
+        """
+        from core.attack_seq import ATTACK_TICK_MS
+        seq = u.attack_seq
+        u.attack_step_elapsed_ms += dt_ms
+        while u.attack_step_idx < len(seq):
+            step = seq[u.attack_step_idx]
+            kind = step[0]
+            if kind == 'move':
+                _, dx, dy, ticks = step
+                duration = ticks * ATTACK_TICK_MS
+                sx, sy = u.attack_step_start_off
+                if duration <= 0:
+                    u.attack_offset = (sx + dx, sy + dy)
+                    u.attack_step_idx += 1
+                    u.attack_step_start_off = u.attack_offset
+                    u.attack_step_elapsed_ms = 0
+                    continue
+                if u.attack_step_elapsed_ms >= duration:
+                    u.attack_offset = (sx + dx, sy + dy)
+                    u.attack_step_idx += 1
+                    u.attack_step_start_off = u.attack_offset
+                    u.attack_step_elapsed_ms -= duration
+                    continue
+                t = u.attack_step_elapsed_ms / duration
+                u.attack_offset = (sx + dx * t, sy + dy * t)
+                return
+            if kind == 'fm':
+                _, atlas, frame, ticks = step
+                u.attack_fm_atlas = atlas
+                u.attack_fm_frame = frame
+                duration = ticks * ATTACK_TICK_MS
+                if duration <= 0:
+                    u.attack_step_idx += 1
+                    u.attack_step_elapsed_ms = 0
+                    continue
+                if u.attack_step_elapsed_ms >= duration:
+                    u.attack_step_idx += 1
+                    u.attack_step_elapsed_ms -= duration
+                    continue
+                return
+            if kind == 'idle':
+                # 暂未使用 (idle 帧切换), 跳过
+                u.attack_step_idx += 1
+                u.attack_step_elapsed_ms = 0
+                continue
+            if kind == 'impact':
+                self.battle._apply_pending_attack(u)
+                u.attack_step_idx += 1
+                u.attack_step_elapsed_ms = 0
+                continue
+            if kind == 'end':
+                self.battle.post_attack_anim(u)
+                return
+            # 'jump' 等其它状态忽略
+            u.attack_step_idx += 1
+            u.attack_step_elapsed_ms = 0
+        # 序列耗尽兜底
+        self.battle.post_attack_anim(u)
 
     def _advance_reaction(self, u, dt_ms: int) -> None:
         """逐步执行 reaction_seq.py 里的脚本: SET_FRAME / MOVE / END."""

@@ -45,3 +45,30 @@ def sprite_resource(name: str, *, form: int | None = None, atlas: int = 0) -> st
     if form is None:
         form = info.default_form if info.default_form is not None else info.forms[0]
     return f"ps_{info.root}{form}{atlas:02d}"
+
+
+# 攻击 fm_ atlas 配置. cell 尺寸不再需要 (从 core/fm_frames.py 的逐帧 BBox 取).
+#   style: 'A' = 4 帧/方向 (ATK_A 打击式), 'B' = 6 帧/方向 (ATK_B 劈砍式)
+#   fm: fm_ atlas 资源名
+ATTACK_PROFILES: dict[str, dict] = {
+    "孙悟空":   {"style": "A", "fm": "fm_CSON1_G0"},
+    "三藏法师": {"style": "B", "fm": "fm_CSAM_G0"},
+    "猪八戒":   {"style": "A", "fm": "fm_CJUPA_G0"},
+    "蒙面人":   {"style": "B", "fm": "fm_CDIT1_G1"},
+    "乐神杰特": {"style": "B", "fm": "fm_CSONA_G0"},
+    "破无":     {"style": "B", "fm": "fm_CPAO_G0"},
+    "捕山":     {"style": "B", "fm": "fm_CPUSA_G0"},
+    "紫河":     {"style": "A", "fm": "fm_CJAH0_G0"},
+    "美娜":     {"style": "B", "fm": "fm_CMIRO_G0"},
+    # 沙悟净 atlas 实际 5 帧/方向 (推测 ATK_C, 未解码), 用 ATK_A 取前 4 帧凑合
+    "沙悟净":   {"style": "A", "fm": "fm_CSAO_G0"},
+}
+
+
+def attack_style(name: str) -> str:
+    return ATTACK_PROFILES.get(name, {}).get("style", "B")
+
+
+def attack_fm_atlas(name: str) -> str | None:
+    """返回 fm atlas 资源名, 或 None (无 fm overlay)."""
+    return ATTACK_PROFILES.get(name, {}).get("fm")

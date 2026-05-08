@@ -267,3 +267,20 @@ def get_character_sprite(resource_name: str, **kwargs) -> CharacterSprite:
 
 def clear_cache() -> None:
     _CACHE.clear()
+
+
+# ----- fm_ atlas (攻击/特效) -----
+# 逆向得到的真实数据: 每帧有显式 BBox (x, y, w, h) + 锚点 (ax, ay).
+# fm atlas 不是均匀网格! 帧大小因姿态变化, 用逐帧 BBox 才能取出干净 sprite.
+# 数据在 core/fm_frames.py (6610 帧, 334 个 atlas, 从 FlyingSB.exe 0x5bf8a8 表逆向).
+_FM_SURF_CACHE: dict[str, pygame.Surface] = {}
+
+
+def get_fm_surface(resource_name: str) -> pygame.Surface:
+    """加载 fm_ atlas 大图. 帧从 fm_frames.FM_FRAMES 取 BBox 子表面."""
+    if resource_name not in _FM_SURF_CACHE:
+        path = SPRITES_DIR / f"{resource_name}.pcx"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        _FM_SURF_CACHE[resource_name] = load_image(path, color_key=AUTO)
+    return _FM_SURF_CACHE[resource_name]
