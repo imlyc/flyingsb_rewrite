@@ -287,6 +287,11 @@ class BattleScene(Scene):
                         unit.facing = (1 if ddx > 0 else -1, 0)
                     elif ddy != 0:
                         unit.facing = (0, 1 if ddy > 0 else -1)
+                else:
+                    # 路径跑完: 还原 AI 设的攻击朝向 (否则 facing 留在最后一段移动方向)
+                    if unit.post_move_facing is not None:
+                        unit.facing = unit.post_move_facing
+                        unit.post_move_facing = None
             # 行走帧时间 / 待机帧时间互补累加 (静止 = 走帧重置, 移动 = 待机帧重置)
             unit.anim.tick(dt_ms, moving=moving)
 

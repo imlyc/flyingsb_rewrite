@@ -80,6 +80,9 @@ class BattleUnit:
     # 渲染态 (UI 写入, 战斗逻辑不动)
     anim: AnimationState = field(default_factory=AnimationState)
     move_path: list[tuple[int, int]] = field(default_factory=list)   # render 待经过的剩余路径节点 (不含起点; 含终点)
+    # AI 移动结束后强制朝向 (= _face_toward 设的攻击朝向). UI 走完 move_path 时还原, 防止
+    # 移动 lerp 中 "切下一段方向" 把攻击 facing 覆盖成最后一段移动方向.
+    post_move_facing: tuple[int, int] | None = None
     # 渲染坐标 (浮点 tile 单位); UI 帧间向 x/y 插值, 实现走动动画
     render_x: float = 0.0
     render_y: float = 0.0
@@ -696,6 +699,9 @@ class TacticsBattle:
         # 走到了能攻击的位置就计划攻击, 但留到 post_enemy_turn 才打
         if target.alive and (target.x, target.y) in self.attack_tiles(unit, unit.x, unit.y):
             self._face_toward(unit, target)
+            # 移动期间 render 会把 facing 改成最后一段移动方向; 标记一下让 UI 走完路径后还原
+            if unit.move_path:
+                unit.post_move_facing = unit.facing
             self._pending_enemy_attack = target
 
     def _face_toward(self, unit: BattleUnit, target: BattleUnit) -> None:
