@@ -605,17 +605,15 @@ class TacticsBattle:
 
     # ---- 普攻 (走 attack_seq 动画) ----
     def _begin_attack(self, attacker: BattleUnit, defender: BattleUnit) -> None:
-        """决定攻击结果, 设置 attack_seq + 待发伤害 (UI 推进序列, impact 时调 _apply_pending_attack)."""
+        """启动 attack_seq; impact 步骤时由 _apply_pending_attack 独立 roll 命中/伤害.
+        多段攻击: seq 含多个 ('impact',), 每次独立判定 (= 原版多次 jump -100).
+        """
         from core.attack_seq import attack_seq_for
-        if self.rng.random() < self._miss_chance(attacker, defender):
-            kind, dmg = "dodge", 0
-        else:
-            raw = attacker.attack - defender.defence + self.rng.randint(-5, 5)
-            kind, dmg = "hit", max(1, raw)
         attacker.pending_attack_target = defender
-        attacker.pending_attack_kind = kind
-        attacker.pending_attack_dmg = dmg
         attacker.pending_attack_skill = False
+        # kind/dmg 字段保留兼容但已不用 — 每个 impact 重新 roll
+        attacker.pending_attack_kind = ""
+        attacker.pending_attack_dmg = 0
         attacker.attack_seq = attack_seq_for(attacker.name, attacker.facing)
         attacker.attack_step_idx = 0
         attacker.attack_step_elapsed_ms = 0
@@ -625,16 +623,20 @@ class TacticsBattle:
         attacker.attack_fm_frame = None
 
     def _apply_pending_attack(self, attacker: BattleUnit) -> None:
-        """attack_seq 跑到 'impact' 步骤时由 UI 调. 实际扣血 + 触发受击/闪避动画."""
+        """attack_seq 跑到 'impact' 步骤时由 UI 调. 实际扣血 + 触发受击/闪避动画.
+        每次 impact 独立 roll (支持多段攻击; 目标死亡后续 impact 自动跳过).
+        """
         target = attacker.pending_attack_target
         if target is None or not target.alive:
             return
-        if attacker.pending_attack_kind == "dodge":
+        if self.rng.random() < self._miss_chance(attacker, target):
             self.damage_events.append(DamageEvent(0, target.hp, target.x, target.y, miss=True))
             self._set_reaction(target, "dodge", attacker)
             self._log(f"{attacker.name} → {target.name}: MISS (闪避)")
         else:
-            self._apply_damage(attacker, target, attacker.pending_attack_dmg, "")
+            raw = attacker.attack - target.defence + self.rng.randint(-5, 5)
+            dmg = max(1, raw)
+            self._apply_damage(attacker, target, dmg, "")
 
     def _clear_pending_attack(self, attacker: BattleUnit) -> None:
         attacker.pending_attack_target = None

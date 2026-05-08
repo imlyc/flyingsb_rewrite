@@ -26,13 +26,18 @@ def pick_locomotion_frame(
     anim: AnimationState,
     walk_period_ms: int = 80,
     idle_period_ms: int = 400,
+    flying: bool = False,
 ) -> tuple[pygame.Surface, tuple[int, int]]:
     """根据 (facing, anim) 返回 (frame, feet_anchor).
     优先级: 走路帧 > 待机呼吸帧.
     anchor 按 *方向* 共享 (sprite.feet_for_facing), 同方向所有动画帧共用 — 防迈步左右晃.
+    flying=True: 飞行单位待机也循环 walk atlas (扇翅膀), 不走 idle atlas 行 0/1.
     """
     if anim.anim_time_ms > 0:
         anim_idx = int(anim.anim_time_ms // walk_period_ms) % walk_sprite.walk_frames
+        return walk_sprite.frame_for_facing(facing, anim_idx), walk_sprite.feet_for_facing(facing)
+    if flying:
+        anim_idx = int(anim.idle_time_ms // walk_period_ms) % walk_sprite.walk_frames
         return walk_sprite.frame_for_facing(facing, anim_idx), walk_sprite.feet_for_facing(facing)
     if idle_sprite is not None:
         phase = int(anim.idle_time_ms // idle_period_ms) % 2

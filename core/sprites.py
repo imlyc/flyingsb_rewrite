@@ -170,6 +170,17 @@ class SpriteSheet:
 DEFAULT_WALK_FRAMES = 5
 TURN_FRAME_COL = 5
 
+# 飞行单位: walk atlas 只有 4 帧 (col 4 空), 且 idle atlas (06) 行 0/1 空白 —
+# 因为飞行=待机=移动都是同一组扇翅膀帧. 渲染时:
+#   - walk_frames 用 4 (避免循环到空白 col 4)
+#   - 待机不读 06 行 0/1, 改成在 walk atlas 上以 idle 节奏循环 (扇翅膀)
+#   - reaction 仍读 06 行 2/3/4 (那几行有内容)
+FLYING_WALK_KEYS: set[str] = {"ps_CCROW00"}
+
+
+def is_flying_sprite(walk_key: str) -> bool:
+    return walk_key in FLYING_WALK_KEYS
+
 # 90° 转向对 → 该过渡帧所在的 atlas 行 (用 Direction 枚举表示)
 TURN_TRANSITION_DIR: dict[frozenset[Direction], Direction] = {
     frozenset({Direction.UP,   Direction.RIGHT}): Direction.UP,
@@ -327,7 +338,10 @@ _CACHE: dict[str, CharacterSprite] = {}
 
 def get_character_sprite(resource_name: str, **kwargs) -> CharacterSprite:
     if resource_name not in _CACHE:
-        _CACHE[resource_name] = load_character_sprite(resource_name, **kwargs)
+        cs = load_character_sprite(resource_name, **kwargs)
+        if is_flying_sprite(resource_name):
+            cs.walk_frames = 4   # col 4 空白, 只循环 cols 0-3
+        _CACHE[resource_name] = cs
     return _CACHE[resource_name]
 
 

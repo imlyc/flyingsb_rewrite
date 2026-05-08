@@ -35,6 +35,7 @@ from core.sprites import (
     get_character_sprite,
     get_idle_sprite,
     idle_key_from_walk_key,
+    is_flying_sprite,
 )
 from scenes.unit_render import blit_shadow, blit_unit, pick_locomotion_frame
 from scenes.base import Scene
@@ -565,6 +566,7 @@ class BattleScene(Scene):
                             frame = cs.frame_for_facing(u.facing, 0)
                 else:
                     # 通用 locomotion: 走路 / 待机, 用共享 picker
+                    flying = is_flying_sprite(u.sprite_key)
                     try:
                         idle_sprite = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
                     except FileNotFoundError:
@@ -573,6 +575,7 @@ class BattleScene(Scene):
                         cs, idle_sprite, u.facing, u.anim,
                         walk_period_ms=self.WALK_FRAME_PERIOD_MS,
                         idle_period_ms=self.IDLE_FRAME_PERIOD_MS,
+                        flying=flying,
                     )
                 # 攻击中不要变半透明 (会让玩家误以为已结束行动)
                 alpha = 140 if (u.has_acted and u.attack_seq is None) else None

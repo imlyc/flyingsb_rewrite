@@ -58,7 +58,7 @@ ATTACK_PROFILES: dict[str, dict] = {
     "乐神杰特": {"style": "B", "fm": "fm_CSONA_G0"},
     "破无":     {"style": "B", "fm": "fm_CPAO_G0"},
     "捕山":     {"style": "B", "fm": "fm_CPUSA_G0"},
-    "紫河":     {"style": "A", "fm": "fm_CJAH0_G0"},
+    "紫河":     {"style": "B_MULTI", "fm": "fm_CJAH0_G0"},
     "美娜":     {"style": "B", "fm": "fm_CMIRO_G0"},
     # 沙悟净 atlas 实际 5 帧/方向 (推测 ATK_C, 未解码), 用 ATK_A 取前 4 帧凑合
     "沙悟净":   {"style": "A", "fm": "fm_CSAO_G0"},
@@ -66,7 +66,7 @@ ATTACK_PROFILES: dict[str, dict] = {
     # 原版敌人有专门的 32-frame seq (8/dir), 我们暂用 ATK_B 复用玩家 pipeline
     "骷髅":     {"style": "B", "fm": "fm_CSKEL_G0"},
     "黄色怪":   {"style": "B", "fm": "fm_CGHOU_G0"},
-    "乌鸦怪":   {"style": "B", "fm": "fm_CCROW_G0"},
+    "乌鸦怪":   {"style": "B_MULTI", "fm": "fm_CCROW_G0"},
 }
 
 

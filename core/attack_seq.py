@@ -156,6 +156,27 @@ ATK_B: list[list[tuple]] = [
 ]
 
 
+# ATK_B_MULTI: 二段攻击, ATK_B 基础上在 fm4 后再插一个 IMPACT.
+# 总位移仍为 0 (charge -18, 后撤恢复 +18 + return 0). 视觉: 冲入 → 命中1 → 短停留 → 命中2 → 收招 → 归位.
+# 用于乌鸦怪 (CCROW) / 紫河 (CJAH) 这类原版多段攻击的角色.
+def _make_atk_b_multi():
+    """从 ATK_B 派生: 在 'impact' 之后, 'fm 4' 之前再插一个 ('impact',).
+    保持原 fm 帧序列和位移轨迹; 新增的 impact 落在收招前的稳态阶段, 视觉自然."""
+    out = []
+    for dir_seq in ATK_B:
+        new = []
+        for step in dir_seq:
+            new.append(step)
+            # 在原 ('fm', 1, 4, 3) 之后插入第二段 impact
+            if step[0] == 'fm' and step[2] in (4, 10, 16, 22):  # fm4 in 4 directions
+                new.append(('impact',))
+        out.append(new)
+    return out
+
+
+ATK_B_MULTI: list[list[tuple]] = _make_atk_b_multi()
+
+
 def facing_to_atk_index(facing: tuple[int, int]) -> int:
     dx, dy = facing
     if dy < 0: return 0   # UP
@@ -168,11 +189,16 @@ def facing_to_atk_index(facing: tuple[int, int]) -> int:
 def attack_seq_for(char_name: str, facing: tuple[int, int]) -> list[tuple]:
     from core.character_sprites import attack_style
     style = attack_style(char_name)
-    table = ATK_A if style == "A" else ATK_B    # 'C' 待解, 暂用 B
+    if style == "A":
+        table = ATK_A
+    elif style == "B_MULTI":
+        table = ATK_B_MULTI
+    else:
+        table = ATK_B
     return table[facing_to_atk_index(facing)]
 
 
 def frames_per_dir(char_name: str) -> int:
-    """fm atlas 每方向用前 N 列 (ATK_A=4, ATK_B=6)."""
+    """fm atlas 每方向用前 N 列 (ATK_A=4, ATK_B*=6)."""
     from core.character_sprites import attack_style
     return 4 if attack_style(char_name) == "A" else 6

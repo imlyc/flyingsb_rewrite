@@ -339,9 +339,13 @@ class WorldMapScene(Scene):
         ]
 
     def _maybe_trigger_battle(self) -> None:
-        # 走到地牢: BOSS 战 (黄色怪)
+        # 走到地牢: 两个地牢分别对应不同敌人组
         if TILES[self.grid[self.player_y][self.player_x]].terrain == TerrainType.DUNGEON:
-            self._start_battle([make_enemy("黄色怪"), make_enemy("骷髅")])
+            pos = (self.player_x, self.player_y)
+            if pos == (5, 18):
+                self._start_battle([make_enemy("乌鸦怪"), make_enemy("乌鸦怪")])
+            else:  # (15, 8)
+                self._start_battle([make_enemy("黄色怪"), make_enemy("骷髅")])
             return
         # 每 N 步骰: 随机战斗
         if self.steps % RANDOM_BATTLE_EVERY == 0 and self.rng.random() < RANDOM_BATTLE_CHANCE:
