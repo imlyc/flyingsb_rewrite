@@ -18,10 +18,10 @@ from core.sprites import facing_to_direction, get_character_sprite
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
-TILE_SIZE = 32
+TILE_SIZE = 48
 MAP_W = 30
 MAP_H = 30
-WALK_SPEED_PX_PER_SEC = 320.0   # 10 tile/秒
+WALK_SPEED_PX_PER_SEC = 480.0   # 10 tile/秒 (= TILE_SIZE * 10)
 WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
 TURN_FRAME_DURATION_MS = 40      # 90° 转向时显示过渡帧的时长
 WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
