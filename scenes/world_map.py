@@ -291,21 +291,22 @@ class WorldMapScene(Scene):
         cx, cy = self._camera_offset()
         self.draw_terrain(self.surface, cx, cy)
 
-        # 玩家 sprite (底边居中对齐目标 tile 底, 像素位置含 subpx/y)
+        # 玩家 sprite (脚点 anchor 同方向共用, 防止迈步时 sprite 左右晃)
         if self._turn_remaining_ms > 0 and self._turn_from_facing is not None:
             frame = self._leader_sprite.turn_frame(
                 facing_to_direction(self._turn_from_facing),
                 facing_to_direction(self.facing),
             )
-            assert frame is not None  # 上面 _poll_input 已确保有过渡帧才进此分支
+            assert frame is not None
         else:
-            anim_idx = self._anim_time_ms // WALK_FRAME_PERIOD_MS
-            frame = self._leader_sprite.frame_for_facing(self.facing, int(anim_idx))
-        fw, fh = frame.get_size()
+            anim_idx = int(self._anim_time_ms // WALK_FRAME_PERIOD_MS) % self._leader_sprite.walk_frames
+            frame = self._leader_sprite.frame_for_facing(self.facing, anim_idx)
+        feet_x, feet_y = self._leader_sprite.feet_for_facing(self.facing)
         px = self.player_x * TILE_SIZE + self.subpx
         py = self.player_y * TILE_SIZE + self.subpy
-        blit_x = int(px - cx + TILE_SIZE / 2 - fw / 2)
-        blit_y = int(py + TILE_SIZE - cy - fh)
+        # 脚点对齐 tile 中心 (而非 tile 底边), 角色上半身自然伸出 tile 上方
+        blit_x = int(px - cx + TILE_SIZE / 2 - feet_x)
+        blit_y = int(py - cy + TILE_SIZE / 2 - feet_y)
         self.surface.blit(frame, (blit_x, blit_y))
 
         self._draw_hud()

@@ -519,14 +519,15 @@ class BattleScene(Scene):
                 continue
             if rect.bottom < 0 or rect.top > self.surface.get_height():
                 continue
-            # 影子
-            shadow_rect = self._shadow_surf.get_rect(midbottom=(cx, cy + TILE // 2 - 2))
+            # 影子: 以 tile 中心为中心 (= feet 位置), 脚踩阴影正中
+            shadow_rect = self._shadow_surf.get_rect(center=(cx, cy))
             self.surface.blit(self._shadow_surf, shadow_rect)
             # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块
             r = rect.inflate(-8, -8)
             if u.sprite_key:
                 cs = get_character_sprite(u.sprite_key)
                 react_off = (0, 0)
+                anchor: tuple[int, int] | None = None    # (feet_x, feet_y) within frame; None=用默认 bottom-center
                 # reaction 序列优先级最高: 用脚本指定的 atlas-06 帧 + 像素位移
                 if u.reaction_seq is not None and u.reaction_frame is not None:
                     try:
@@ -534,6 +535,7 @@ class BattleScene(Scene):
                         col = u.reaction_frame % 4
                         row = u.reaction_frame // 4
                         frame = idle.sheet.frame(col, row)
+                        anchor = idle.feet_for_facing(u.facing)
                         ox, oy = u.reaction_offset
                         react_off = (int(round(ox)), int(round(oy)))
                     except FileNotFoundError:
@@ -561,8 +563,7 @@ class BattleScene(Scene):
                             fx, fy, fw, fh, anc_x, anc_y = fm_data
                             surf = get_fm_surface(fm_name)
                             frame = surf.subsurface(pygame.Rect(fx, fy, fw, fh))
-                            # fm 帧用自己的 anchor, 不走默认 bottom-center
-                            u._fm_anchor = (anc_x, anc_y)   # 标记给下面 blit 用
+                            anchor = (anc_x, anc_y)
                         except (FileNotFoundError, ValueError):
                             frame = cs.frame_for_facing(u.facing, 0)
                     else:
@@ -571,6 +572,7 @@ class BattleScene(Scene):
                             idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
                             col = DEFAULT_IDLE_DIRECTION_COLS[facing_to_direction(u.facing)]
                             frame = idle.sheet.frame(col, 2)
+                            anchor = idle.feet_for_facing(u.facing)
                         except (FileNotFoundError, IndexError):
                             frame = cs.frame_for_facing(u.facing, 0)
                 elif u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
@@ -578,16 +580,19 @@ class BattleScene(Scene):
                         facing_to_direction(u.turn_from_facing),
                         facing_to_direction(u.facing),
                     ) or cs.frame_for_facing(u.facing, 0)
+                    anchor = cs.feet_for_facing(u.facing)
                 elif u.anim_time_ms > 0:
-                    # 移动中 → 走路帧
-                    anim_idx = u.anim_time_ms // self.WALK_FRAME_PERIOD_MS
-                    frame = cs.frame_for_facing(u.facing, int(anim_idx))
+                    # 移动中 → 走路帧 (anchor 同方向共用, 防左右晃)
+                    anim_idx = int(u.anim_time_ms // self.WALK_FRAME_PERIOD_MS) % cs.walk_frames
+                    frame = cs.frame_for_facing(u.facing, anim_idx)
+                    anchor = cs.feet_for_facing(u.facing)
                 else:
                     # 静止 → 待机呼吸帧
                     try:
                         idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
-                        phase = u.idle_time_ms // self.IDLE_FRAME_PERIOD_MS
-                        frame = idle.frame_for_facing(u.facing, int(phase))
+                        phase = int(u.idle_time_ms // self.IDLE_FRAME_PERIOD_MS) % 2
+                        frame = idle.frame_for_facing(u.facing, phase)
+                        anchor = idle.feet_for_facing(u.facing)
                     except FileNotFoundError:
                         frame = cs.frame_for_facing(u.facing, 0)
                 if u.has_acted and u.attack_seq is None:
@@ -597,22 +602,19 @@ class BattleScene(Scene):
                 fw, fh = frame.get_size()
                 # 攻击位移 (类似受击位移, 二者互斥)
                 ax, ay = u.attack_offset if u.attack_seq is not None else (0, 0)
-                fm_anchor = getattr(u, "_fm_anchor", None)
-                if u.attack_seq is not None and fm_anchor is not None:
-                    # fm 帧: anchor (ax, ay) 是 sprite 内 feet 位置
-                    # ps_*idle sprite 底部含 ~8px 阴影空白, feet 在 sprite 内 y≈88 (96-8)
-                    # 为对齐 idle 的 feet, fm blit 也上移 SHADOW_PAD
-                    SHADOW_PAD = 8
-                    anc_x, anc_y = fm_anchor
+                if anchor is not None:
+                    # 原版: 脚点对齐 tile 中心 (而非 tile 底边). 角色身体上半超出 tile 上方
+                    feet_x, feet_y = anchor
+                    sprite_top_y = cy - feet_y + react_off[1] + int(round(ay))
                     self.surface.blit(frame,
-                                      (cx - anc_x + int(round(ax)),
-                                       cy + TILE // 2 - anc_y - SHADOW_PAD + int(round(ay))))
-                    u._fm_anchor = None
+                                      (cx - feet_x + react_off[0] + int(round(ax)),
+                                       sprite_top_y))
                 else:
-                    # 默认: bottom-center anchor
+                    # 兜底: bottom-center 对到 tile 中心
+                    sprite_top_y = cy - fh + react_off[1] + int(round(ay))
                     self.surface.blit(frame,
                                       (cx - fw // 2 + react_off[0] + int(round(ax)),
-                                       cy + TILE // 2 - fh + react_off[1] + int(round(ay))))
+                                       sprite_top_y))
             else:
                 color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
                 pygame.draw.rect(self.surface, color, r)
@@ -621,14 +623,17 @@ class BattleScene(Scene):
                 pygame.draw.rect(self.surface, self.HIGHLIGHT, rect.inflate(-2, -2), 2)
                 # 朝向小三角 (黄)
                 self._draw_facing_arrow(u, rect)
-            # 头顶 HP
-            hp_top = (rect.top if u.sprite_key else r.top) - 1
+            # 头顶 HP (sprite 整体上移到 tile 中心后, HP 紧贴 sprite 顶, 不再用 tile 顶)
+            if u.sprite_key:
+                hp_top = sprite_top_y - 1
+            else:
+                hp_top = r.top - 1
             hp = self.tiny.render(str(u.hp), True, self.HP_NUM_COLOR)
             self.surface.blit(hp, hp.get_rect(midbottom=(cx, hp_top)))
-            # 当前单位 + 移动阶段: 蓝色 M{move}
+            # 当前单位 + 移动阶段: 蓝色 M{move} (放 tile 底部)
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
-                self.surface.blit(mv, mv.get_rect(midtop=(cx, r.bottom + 1)))
+                self.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
 
     def _advance_attack(self, u, dt_ms: int) -> None:
         """推进攻击者 attack_seq 一帧.
