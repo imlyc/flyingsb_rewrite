@@ -24,7 +24,6 @@ MAP_W = 30
 MAP_H = 30
 WALK_SPEED_PX_PER_SEC = 480.0   # 10 tile/秒 (= TILE_SIZE * 10)
 WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
-TURN_FRAME_DURATION_MS = 40      # 90° 转向时显示过渡帧的时长
 WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
 RANDOM_BATTLE_EVERY = 3
 RANDOM_BATTLE_CHANCE = 0.00
@@ -118,9 +117,6 @@ class WorldMapScene(Scene):
         self.party_leader = "孙悟空"
         self.facing: tuple[int, int] = (0, 1)  # 初始朝下
         self._anim_time_ms = 0    # 行走动画时间 (移动中累加, 静止归零)
-        # 90° 转向过渡帧状态
-        self._turn_remaining_ms = 0
-        self._turn_from_facing: tuple[int, int] | None = None
         # 输入门: 进/回到地图时, 必须松开方向键再按才接受 (防止战斗结束瞬间自动续走)
         self._input_gated = True
         # 方向键长按检测器 (tap 只转向 / 持续按住超阈值才连走)
@@ -135,7 +131,6 @@ class WorldMapScene(Scene):
         self.subpx = 0.0
         self.subpy = 0.0
         self._anim_time_ms = 0
-        self._turn_remaining_ms = 0
         self._hold.reset()
         try:
             self.audio.play_bgm("world1.wav")
@@ -160,8 +155,6 @@ class WorldMapScene(Scene):
 
     # ------- 更新 -------
     def update(self, dt_ms: int) -> None:
-        if self._turn_remaining_ms > 0:
-            self._turn_remaining_ms = max(0, self._turn_remaining_ms - dt_ms)
         if self.moving_dir != (0, 0):
             self._advance_movement(dt_ms)
         # 战斗触发: 跳过本帧后续的输入轮询, 避免按键续写出残留 moving 状态被冻结
@@ -215,13 +208,7 @@ class WorldMapScene(Scene):
         if new_dir != self.facing:
             # 朝向不一致: 边沿时转身 (含过渡帧), 不前进
             if edge:
-                old_facing = self.facing
-                self.facing = new_dir
-                if self._leader_sprite.turn_frame(
-                    facing_to_direction(old_facing), facing_to_direction(new_dir)
-                ) is not None:
-                    self._turn_from_facing = old_facing
-                    self._turn_remaining_ms = TURN_FRAME_DURATION_MS
+                self.facing = new_dir   # 转向即生效, 不插过渡帧
             self._anim_time_ms = 0
             return
 
@@ -301,8 +288,6 @@ class WorldMapScene(Scene):
             facing=self.facing,
             anim_time_ms=self._anim_time_ms,
             idle_time_ms=0,        # 世界地图静止用 walk col 0; 暂不接 idle 呼吸
-            turn_remaining_ms=self._turn_remaining_ms,
-            turn_from_facing=self._turn_from_facing,
             walk_frame_period_ms=WALK_FRAME_PERIOD_MS,
         )
         # 注: 世界地图静止时也想用 walk col 0 (不像战斗用 06 idle), 所以传 idle_sprite=None

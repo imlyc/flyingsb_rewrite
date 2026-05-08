@@ -123,7 +123,6 @@ class BattleScene(Scene):
     CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
     UNIT_TILES_PER_SEC = 8.0      # 单位走动速度 (格/秒, 与世界地图节奏一致)
     WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
-    TURN_FRAME_DURATION_MS = 40   # 90° 转向过渡帧时长
     IDLE_FRAME_PERIOD_MS = 400    # 待机呼吸帧切换间隔 (慢一点更自然)
     WALK_HOLD_DELAY_MS = 80       # 按住方向键超过此时长才自动连走 (tap 只转向)
     # 受击表现: 原版是硬切, 不做位移/混合插值. 只靠 reaction 帧本身的姿态 + 停留时长 +
@@ -218,15 +217,8 @@ class BattleScene(Scene):
         edge = self._hold.tick(new_dir, dt_ms)
 
         if new_dir != u.facing:
-            # 朝向不一致: 边沿时转身 (含过渡帧), 不前进
+            # 朝向不一致: 边沿时转身 (即生效, 不插过渡帧), 不前进
             if edge:
-                old_facing = u.facing
-                cs = get_character_sprite(u.sprite_key) if u.sprite_key else None
-                if cs is not None and cs.turn_frame(
-                    facing_to_direction(old_facing), facing_to_direction(new_dir)
-                ) is not None:
-                    u.turn_from_facing = old_facing
-                    u.turn_remaining_ms = self.TURN_FRAME_DURATION_MS
                 u.facing = new_dir
             return
 
@@ -301,8 +293,6 @@ class BattleScene(Scene):
             else:
                 unit.anim_time_ms = 0
                 unit.idle_time_ms += dt_ms
-            if unit.turn_remaining_ms > 0:
-                unit.turn_remaining_ms = max(0, unit.turn_remaining_ms - dt_ms)
 
         # 当前玩家长按方向键 → 连续移动
         self._poll_player_hold(dt_ms)
@@ -585,8 +575,6 @@ class BattleScene(Scene):
                         facing=u.facing,
                         anim_time_ms=u.anim_time_ms,
                         idle_time_ms=u.idle_time_ms,
-                        turn_remaining_ms=u.turn_remaining_ms,
-                        turn_from_facing=u.turn_from_facing,
                         walk_frame_period_ms=self.WALK_FRAME_PERIOD_MS,
                         idle_frame_period_ms=self.IDLE_FRAME_PERIOD_MS,
                     )

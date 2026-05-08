@@ -19,12 +19,12 @@ from core.sprites import (
 
 @dataclass
 class LocomotionState:
-    """走路 / 转身 / 待机三态的输入. 累计时长由调用方维护."""
+    """走路 / 待机两态的输入. 累计时长由调用方维护.
+    注: 90° 转向不插过渡帧 (atlas col 5 的 45° 帧仅过场动画用), 转向即生效.
+    """
     facing: tuple[int, int]
     anim_time_ms: int = 0           # 移动中累加 (静止 = 0)
     idle_time_ms: int = 0           # 静止时累加 (移动 = 0)
-    turn_remaining_ms: int = 0       # 90° 转身过渡帧剩余时间
-    turn_from_facing: tuple[int, int] | None = None
     walk_frame_period_ms: int = 80   # 行走帧切换间隔
     idle_frame_period_ms: int = 400  # 待机呼吸帧切换间隔
 
@@ -35,31 +35,16 @@ def pick_locomotion_frame(
     state: LocomotionState,
 ) -> tuple[pygame.Surface, tuple[int, int]]:
     """根据 locomotion 状态返回 (frame, feet_anchor).
-    优先级: 转身过渡 > 走路帧 > 待机呼吸帧.
+    优先级: 走路帧 > 待机呼吸帧.
     anchor 按 *方向* 共享 (sprite.feet_for_facing), 同方向所有动画帧共用 — 防迈步左右晃.
     """
     facing = state.facing
-
-    # 1. 转身过渡帧 (90°, 显示 col 5 的过渡帧)
-    if state.turn_remaining_ms > 0 and state.turn_from_facing is not None:
-        frame = walk_sprite.turn_frame(
-            facing_to_direction(state.turn_from_facing),
-            facing_to_direction(facing),
-        )
-        if frame is not None:
-            return frame, walk_sprite.feet_for_facing(facing)
-
-    # 2. 走路帧 (anim_time_ms > 0 = 移动中)
     if state.anim_time_ms > 0:
         anim_idx = int(state.anim_time_ms // state.walk_frame_period_ms) % walk_sprite.walk_frames
         return walk_sprite.frame_for_facing(facing, anim_idx), walk_sprite.feet_for_facing(facing)
-
-    # 3. 待机呼吸 (用 06 idle atlas 两帧交替)
     if idle_sprite is not None:
         phase = int(state.idle_time_ms // state.idle_frame_period_ms) % 2
         return idle_sprite.frame_for_facing(facing, phase), idle_sprite.feet_for_facing(facing)
-
-    # fallback: walk atlas col 0
     return walk_sprite.frame_for_facing(facing, 0), walk_sprite.feet_for_facing(facing)
 
 
