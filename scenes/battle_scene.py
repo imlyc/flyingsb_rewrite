@@ -36,6 +36,7 @@ from core.sprites import (
     get_idle_sprite,
     idle_key_from_walk_key,
 )
+from scenes.unit_render import LocomotionState, blit_shadow, blit_unit, pick_locomotion_frame
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -520,8 +521,7 @@ class BattleScene(Scene):
             if rect.bottom < 0 or rect.top > self.surface.get_height():
                 continue
             # 影子: 以 tile 中心为中心 (= feet 位置), 脚踩阴影正中
-            shadow_rect = self._shadow_surf.get_rect(center=(cx, cy))
-            self.surface.blit(self._shadow_surf, shadow_rect)
+            blit_shadow(self.surface, self._shadow_surf, cx, cy)
             # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块
             r = rect.inflate(-8, -8)
             if u.sprite_key:
@@ -575,46 +575,37 @@ class BattleScene(Scene):
                             anchor = idle.feet_for_facing(u.facing)
                         except (FileNotFoundError, IndexError):
                             frame = cs.frame_for_facing(u.facing, 0)
-                elif u.turn_remaining_ms > 0 and u.turn_from_facing is not None:
-                    frame = cs.turn_frame(
-                        facing_to_direction(u.turn_from_facing),
-                        facing_to_direction(u.facing),
-                    ) or cs.frame_for_facing(u.facing, 0)
-                    anchor = cs.feet_for_facing(u.facing)
-                elif u.anim_time_ms > 0:
-                    # 移动中 → 走路帧 (anchor 同方向共用, 防左右晃)
-                    anim_idx = int(u.anim_time_ms // self.WALK_FRAME_PERIOD_MS) % cs.walk_frames
-                    frame = cs.frame_for_facing(u.facing, anim_idx)
-                    anchor = cs.feet_for_facing(u.facing)
                 else:
-                    # 静止 → 待机呼吸帧
+                    # 通用 locomotion: 转身 / 走路 / 待机, 用共享 picker
                     try:
-                        idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
-                        phase = int(u.idle_time_ms // self.IDLE_FRAME_PERIOD_MS) % 2
-                        frame = idle.frame_for_facing(u.facing, phase)
-                        anchor = idle.feet_for_facing(u.facing)
+                        idle_sprite = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
                     except FileNotFoundError:
-                        frame = cs.frame_for_facing(u.facing, 0)
-                if u.has_acted and u.attack_seq is None:
-                    # 攻击中不要变半透明 (会让玩家误以为已结束行动)
-                    frame = frame.copy()
-                    frame.set_alpha(140)
-                fw, fh = frame.get_size()
+                        idle_sprite = None
+                    state = LocomotionState(
+                        facing=u.facing,
+                        anim_time_ms=u.anim_time_ms,
+                        idle_time_ms=u.idle_time_ms,
+                        turn_remaining_ms=u.turn_remaining_ms,
+                        turn_from_facing=u.turn_from_facing,
+                        walk_frame_period_ms=self.WALK_FRAME_PERIOD_MS,
+                        idle_frame_period_ms=self.IDLE_FRAME_PERIOD_MS,
+                    )
+                    frame, anchor = pick_locomotion_frame(cs, idle_sprite, state)
+                # 攻击中不要变半透明 (会让玩家误以为已结束行动)
+                alpha = 140 if (u.has_acted and u.attack_seq is None) else None
                 # 攻击位移 (类似受击位移, 二者互斥)
                 ax, ay = u.attack_offset if u.attack_seq is not None else (0, 0)
-                if anchor is not None:
-                    # 原版: 脚点对齐 tile 中心 (而非 tile 底边). 角色身体上半超出 tile 上方
-                    feet_x, feet_y = anchor
-                    sprite_top_y = cy - feet_y + react_off[1] + int(round(ay))
-                    self.surface.blit(frame,
-                                      (cx - feet_x + react_off[0] + int(round(ax)),
-                                       sprite_top_y))
-                else:
-                    # 兜底: bottom-center 对到 tile 中心
-                    sprite_top_y = cy - fh + react_off[1] + int(round(ay))
-                    self.surface.blit(frame,
-                                      (cx - fw // 2 + react_off[0] + int(round(ax)),
-                                       sprite_top_y))
+                if anchor is None:
+                    # 兜底: bottom-center 当 anchor (frame 底中心)
+                    fw, fh = frame.get_size()
+                    anchor = (fw // 2, fh)
+                sprite_top_y = blit_unit(
+                    self.surface, frame, anchor,
+                    tile_center_x=cx, tile_center_y=cy,
+                    offset_x=react_off[0] + int(round(ax)),
+                    offset_y=react_off[1] + int(round(ay)),
+                    alpha=alpha,
+                )
             else:
                 color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
                 pygame.draw.rect(self.surface, color, r)

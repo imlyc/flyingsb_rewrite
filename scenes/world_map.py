@@ -14,7 +14,8 @@ from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
 from core.character_sprites import sprite_resource
 from core.movement_input import DirectionalHold
 from core.save_manager import SaveData
-from core.sprites import facing_to_direction, get_character_sprite
+from core.sprites import facing_to_direction, get_character_sprite, get_idle_sprite, idle_key_from_walk_key
+from scenes.unit_render import LocomotionState, blit_unit, pick_locomotion_frame
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -291,23 +292,29 @@ class WorldMapScene(Scene):
         cx, cy = self._camera_offset()
         self.draw_terrain(self.surface, cx, cy)
 
-        # 玩家 sprite (脚点 anchor 同方向共用, 防止迈步时 sprite 左右晃)
-        if self._turn_remaining_ms > 0 and self._turn_from_facing is not None:
-            frame = self._leader_sprite.turn_frame(
-                facing_to_direction(self._turn_from_facing),
-                facing_to_direction(self.facing),
-            )
-            assert frame is not None
-        else:
-            anim_idx = int(self._anim_time_ms // WALK_FRAME_PERIOD_MS) % self._leader_sprite.walk_frames
-            frame = self._leader_sprite.frame_for_facing(self.facing, anim_idx)
-        feet_x, feet_y = self._leader_sprite.feet_for_facing(self.facing)
+        # 玩家 sprite — locomotion 状态机统一在 scenes.unit_render
+        try:
+            idle_sprite = get_idle_sprite(idle_key_from_walk_key(sprite_resource(self.party_leader)))
+        except FileNotFoundError:
+            idle_sprite = None
+        state = LocomotionState(
+            facing=self.facing,
+            anim_time_ms=self._anim_time_ms,
+            idle_time_ms=0,        # 世界地图静止用 walk col 0; 暂不接 idle 呼吸
+            turn_remaining_ms=self._turn_remaining_ms,
+            turn_from_facing=self._turn_from_facing,
+            walk_frame_period_ms=WALK_FRAME_PERIOD_MS,
+        )
+        # 注: 世界地图静止时也想用 walk col 0 (不像战斗用 06 idle), 所以传 idle_sprite=None
+        frame, anchor = pick_locomotion_frame(self._leader_sprite, None, state)
         px = self.player_x * TILE_SIZE + self.subpx
         py = self.player_y * TILE_SIZE + self.subpy
-        # 脚点对齐 tile 中心 (而非 tile 底边), 角色上半身自然伸出 tile 上方
-        blit_x = int(px - cx + TILE_SIZE / 2 - feet_x)
-        blit_y = int(py - cy + TILE_SIZE / 2 - feet_y)
-        self.surface.blit(frame, (blit_x, blit_y))
+        # 脚点对齐 tile 中心
+        blit_unit(
+            self.surface, frame, anchor,
+            tile_center_x=int(px - cx + TILE_SIZE // 2),
+            tile_center_y=int(py - cy + TILE_SIZE // 2),
+        )
 
         self._draw_hud()
 
