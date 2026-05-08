@@ -8,6 +8,7 @@ from enum import Enum
 
 import pygame
 
+from core.anim_state import AnimationState
 from core.audio_manager import AudioManager
 from core.battle import BattleMap, BattleUnit, TacticsBattle, make_enemy, unit_from_character
 from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
@@ -15,7 +16,7 @@ from core.character_sprites import sprite_resource
 from core.movement_input import DirectionalHold
 from core.save_manager import SaveData
 from core.sprites import facing_to_direction, get_character_sprite, get_idle_sprite, idle_key_from_walk_key
-from scenes.unit_render import LocomotionState, blit_unit, pick_locomotion_frame
+from scenes.unit_render import blit_unit, pick_locomotion_frame
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -116,7 +117,7 @@ class WorldMapScene(Scene):
         # 队长角色 sprite
         self.party_leader = "孙悟空"
         self.facing: tuple[int, int] = (0, 1)  # 初始朝下
-        self._anim_time_ms = 0    # 行走动画时间 (移动中累加, 静止归零)
+        self._anim = AnimationState()
         # 输入门: 进/回到地图时, 必须松开方向键再按才接受 (防止战斗结束瞬间自动续走)
         self._input_gated = True
         # 方向键长按检测器 (tap 只转向 / 持续按住超阈值才连走)
@@ -130,7 +131,7 @@ class WorldMapScene(Scene):
         self.moving_dir = (0, 0)
         self.subpx = 0.0
         self.subpy = 0.0
-        self._anim_time_ms = 0
+        self._anim.reset()
         self._hold.reset()
         try:
             self.audio.play_bgm("world1.wav")
@@ -178,7 +179,7 @@ class WorldMapScene(Scene):
                 self.subpy = 0.0
             else:
                 self.subpy += step if self.subpy < 0 else -step
-        self._anim_time_ms += dt_ms
+        self._anim.tick(dt_ms, moving=True)
         if self.subpx == 0 and self.subpy == 0:
             self.moving_dir = (0, 0)
             self.steps += 1
@@ -191,14 +192,14 @@ class WorldMapScene(Scene):
         """
         if self._input_gated:
             self._hold.reset()
-            self._anim_time_ms = 0
+            self._anim.reset()
             return
         keys = pygame.key.get_pressed()
         dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
         dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
         if dx == 0 and dy == 0:
             self._hold.reset()
-            self._anim_time_ms = 0
+            self._anim.reset()
             return
         if dx != 0:  # 优先水平, 避免对角斜跳
             dy = 0
@@ -206,15 +207,14 @@ class WorldMapScene(Scene):
         edge = self._hold.tick(new_dir, dt_ms)
 
         if new_dir != self.facing:
-            # 朝向不一致: 边沿时转身 (含过渡帧), 不前进
             if edge:
                 self.facing = new_dir   # 转向即生效, 不插过渡帧
-            self._anim_time_ms = 0
+            self._anim.reset()
             return
 
         # 朝向已对齐: 是否走一步
         if not self._hold.should_walk(edge, WALK_HOLD_DELAY_MS):
-            self._anim_time_ms = 0
+            self._anim.reset()
             return
         nx, ny = self.player_x + dx, self.player_y + dy
         if 0 <= nx < MAP_W and 0 <= ny < MAP_H and TILES[self.grid[ny][nx]].passable:
@@ -224,7 +224,7 @@ class WorldMapScene(Scene):
             self.moving_dir = (dx, dy)
         else:
             # 撞墙: 原地踏步动画, 帧继续切换
-            self._anim_time_ms += dt_ms
+            self._anim.tick(dt_ms, moving=True)
 
     # ------- 渲染 -------
     def camera_offset_for(self, focus_x: int, focus_y: int) -> tuple[int, int]:
@@ -284,14 +284,11 @@ class WorldMapScene(Scene):
             idle_sprite = get_idle_sprite(idle_key_from_walk_key(sprite_resource(self.party_leader)))
         except FileNotFoundError:
             idle_sprite = None
-        state = LocomotionState(
-            facing=self.facing,
-            anim_time_ms=self._anim_time_ms,
-            idle_time_ms=0,        # 世界地图静止用 walk col 0; 暂不接 idle 呼吸
-            walk_frame_period_ms=WALK_FRAME_PERIOD_MS,
+        # 世界地图静止用 walk col 0 (不接 06 idle 呼吸), 故 idle_sprite=None
+        frame, anchor = pick_locomotion_frame(
+            self._leader_sprite, None, self.facing, self._anim,
+            walk_period_ms=WALK_FRAME_PERIOD_MS,
         )
-        # 注: 世界地图静止时也想用 walk col 0 (不像战斗用 06 idle), 所以传 idle_sprite=None
-        frame, anchor = pick_locomotion_frame(self._leader_sprite, None, state)
         px = self.player_x * TILE_SIZE + self.subpx
         py = self.player_y * TILE_SIZE + self.subpy
         # 脚点对齐 tile 中心

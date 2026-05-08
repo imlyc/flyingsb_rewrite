@@ -15,6 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from core.anim_state import AnimationState
 from core.character import UNSET, Character
 
 
@@ -77,8 +78,7 @@ class BattleUnit:
     money_reward: int = 0
     sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
     # 渲染态 (UI 写入, 战斗逻辑不动)
-    anim_time_ms: int = 0                                  # 行走帧累计时间, 静止时 0
-    idle_time_ms: int = 0                                  # 待机呼吸帧累计时间, 移动时 0
+    anim: AnimationState = field(default_factory=AnimationState)
     move_path: list[tuple[int, int]] = field(default_factory=list)   # render 待经过的剩余路径节点 (不含起点; 含终点)
     # 渲染坐标 (浮点 tile 单位); UI 帧间向 x/y 插值, 实现走动动画
     render_x: float = 0.0

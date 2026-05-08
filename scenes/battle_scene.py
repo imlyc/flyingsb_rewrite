@@ -36,7 +36,7 @@ from core.sprites import (
     get_idle_sprite,
     idle_key_from_walk_key,
 )
-from scenes.unit_render import LocomotionState, blit_shadow, blit_unit, pick_locomotion_frame
+from scenes.unit_render import blit_shadow, blit_unit, pick_locomotion_frame
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
@@ -226,9 +226,9 @@ class BattleScene(Scene):
         if not self._hold.should_walk(edge, self.WALK_HOLD_DELAY_MS):
             return
         if self.battle.player_step(dx, dy) and (u.x, u.y) != (int(round(u.render_x)), int(round(u.render_y))):
-            if u.anim_time_ms <= 0:
-                u.anim_time_ms = 1
-            u.idle_time_ms = 0
+            if u.anim.anim_time_ms <= 0:
+                u.anim.anim_time_ms = 1
+            u.anim.idle_time_ms = 0
 
     def _make_tint(self, rgba: tuple) -> pygame.Surface:
         s = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
@@ -287,12 +287,7 @@ class BattleScene(Scene):
                     elif ddy != 0:
                         unit.facing = (0, 1 if ddy > 0 else -1)
             # 行走帧时间 / 待机帧时间互补累加 (静止 = 走帧重置, 移动 = 待机帧重置)
-            if moving:
-                unit.anim_time_ms += dt_ms
-                unit.idle_time_ms = 0
-            else:
-                unit.anim_time_ms = 0
-                unit.idle_time_ms += dt_ms
+            unit.anim.tick(dt_ms, moving=moving)
 
         # 当前玩家长按方向键 → 连续移动
         self._poll_player_hold(dt_ms)
@@ -566,19 +561,16 @@ class BattleScene(Scene):
                         except (FileNotFoundError, IndexError):
                             frame = cs.frame_for_facing(u.facing, 0)
                 else:
-                    # 通用 locomotion: 转身 / 走路 / 待机, 用共享 picker
+                    # 通用 locomotion: 走路 / 待机, 用共享 picker
                     try:
                         idle_sprite = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
                     except FileNotFoundError:
                         idle_sprite = None
-                    state = LocomotionState(
-                        facing=u.facing,
-                        anim_time_ms=u.anim_time_ms,
-                        idle_time_ms=u.idle_time_ms,
-                        walk_frame_period_ms=self.WALK_FRAME_PERIOD_MS,
-                        idle_frame_period_ms=self.IDLE_FRAME_PERIOD_MS,
+                    frame, anchor = pick_locomotion_frame(
+                        cs, idle_sprite, u.facing, u.anim,
+                        walk_period_ms=self.WALK_FRAME_PERIOD_MS,
+                        idle_period_ms=self.IDLE_FRAME_PERIOD_MS,
                     )
-                    frame, anchor = pick_locomotion_frame(cs, idle_sprite, state)
                 # 攻击中不要变半透明 (会让玩家误以为已结束行动)
                 alpha = 140 if (u.has_acted and u.attack_seq is None) else None
                 # 攻击位移 (类似受击位移, 二者互斥)
