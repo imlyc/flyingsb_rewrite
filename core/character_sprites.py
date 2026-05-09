@@ -66,6 +66,10 @@ class FormInfo:
     style: str                   # ATK_A / ATK_B / ATK_C (对应 raw_attack_seqs.ATK_*)
     label: str                   # 形态标签 (中文, 给人看)
     note: str = ""
+    # 一次攻击播放的 atlas 总帧数覆盖. None=用默认 (cols // n * n).
+    # 仅当 atlas cols 不是 n 的整数倍时需要 — 原版可能用更精细的帧分布.
+    # 例: 蒙面人 cdit1_g1 cols=16, ATK_C n=6, 默认=12, 实测原版 11.
+    attack_total_frames: int | None = None
 
 
 CHARACTER_FORMS: list[FormInfo] = [
@@ -82,9 +86,11 @@ CHARACTER_FORMS: list[FormInfo] = [
     FormInfo(7,  "蒙面人",   0, "CDIT0", None,            "B", "真容",       "无攻击 atlas (只 E0 特效), 剧情专用"),
 
     # --- ATK_C 风格 (atlas_slot=5 在 seq 里; 6 帧/dir, 含 jump -1001) ---
-    FormInfo(8,  "蒙面人",   1, "CDIT1", "fm_CDIT1_G1",   "C", "斗篷态",     "默认战斗态, 满配 G0..G2/M1/E0"),
+    FormInfo(8,  "蒙面人",   1, "CDIT1", "fm_CDIT1_G1",   "C", "斗篷态",     "默认战斗态, 满配 G0..G2/M1/E0",
+             attack_total_frames=11),  # cdit1_g1 cols=16, n=6, 视觉实测 11 帧 (原版 remap 公式未追到字节级)
     FormInfo(9,  "乐神杰特", None, "CSONA", "fm_CSONA_G0", "C", "乐神杰特",   ""),
-    FormInfo(10, "破无",     None, "CPAO",  "fm_CPAO_G0",  "C", "破无",       ""),
+    FormInfo(10, "破无",     None, "CPAO",  "fm_CPAO_G0",  "C", "破无",       "远程弓箭手. atlas 11 cols/dir; total=11 (用满, 末帧独占 1 phase 长停)",
+             attack_total_frames=11),
     FormInfo(11, "捕山",     None, "CPUSA", "fm_CPUSA_G0", "C", "捕山",       ""),
     FormInfo(12, "紫河",     0, "CJAH0", "fm_CJAH0_G0",   "C", "人形",       "默认战斗态"),
     FormInfo(13, "紫河",     1, "CJAH1", "fm_CJAH1_G0",   "C", "半人半兽",   ""),
@@ -138,5 +144,13 @@ def char_id_for(name: str, form: int | None = None) -> int | None:
     """角色形态在 exe 玩家模板表 PTR_FUN_0068aba4 的槽号 (0-15)."""
     try:
         return _form_index(name, form).char_id
+    except KeyError:
+        return None
+
+
+def attack_total_frames(name: str, form: int | None = None) -> int | None:
+    """一次普攻播放的 atlas 总帧数覆盖. None = 用默认 cols // n * n."""
+    try:
+        return _form_index(name, form).attack_total_frames
     except KeyError:
         return None

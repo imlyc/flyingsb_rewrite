@@ -101,7 +101,9 @@ class BattleUnit:
     attack_step_start_off: tuple[float, float] = (0.0, 0.0)
     attack_offset: tuple[float, float] = (0.0, 0.0)
     attack_fm_atlas: int | None = None        # 0 / 1 等, 选择哪个 fm_ atlas
-    attack_fm_frame: int | None = None
+    attack_fm_frame: int | None = None        # 当前 fm op 的 frame_idx (seq 抽象索引)
+    attack_fm_ticks: int = 0                  # 当前 fm op 的总 ticks (供渲染计算 sub-frame)
+    attack_fm_elapsed_ms: int = 0             # 当前 fm op 已经过 ms (从 0 到 ticks*40, 用来在 atlas cols > n 时插值更细的子帧)
     # 待发的攻击 (impact 步骤时才真正应用伤害)
     pending_attack_target: "BattleUnit | None" = None
     pending_attack_kind: str = ""             # "hit" / "dodge"

@@ -536,8 +536,8 @@ class BattleScene(Scene):
                         frame = cs.frame_for_facing(u.facing, 0)
                 # 攻击中: 用 fm 逐帧 BBox + anchor (从 fm_frames.py 逆向得到)
                 elif u.attack_seq is not None:
-                    from core.character_sprites import attack_fm_atlas
-                    from core.attack_seq import frames_per_dir
+                    from core.character_sprites import attack_fm_atlas, attack_total_frames
+                    from core.attack_seq import frames_per_dir, ATTACK_TICK_MS
                     from core.sprites import get_fm_surface
                     from core.fm_frames import FM_FRAMES, cols_in_atlas
                     fm_name = attack_fm_atlas(u.name)
@@ -549,7 +549,24 @@ class BattleScene(Scene):
                         if atlas_frames:
                             n = frames_per_dir(u.name)
                             cols = cols_in_atlas(atlas_key)
-                            list_idx = (u.attack_fm_frame // n) * cols + (u.attack_fm_frame % n)
+                            # 一次攻击的 atlas 总帧数: 默认 cols//n * n (整除),
+                            # 角色级别可 override (蒙面人=11, exe 实测和默认 12 不同).
+                            override = attack_total_frames(u.name)
+                            total = override if override is not None else (cols // n) * n
+                            # 把 total 帧分给 n 个 phase: 余数帧加在前面, 末尾 phase 只占 base 个.
+                            # 这样最后一帧停留时间最长 (= 它独占一个 fm op 的全部 ticks).
+                            # 例: total=11, n=6 → 前 5 phase 每个 2 帧, phase 5 仅 1 帧.
+                            phase = u.attack_fm_frame % n
+                            base = total // n
+                            remainder = total - base * n
+                            phase_size = max(1, base + (1 if phase < remainder else 0))
+                            phase_start = base * phase + min(phase, remainder)
+                            sub_frame = 0
+                            if phase_size > 1 and u.attack_fm_ticks > 0:
+                                duration = u.attack_fm_ticks * ATTACK_TICK_MS
+                                t = max(0.0, min(0.999, u.attack_fm_elapsed_ms / duration))
+                                sub_frame = int(t * phase_size)
+                            list_idx = (u.attack_fm_frame // n) * cols + phase_start + sub_frame
                             if 0 <= list_idx < len(atlas_frames):
                                 fm_data = atlas_frames[list_idx]
                     if fm_data is not None:
@@ -661,6 +678,8 @@ class BattleScene(Scene):
                 _, atlas, frame, ticks = step
                 u.attack_fm_atlas = atlas
                 u.attack_fm_frame = frame
+                u.attack_fm_ticks = ticks
+                u.attack_fm_elapsed_ms = u.attack_step_elapsed_ms
                 duration = ticks * ATTACK_TICK_MS
                 if duration <= 0:
                     u.attack_step_idx += 1
