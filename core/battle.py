@@ -15,6 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from core.anim_engine import Entity
 from core.anim_state import AnimationState
 from core.character import UNSET, Character
 
@@ -94,21 +95,19 @@ class BattleUnit:
     reaction_offset: tuple[float, float] = (0.0, 0.0)   # 当前像素位移 (dx, dy)
     reaction_frame: int | None = None         # atlas 06 的帧索引 (0-19), None=不画
     reaction_saved_facing: tuple[int, int] | None = None   # 进入受击前的朝向
-    # 攻击者动画: 由 attack_seq.py 驱动. 攻击者播 → impact 步骤触发受击者反应 → 序列结束才回合结束
-    attack_seq: list | None = None
-    attack_step_idx: int = 0
-    attack_step_elapsed_ms: int = 0
-    attack_step_start_off: tuple[float, float] = (0.0, 0.0)
-    attack_offset: tuple[float, float] = (0.0, 0.0)
-    attack_fm_atlas: int | None = None        # 0 / 1 等, 选择哪个 fm_ atlas
-    attack_fm_frame: int | None = None        # 当前 fm op 的 frame_idx (seq 抽象索引)
-    attack_fm_ticks: int = 0                  # 当前 fm op 的总 ticks (供渲染计算 sub-frame)
-    attack_fm_elapsed_ms: int = 0             # 当前 fm op 已经过 ms (从 0 到 ticks*40, 用来在 atlas cols > n 时插值更细的子帧)
+    # 攻击者动画: 由 anim_engine 驱动. entity 持有 seq 状态 (atlas/frame/x/y/ticks),
+    # SIGNAL -100 IMPACT 触发 _apply_pending_attack, -110 END 触发 post_attack_anim.
+    # entity is None = 未在攻击; entity.is_playing() = 攻击中.
+    entity: Entity | None = None
     # 待发的攻击 (impact 步骤时才真正应用伤害)
     pending_attack_target: "BattleUnit | None" = None
     pending_attack_kind: str = ""             # "hit" / "dodge"
     pending_attack_dmg: int = 0
     pending_attack_skill: bool = False        # 是否必杀
+
+    @property
+    def is_attacking(self) -> bool:
+        return self.entity is not None and self.entity.is_playing()
 
     @property
     def alive(self) -> bool:
@@ -240,8 +239,25 @@ class TacticsBattle:
         self.level_ups: list[LevelUpReport] = []
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)
         self._pending_enemy_attack: BattleUnit | None = None
+        # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
+        # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
+        from core.anim_engine import Engine, SIG_IMPACT, SIG_END
+        self.engine = Engine()
+        self._SIG_IMPACT = SIG_IMPACT
+        self._SIG_END = SIG_END
+        self.engine.on('signal', self._on_anim_signal)
         self._place_units(player_positions, enemy_positions)
         self._start_round()
+
+    def _on_anim_signal(self, source_entity: Entity, sig: int) -> None:
+        """anim_engine SIGNAL 路由: -100 IMPACT → 结算伤害, -110 END → 结束攻击回合."""
+        unit = source_entity.user_data.get('unit')
+        if unit is None:
+            return
+        if sig == self._SIG_IMPACT:
+            self._apply_pending_attack(unit)
+        elif sig == self._SIG_END:
+            self.post_attack_anim(unit)
 
     # ---- 摆阵 ----
     def _place_units(
@@ -608,24 +624,27 @@ class TacticsBattle:
         self._log(f"  {attacker.name} → {defender.name}: {dmg} 必杀伤害"
                   + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
 
-    # ---- 普攻 (走 attack_seq 动画) ----
+    # ---- 普攻 (走 anim_engine 字节码) ----
     def _begin_attack(self, attacker: BattleUnit, defender: BattleUnit) -> None:
-        """启动 attack_seq; impact 步骤时由 _apply_pending_attack 独立 roll 命中/伤害.
-        多段攻击: seq 含多个 ('impact',), 每次独立判定 (= 原版多次 jump -100).
+        """启动攻击 seq; anim_engine 跑字节码, SIGNAL -100 时 _apply_pending_attack 独立 roll 命中/伤害.
+        多段攻击: seq 含多个 SIGNAL -100, 每次独立判定 (= 原版多次 jump -100).
         """
         from core.attack_seq import attack_seq_for
+        from core.anim_engine import tuple_to_bytecode
         attacker.pending_attack_target = defender
         attacker.pending_attack_skill = False
-        # kind/dmg 字段保留兼容但已不用 — 每个 impact 重新 roll
         attacker.pending_attack_kind = ""
         attacker.pending_attack_dmg = 0
-        attacker.attack_seq = attack_seq_for(attacker.name, attacker.facing)
-        attacker.attack_step_idx = 0
-        attacker.attack_step_elapsed_ms = 0
-        attacker.attack_step_start_off = (0.0, 0.0)
-        attacker.attack_offset = (0.0, 0.0)
-        attacker.attack_fm_atlas = None
-        attacker.attack_fm_frame = None
+        # 创建/复用 entity, 关联回 BattleUnit (signal handler 用)
+        if attacker.entity is None:
+            attacker.entity = self.engine.spawn()
+            attacker.entity.user_data['unit'] = attacker
+        attacker.entity.x = 0
+        attacker.entity.y = 0
+        attacker.entity.z = 0
+        # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
+        seq_bc = tuple_to_bytecode(attack_seq_for(attacker.name, attacker.facing))
+        self.engine.attach_seq(attacker.entity, seq_bc)
 
     def _apply_pending_attack(self, attacker: BattleUnit) -> None:
         """attack_seq 跑到 'impact' 步骤时由 UI 调. 实际扣血 + 触发受击/闪避动画.
@@ -647,10 +666,13 @@ class TacticsBattle:
         attacker.pending_attack_target = None
         attacker.pending_attack_kind = ""
         attacker.pending_attack_dmg = 0
-        attacker.attack_seq = None
-        attacker.attack_offset = (0.0, 0.0)
-        attacker.attack_fm_atlas = None
-        attacker.attack_fm_frame = None
+        # 强制清掉 entity 的 playing flag, 防止后续 tick 还在跑 (即使 seq 没显式 EXIT)
+        if attacker.entity is not None:
+            attacker.entity.flags &= ~0x20000
+            attacker.entity.seq = b''
+            attacker.entity.x = 0
+            attacker.entity.y = 0
+            attacker.entity.z = 0
 
     # 兼容旧 API: 立即结算 (测试 / 必杀沿用)
     def _strike(self, attacker: BattleUnit, defender: BattleUnit) -> None:

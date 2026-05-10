@@ -155,6 +155,8 @@ class BattleScene(Scene):
         self._enemy_turn_started_at: int | None = None
         self._battle_over_signaled = False
         self._floats: list[FloatText] = []
+        # anim_engine tick 累积器 (40ms/tick); update() 每帧累加 dt_ms
+        self._eng_acc_ms: int = 0
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False   # 玩家已按过一次 (跳过胜利 banner)
@@ -199,7 +201,7 @@ class BattleScene(Scene):
         if not u.is_player:
             return
         # 攻击/受击动画期间禁止新输入
-        if u.attack_seq is not None or u.reaction_seq is not None:
+        if u.is_attacking or u.reaction_seq is not None:
             return
         # 还在向逻辑位置插值, 不接受新输入 (避免叠加多步领先渲染)
         if abs(u.render_x - u.x) > self.ANIM_EPSILON or abs(u.render_y - u.y) > self.ANIM_EPSILON:
@@ -310,10 +312,13 @@ class BattleScene(Scene):
         for unit in self.battle.all_units:
             if unit.reaction_seq is not None:
                 self._advance_reaction(unit, dt_ms)
-        # 推进 attack 序列 (攻击者动画). 'impact' 步触发受击者反应; 'end' 结束攻击者回合
-        for unit in self.battle.all_units:
-            if unit.attack_seq is not None:
-                self._advance_attack(unit, dt_ms)
+        # 推进 anim_engine: 累积 ms, 每满 ATTACK_TICK_MS (40ms) 调一次 engine.tick().
+        # tick 内部会跑所有 attacking entity 的 seq, 触发 SIGNAL → IMPACT/END callbacks.
+        from core.attack_seq import ATTACK_TICK_MS
+        self._eng_acc_ms += dt_ms
+        while self._eng_acc_ms >= ATTACK_TICK_MS:
+            self._eng_acc_ms -= ATTACK_TICK_MS
+            self.battle.engine.tick()
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -354,7 +359,7 @@ class BattleScene(Scene):
             return True
         # 攻击/受击动画期间不接键
         cur = self.battle.current
-        if cur.attack_seq is not None:
+        if cur.is_attacking:
             return True
 
         # 菜单打开时: 方向键直接选项, ESC 关闭, 其它忽略
@@ -477,7 +482,7 @@ class BattleScene(Scene):
             if (abs(u.render_x - u.x) > self.ANIM_EPSILON
                     or abs(u.render_y - u.y) > self.ANIM_EPSILON):
                 return True
-            if u.attack_seq is not None or u.reaction_seq is not None:
+            if u.is_attacking or u.reaction_seq is not None:
                 return True
         return False
 
@@ -534,39 +539,33 @@ class BattleScene(Scene):
                         react_off = (int(round(ox)), int(round(oy)))
                     except FileNotFoundError:
                         frame = cs.frame_for_facing(u.facing, 0)
-                # 攻击中: 用 fm 逐帧 BBox + anchor (从 fm_frames.py 逆向得到)
-                elif u.attack_seq is not None:
+                # 攻击中: 用 fm 逐帧 BBox + anchor (从 fm_frames.py 逆向得到).
+                # 状态全部从 anim_engine.Entity 读: atlas_slot, frame_idx, x/y (16.16 fixed → px).
+                # 注: 第一刀 Option A 暂不做 sub-tick 子帧插值, 整帧步进 (有轻微抖动, 后续优化).
+                elif u.is_attacking:
                     from core.character_sprites import attack_fm_atlas, attack_total_frames
-                    from core.attack_seq import frames_per_dir, ATTACK_TICK_MS
+                    from core.attack_seq import frames_per_dir
                     from core.sprites import get_fm_surface
                     from core.fm_frames import FM_FRAMES, cols_in_atlas
                     fm_name = attack_fm_atlas(u.name)
                     fm_data = None
-                    if fm_name and u.attack_fm_frame is not None:
-                        # 我们的资源文件名带 fm_ 前缀, 但 exe 元数据键不带
+                    ent = u.entity
+                    fm_frame_idx = ent.frame_idx if ent.atlas_slot != 0 or ent.frame_idx != 0 else None
+                    if fm_name and fm_frame_idx is not None:
                         atlas_key = fm_name.lower().removeprefix("fm_")
                         atlas_frames = FM_FRAMES.get(atlas_key)
                         if atlas_frames:
                             n = frames_per_dir(u.name)
                             cols = cols_in_atlas(atlas_key)
-                            # 一次攻击的 atlas 总帧数: 默认 cols//n * n (整除),
-                            # 角色级别可 override (蒙面人=11, exe 实测和默认 12 不同).
                             override = attack_total_frames(u.name)
                             total = override if override is not None else (cols // n) * n
-                            # 把 total 帧分给 n 个 phase: 余数帧加在前面, 末尾 phase 只占 base 个.
-                            # 这样最后一帧停留时间最长 (= 它独占一个 fm op 的全部 ticks).
-                            # 例: total=11, n=6 → 前 5 phase 每个 2 帧, phase 5 仅 1 帧.
-                            phase = u.attack_fm_frame % n
+                            # 余数前置分布 (末 phase 单帧长停 — 见 character_sprites)
+                            phase = fm_frame_idx % n
                             base = total // n
                             remainder = total - base * n
-                            phase_size = max(1, base + (1 if phase < remainder else 0))
                             phase_start = base * phase + min(phase, remainder)
-                            sub_frame = 0
-                            if phase_size > 1 and u.attack_fm_ticks > 0:
-                                duration = u.attack_fm_ticks * ATTACK_TICK_MS
-                                t = max(0.0, min(0.999, u.attack_fm_elapsed_ms / duration))
-                                sub_frame = int(t * phase_size)
-                            list_idx = (u.attack_fm_frame // n) * cols + phase_start + sub_frame
+                            # 第一刀简化: 不做 sub_frame 插值, 直接用 phase_start
+                            list_idx = (fm_frame_idx // n) * cols + phase_start
                             if 0 <= list_idx < len(atlas_frames):
                                 fm_data = atlas_frames[list_idx]
                     if fm_data is not None:
@@ -600,9 +599,13 @@ class BattleScene(Scene):
                         flying=flying,
                     )
                 # 攻击中不要变半透明 (会让玩家误以为已结束行动)
-                alpha = 140 if (u.has_acted and u.attack_seq is None) else None
-                # 攻击位移 (类似受击位移, 二者互斥)
-                ax, ay = u.attack_offset if u.attack_seq is not None else (0, 0)
+                alpha = 140 if (u.has_acted and not u.is_attacking) else None
+                # 攻击位移: entity.x/y 是 16.16 fixed point → 右移 16 拿像素
+                if u.is_attacking:
+                    ax = u.entity.x >> 16
+                    ay = u.entity.y >> 16
+                else:
+                    ax, ay = 0, 0
                 if anchor is None:
                     # 兜底: bottom-center 当 anchor (frame 底中心)
                     fw, fh = frame.get_size()
@@ -633,85 +636,6 @@ class BattleScene(Scene):
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
-
-    # 跳过过的未实现 op, 每个种类只 log 一次 (避免日志刷屏)
-    _SKIPPED_OPS_SEEN: set = set()
-
-    def _advance_attack(self, u, dt_ms: int) -> None:
-        """推进攻击者 attack_seq 一帧.
-        op tuple 形态 (定义见 core/raw_attack_seqs.py 文档):
-          ('move', dx_px, dy_px, ticks)         攻击者像素位移 (插值)
-          ('fm', atlas_slot, frame_idx, ticks)  切 fm atlas 帧 (atlas_slot = 全局 idx)
-          ('idle', atlas_idx, frame, ticks)     切 ps_*06 atlas 帧 (少见)
-          ('impact',)                           命中点, 触发受击/闪余动画 + 扣血
-          ('end',)                              序列结束
-          ('jump', state)                       状态机跳转 (-1000 spawn / -105 update / -1001 等), 暂时全部 skip
-          ('sound', sound_id, op_hex)           播音效, 暂未实现 (skip)
-          ('raw', op_hex, a, b, c, d)           dumper 占位: 0x0aXX 家族未解码 op (skip + warn)
-        """
-        from core.attack_seq import ATTACK_TICK_MS
-        seq = u.attack_seq
-        u.attack_step_elapsed_ms += dt_ms
-        while u.attack_step_idx < len(seq):
-            step = seq[u.attack_step_idx]
-            kind = step[0]
-            if kind == 'move':
-                _, dx, dy, ticks = step
-                duration = ticks * ATTACK_TICK_MS
-                sx, sy = u.attack_step_start_off
-                if duration <= 0:
-                    u.attack_offset = (sx + dx, sy + dy)
-                    u.attack_step_idx += 1
-                    u.attack_step_start_off = u.attack_offset
-                    u.attack_step_elapsed_ms = 0
-                    continue
-                if u.attack_step_elapsed_ms >= duration:
-                    u.attack_offset = (sx + dx, sy + dy)
-                    u.attack_step_idx += 1
-                    u.attack_step_start_off = u.attack_offset
-                    u.attack_step_elapsed_ms -= duration
-                    continue
-                t = u.attack_step_elapsed_ms / duration
-                u.attack_offset = (sx + dx * t, sy + dy * t)
-                return
-            if kind == 'fm':
-                _, atlas, frame, ticks = step
-                u.attack_fm_atlas = atlas
-                u.attack_fm_frame = frame
-                u.attack_fm_ticks = ticks
-                u.attack_fm_elapsed_ms = u.attack_step_elapsed_ms
-                duration = ticks * ATTACK_TICK_MS
-                if duration <= 0:
-                    u.attack_step_idx += 1
-                    u.attack_step_elapsed_ms = 0
-                    continue
-                if u.attack_step_elapsed_ms >= duration:
-                    u.attack_step_idx += 1
-                    u.attack_step_elapsed_ms -= duration
-                    continue
-                return
-            if kind == 'impact':
-                self.battle._apply_pending_attack(u)
-                u.attack_step_idx += 1
-                u.attack_step_elapsed_ms = 0
-                continue
-            if kind == 'end':
-                self.battle.post_attack_anim(u)
-                return
-            # ↓ 未实现 op: skip + 首次出现时 log (raw=未解码字节码, jump=状态机控制流, sound=音效, idle=切 idle atlas)
-            if kind == 'raw':
-                key = ('raw', step[1] if len(step) > 1 else None)
-            elif kind == 'jump':
-                key = ('jump', step[1] if len(step) > 1 else None)
-            else:
-                key = (kind,)
-            if key not in self._SKIPPED_OPS_SEEN:
-                self._SKIPPED_OPS_SEEN.add(key)
-                print(f"[attack_seq] 跳过未实现 op {step!r} (此后同种 op 不再提示)")
-            u.attack_step_idx += 1
-            u.attack_step_elapsed_ms = 0
-        # 序列耗尽兜底
-        self.battle.post_attack_anim(u)
 
     def _advance_reaction(self, u, dt_ms: int) -> None:
         """逐步执行 reaction_seq.py 里的脚本: SET_FRAME / MOVE / END."""
