@@ -159,6 +159,8 @@ class BattleScene(Scene):
         self._eng_acc_ms: int = 0
         # FM op 触发时记录其总 ticks (用于 sub-frame 插值: cols > n 的 atlas)
         self.battle.engine.on('frame_change', self._on_engine_frame_change)
+        # MOVE op 触发时记录其自己的 ticks + 起点 (ticks=0 = 瞬移不 lerp; ticks>0 = lerp 那段时长)
+        self.battle.engine.on('move', self._on_engine_move)
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False   # 玩家已按过一次 (跳过胜利 banner)
@@ -315,27 +317,13 @@ class BattleScene(Scene):
             if unit.reaction_seq is not None:
                 self._advance_reaction(unit, dt_ms)
         # 推进 anim_engine: 累积 ms, 每满 ATTACK_TICK_MS (40ms) 调一次 engine.tick().
-        # tick 内部会跑所有 attacking entity 的 seq, 触发 SIGNAL → IMPACT/END callbacks.
-        # tick 前 snapshot 每个 attacking entity 的 x/y, tick 后若变化 = MOVE 触发,
-        # 记录起点 + 总 ticks 给 render 做平滑插值. acc_ms / 40 当 sub-tick 分数.
+        # tick 内部会跑所有 attacking entity 的 seq, 触发 SIGNAL/move/frame_change 事件.
+        # MOVE 起点+总 ticks 由 _on_engine_move 在 op 触发瞬间记录 (避免被后续 op 覆盖丢失).
         from core.attack_seq import ATTACK_TICK_MS
         self._eng_acc_ms += dt_ms
         while self._eng_acc_ms >= ATTACK_TICK_MS:
             self._eng_acc_ms -= ATTACK_TICK_MS
-            attacking = [u for u in self.battle.all_units if u.is_attacking]
-            for u in attacking:
-                u.entity.user_data['_pre_x'] = u.entity.x
-                u.entity.user_data['_pre_y'] = u.entity.y
             self.battle.engine.tick()
-            for u in attacking:
-                ent = u.entity
-                pre_x = ent.user_data.get('_pre_x', ent.x)
-                pre_y = ent.user_data.get('_pre_y', ent.y)
-                if ent.x != pre_x or ent.y != pre_y:
-                    ent.user_data['_move_start_x'] = pre_x
-                    ent.user_data['_move_start_y'] = pre_y
-                    # ticks 是 MOVE op 自己设的总等待 (ticks=0 = 瞬移, 不插值)
-                    ent.user_data['_move_total_ticks'] = ent.ticks if ent.ticks > 0 else 0
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -681,6 +669,18 @@ class BattleScene(Scene):
         ent.user_data['_fm_total_ticks'] = ent.ticks if ent.ticks > 0 else 1
         # 新 FM 起来 = 旧 MOVE 插值期结束
         ent.user_data['_move_total_ticks'] = 0
+
+    def _on_engine_move(self, ent, dx: int, dy: int, dz: int, ticks: int) -> None:
+        """MOVE op 触发瞬间记录: ticks=0 不 lerp, ticks>0 用自己的 ticks lerp.
+        必须在事件里捕获 ticks, 因为 MOVE 后 engine 同 tick 内可能跑 FM, e.ticks 会被覆盖."""
+        if ticks > 0:
+            # MOVE 后 e.x 已经是终点, 起点 = 终点 - delta
+            ent.user_data['_move_start_x'] = ent.x - (dx << 16)
+            ent.user_data['_move_start_y'] = ent.y - (dy << 16)
+            ent.user_data['_move_total_ticks'] = ticks
+        else:
+            # 瞬移: 不 lerp, 直接显示 entity.x
+            ent.user_data['_move_total_ticks'] = 0
 
     def _advance_reaction(self, u, dt_ms: int) -> None:
         """逐步执行 reaction_seq.py 里的脚本: SET_FRAME / MOVE / END."""

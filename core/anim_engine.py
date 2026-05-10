@@ -192,7 +192,9 @@ def op_restore_pos(eng, e):
 
 @op(0x0b)
 def op_move(eng, e):
-    """MOVE: dx,dy,dz:i16, ticks:u16. coords are 16.16 fixed → dx*0x10000."""
+    """MOVE: dx,dy,dz:i16, ticks:u16. coords are 16.16 fixed → dx*0x10000.
+    Emits 'move' event so subscribers can capture MOVE's *own* ticks before
+    next op (e.g. FM) overwrites e.ticks."""
     base = e.offset
     dx, dy, dz, t = _i16(e.seq, base + 2), _i16(e.seq, base + 4), _i16(e.seq, base + 6), _u16(e.seq, base + 8)
     e.x += dx << 16
@@ -200,6 +202,7 @@ def op_move(eng, e):
     e.z += dz << 16
     e.ticks = t
     if t: eng._break = True
+    eng._emit('move', e, dx, dy, dz, t)
     e.offset += e.seq[base + 1]
 
 @op(0x0c)
@@ -296,7 +299,7 @@ class Engine:
 
     def on(self, event: str, fn: Callable):
         """订阅事件: 'signal'(entity, sig_id), 'sound_play'(entity, id), 'sound_stop'(entity, id),
-        'frame_change'(entity, atlas_slot, frame_idx)."""
+        'frame_change'(entity, atlas_slot, frame_idx), 'move'(entity, dx, dy, dz, ticks)."""
         self._handlers.setdefault(event, []).append(fn)
 
     def _emit(self, event: str, *args):
