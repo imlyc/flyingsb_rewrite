@@ -157,6 +157,8 @@ class BattleScene(Scene):
         self._floats: list[FloatText] = []
         # anim_engine tick 累积器 (40ms/tick); update() 每帧累加 dt_ms
         self._eng_acc_ms: int = 0
+        # FM op 触发时记录其总 ticks (用于 sub-frame 插值: cols > n 的 atlas)
+        self.battle.engine.on('frame_change', self._on_engine_frame_change)
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False   # 玩家已按过一次 (跳过胜利 banner)
@@ -314,11 +316,26 @@ class BattleScene(Scene):
                 self._advance_reaction(unit, dt_ms)
         # 推进 anim_engine: 累积 ms, 每满 ATTACK_TICK_MS (40ms) 调一次 engine.tick().
         # tick 内部会跑所有 attacking entity 的 seq, 触发 SIGNAL → IMPACT/END callbacks.
+        # tick 前 snapshot 每个 attacking entity 的 x/y, tick 后若变化 = MOVE 触发,
+        # 记录起点 + 总 ticks 给 render 做平滑插值. acc_ms / 40 当 sub-tick 分数.
         from core.attack_seq import ATTACK_TICK_MS
         self._eng_acc_ms += dt_ms
         while self._eng_acc_ms >= ATTACK_TICK_MS:
             self._eng_acc_ms -= ATTACK_TICK_MS
+            attacking = [u for u in self.battle.all_units if u.is_attacking]
+            for u in attacking:
+                u.entity.user_data['_pre_x'] = u.entity.x
+                u.entity.user_data['_pre_y'] = u.entity.y
             self.battle.engine.tick()
+            for u in attacking:
+                ent = u.entity
+                pre_x = ent.user_data.get('_pre_x', ent.x)
+                pre_y = ent.user_data.get('_pre_y', ent.y)
+                if ent.x != pre_x or ent.y != pre_y:
+                    ent.user_data['_move_start_x'] = pre_x
+                    ent.user_data['_move_start_y'] = pre_y
+                    # ticks 是 MOVE op 自己设的总等待 (ticks=0 = 瞬移, 不插值)
+                    ent.user_data['_move_total_ticks'] = ent.ticks if ent.ticks > 0 else 0
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -541,10 +558,10 @@ class BattleScene(Scene):
                         frame = cs.frame_for_facing(u.facing, 0)
                 # 攻击中: 用 fm 逐帧 BBox + anchor (从 fm_frames.py 逆向得到).
                 # 状态全部从 anim_engine.Entity 读: atlas_slot, frame_idx, x/y (16.16 fixed → px).
-                # 注: 第一刀 Option A 暂不做 sub-tick 子帧插值, 整帧步进 (有轻微抖动, 后续优化).
+                # sub_tick_t = 当前 acc_ms / 40, 给 sub-frame 插值 (cols > n 时显示中间帧).
                 elif u.is_attacking:
                     from core.character_sprites import attack_fm_atlas, attack_total_frames
-                    from core.attack_seq import frames_per_dir
+                    from core.attack_seq import frames_per_dir, ATTACK_TICK_MS
                     from core.sprites import get_fm_surface
                     from core.fm_frames import FM_FRAMES, cols_in_atlas
                     fm_name = attack_fm_atlas(u.name)
@@ -563,9 +580,18 @@ class BattleScene(Scene):
                             phase = fm_frame_idx % n
                             base = total // n
                             remainder = total - base * n
+                            phase_size = max(1, base + (1 if phase < remainder else 0))
                             phase_start = base * phase + min(phase, remainder)
-                            # 第一刀简化: 不做 sub_frame 插值, 直接用 phase_start
-                            list_idx = (fm_frame_idx // n) * cols + phase_start
+                            # sub-frame 插值: 用 (fm_total - ticks_remaining + sub_t) / fm_total 算进度
+                            sub_frame = 0
+                            if phase_size > 1:
+                                fm_total = ent.user_data.get('_fm_total_ticks', 0)
+                                if fm_total > 0:
+                                    sub_t = self._eng_acc_ms / ATTACK_TICK_MS
+                                    elapsed = (fm_total - ent.ticks) + sub_t
+                                    progress = max(0.0, min(0.999, elapsed / fm_total))
+                                    sub_frame = int(progress * phase_size)
+                            list_idx = (fm_frame_idx // n) * cols + phase_start + sub_frame
                             if 0 <= list_idx < len(atlas_frames):
                                 fm_data = atlas_frames[list_idx]
                     if fm_data is not None:
@@ -600,10 +626,23 @@ class BattleScene(Scene):
                     )
                 # 攻击中不要变半透明 (会让玩家误以为已结束行动)
                 alpha = 140 if (u.has_acted and not u.is_attacking) else None
-                # 攻击位移: entity.x/y 是 16.16 fixed point → 右移 16 拿像素
+                # 攻击位移: entity.x/y 是 16.16 fixed point → 右移 16 拿像素.
+                # 若当前在 MOVE 等待期 (move_total_ticks > 0), 从 move_start_x lerp 到 entity.x,
+                # 进度 = (move_total - ticks_remaining + sub_t) / move_total, 平滑滑动.
                 if u.is_attacking:
-                    ax = u.entity.x >> 16
-                    ay = u.entity.y >> 16
+                    ent = u.entity
+                    move_total = ent.user_data.get('_move_total_ticks', 0)
+                    if move_total > 0 and ent.ticks > 0:
+                        from core.attack_seq import ATTACK_TICK_MS as _ATM
+                        sub_t = self._eng_acc_ms / _ATM
+                        progress = max(0.0, min(1.0, (move_total - ent.ticks + sub_t) / move_total))
+                        sx = ent.user_data.get('_move_start_x', ent.x)
+                        sy = ent.user_data.get('_move_start_y', ent.y)
+                        ax = int(sx + (ent.x - sx) * progress) >> 16
+                        ay = int(sy + (ent.y - sy) * progress) >> 16
+                    else:
+                        ax = ent.x >> 16
+                        ay = ent.y >> 16
                 else:
                     ax, ay = 0, 0
                 if anchor is None:
@@ -636,6 +675,12 @@ class BattleScene(Scene):
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
+
+    def _on_engine_frame_change(self, ent, atlas_slot: int, frame_idx: int) -> None:
+        """FM/IDLE/SET_FRAME op 触发瞬间记录 total_ticks, render 用来算 sub-frame 插值."""
+        ent.user_data['_fm_total_ticks'] = ent.ticks if ent.ticks > 0 else 1
+        # 新 FM 起来 = 旧 MOVE 插值期结束
+        ent.user_data['_move_total_ticks'] = 0
 
     def _advance_reaction(self, u, dt_ms: int) -> None:
         """逐步执行 reaction_seq.py 里的脚本: SET_FRAME / MOVE / END."""

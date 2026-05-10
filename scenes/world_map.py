@@ -28,7 +28,7 @@ WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
 WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
 RANDOM_BATTLE_EVERY = 3
 RANDOM_BATTLE_CHANCE = 0.00
-PARTY_SIZE = 4
+PARTY_SIZE = 5
 
 
 class TerrainType(Enum):
@@ -336,6 +336,18 @@ class WorldMapScene(Scene):
                        attack=22, defence=12, agile=50, move=4, is_player=True,
                        color=(120, 200, 230),
                        sprite_key=sprite_resource("孙悟空")),
+            BattleUnit(name="蒙面人", level=1, max_hp=70, hp=70, max_mp=15, mp=15, sg=18,
+                       attack=24, defence=11, agile=40, move=4, is_player=True,
+                       color=(160, 160, 200),
+                       sprite_key=sprite_resource("蒙面人")),
+            BattleUnit(name="破无",   level=1, max_hp=55, hp=55, max_mp=12, mp=12, sg=12,
+                       attack=20, defence=8, agile=35, move=3, is_player=True,
+                       color=(200, 180, 80), attack_range=3,   # 弓箭手, 远程
+                       sprite_key=sprite_resource("破无")),
+            BattleUnit(name="紫河",   level=1, max_hp=65, hp=65, max_mp=25, mp=25, sg=15,
+                       attack=19, defence=10, agile=28, move=3, is_player=True,
+                       color=(180, 120, 220),
+                       sprite_key=sprite_resource("紫河")),
         ]
 
     def _maybe_trigger_battle(self) -> None:

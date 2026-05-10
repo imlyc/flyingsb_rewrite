@@ -638,10 +638,12 @@ class TacticsBattle:
         # 创建/复用 entity, 关联回 BattleUnit (signal handler 用)
         if attacker.entity is None:
             attacker.entity = self.engine.spawn()
-            attacker.entity.user_data['unit'] = attacker
         attacker.entity.x = 0
         attacker.entity.y = 0
         attacker.entity.z = 0
+        # 清掉上一次攻击残留的 render snapshot (_move_start_*, _fm_total_ticks 等),
+        # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
+        attacker.entity.user_data = {'unit': attacker}
         # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
         seq_bc = tuple_to_bytecode(attack_seq_for(attacker.name, attacker.facing))
         self.engine.attach_seq(attacker.entity, seq_bc)
