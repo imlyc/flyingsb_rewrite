@@ -546,42 +546,58 @@ class BattleScene(Scene):
                         frame = cs.frame_for_facing(u.facing, 0)
                 # 攻击中: 用 fm 逐帧 BBox + anchor (从 fm_frames.py 逆向得到).
                 # 状态全部从 anim_engine.Entity 读: atlas_slot, frame_idx, x/y (16.16 fixed → px).
-                # sub_tick_t = 当前 acc_ms / 40, 给 sub-frame 插值 (cols > n 时显示中间帧).
+                # 两条 render 路径:
+                #   (a) Player ATK_A/B/C (atlas_slot 抽象 0/1/5): 走 per-character attack_fm_atlas() lookup
+                #       + phase-based sub-frame 插值 (cols > n 的角色用)
+                #   (b) Enemy ENEMY_* (atlas_slot 是全局 idx, e.g. 192=ccrow_g0): 走 atlas_resource() 反查,
+                #       frame_idx 直接当 atlas 内索引 (敌方 seq 不需要 phase 数学)
                 elif u.is_attacking:
                     from core.character_sprites import attack_fm_atlas, attack_total_frames
                     from core.attack_seq import frames_per_dir, ATTACK_TICK_MS
                     from core.sprites import get_fm_surface
                     from core.fm_frames import FM_FRAMES, cols_in_atlas
-                    fm_name = attack_fm_atlas(u.name)
+                    from core.raw_attack_seqs import atlas_resource
                     fm_data = None
+                    fm_name = None
                     ent = u.entity
-                    fm_frame_idx = ent.frame_idx if ent.atlas_slot != 0 or ent.frame_idx != 0 else None
-                    if fm_name and fm_frame_idx is not None:
-                        atlas_key = fm_name.lower().removeprefix("fm_")
-                        atlas_frames = FM_FRAMES.get(atlas_key)
-                        if atlas_frames:
-                            n = frames_per_dir(u.name)
-                            cols = cols_in_atlas(atlas_key)
-                            override = attack_total_frames(u.name)
-                            total = override if override is not None else (cols // n) * n
-                            # 余数前置分布 (末 phase 单帧长停 — 见 character_sprites)
-                            phase = fm_frame_idx % n
-                            base = total // n
-                            remainder = total - base * n
-                            phase_size = max(1, base + (1 if phase < remainder else 0))
-                            phase_start = base * phase + min(phase, remainder)
-                            # sub-frame 插值: 用 (fm_total - ticks_remaining + sub_t) / fm_total 算进度
-                            sub_frame = 0
-                            if phase_size > 1:
-                                fm_total = ent.user_data.get('_fm_total_ticks', 0)
-                                if fm_total > 0:
-                                    sub_t = self._eng_acc_ms / ATTACK_TICK_MS
-                                    elapsed = (fm_total - ent.ticks) + sub_t
-                                    progress = max(0.0, min(0.999, elapsed / fm_total))
-                                    sub_frame = int(progress * phase_size)
-                            list_idx = (fm_frame_idx // n) * cols + phase_start + sub_frame
-                            if 0 <= list_idx < len(atlas_frames):
-                                fm_data = atlas_frames[list_idx]
+                    slot_lo = ent.atlas_slot & 0xffff
+                    fm_frame_idx = ent.frame_idx if slot_lo != 0 or ent.frame_idx != 0 else None
+                    # 路径选择: slot >= 8 = 全局 atlas idx (mode 0, enemy), 否则 per-character (player)
+                    is_global_atlas = slot_lo >= 8
+                    if is_global_atlas and fm_frame_idx is not None:
+                        atlas_key = atlas_resource(slot_lo)
+                        if atlas_key:
+                            fm_name = "fm_" + atlas_key.upper()
+                            atlas_frames = FM_FRAMES.get(atlas_key)
+                            if atlas_frames and 0 <= fm_frame_idx < len(atlas_frames):
+                                fm_data = atlas_frames[fm_frame_idx]
+                    elif fm_frame_idx is not None:
+                        # per-character 路径
+                        fm_name = attack_fm_atlas(u.name)
+                        if fm_name:
+                            atlas_key = fm_name.lower().removeprefix("fm_")
+                            atlas_frames = FM_FRAMES.get(atlas_key)
+                            if atlas_frames:
+                                n = frames_per_dir(u.name)
+                                cols = cols_in_atlas(atlas_key)
+                                override = attack_total_frames(u.name)
+                                total = override if override is not None else (cols // n) * n
+                                phase = fm_frame_idx % n
+                                base = total // n
+                                remainder = total - base * n
+                                phase_size = max(1, base + (1 if phase < remainder else 0))
+                                phase_start = base * phase + min(phase, remainder)
+                                sub_frame = 0
+                                if phase_size > 1:
+                                    fm_total = ent.user_data.get('_fm_total_ticks', 0)
+                                    if fm_total > 0:
+                                        sub_t = self._eng_acc_ms / ATTACK_TICK_MS
+                                        elapsed = (fm_total - ent.ticks) + sub_t
+                                        progress = max(0.0, min(0.999, elapsed / fm_total))
+                                        sub_frame = int(progress * phase_size)
+                                list_idx = (fm_frame_idx // n) * cols + phase_start + sub_frame
+                                if 0 <= list_idx < len(atlas_frames):
+                                    fm_data = atlas_frames[list_idx]
                     if fm_data is not None:
                         try:
                             fx, fy, fw, fh, anc_x, anc_y = fm_data

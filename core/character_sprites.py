@@ -103,9 +103,9 @@ CHARACTER_FORMS: list[FormInfo] = [
 # 这些不在 PTR_FUN_0068aba4 (玩家表), 走 PTR_FUN_00692f6c (敌方表) 的 wrapper.
 # char_id=None 表示"非玩家槽". 现阶段先给它们配玩家 ATK_B/B_MULTI 凑合.
 ENEMY_FORMS: list[FormInfo] = [
-    FormInfo(None, "骷髅",   None, "CSKEL", "fm_CSKEL_G0", "B",       "骷髅",   ""),
-    FormInfo(None, "黄色怪", None, "CGHOU", "fm_CGHOU_G0", "B",       "黄色怪", ""),
-    FormInfo(None, "乌鸦怪", None, "CCROW", "fm_CCROW_G0", "B_MULTI", "乌鸦怪", "原版 2-impact, 我们用合成 B_MULTI 凑合"),
+    FormInfo(None, "骷髅",   None, "CSKEL", "fm_CSKEL_G0", "ENEMY_CSKEL", "骷髅",   "exe G0 直接 dump (atlas 151)"),
+    FormInfo(None, "黄色怪", None, "CGHOU", "fm_CGHOU_G0", "ENEMY_CGHOU", "黄色怪", "exe G0 直接 dump (atlas 153)"),
+    FormInfo(None, "乌鸦怪", None, "CCROW", "fm_CCROW_G0", "ENEMY_CCROW", "乌鸦怪", "exe G0 直接 dump (atlas 192, 1-impact). G1 是 2-impact 变体, selector 没挖暂未接"),
 ]
 
 
