@@ -105,7 +105,7 @@ CHARACTER_FORMS: list[FormInfo] = [
 ENEMY_FORMS: list[FormInfo] = [
     FormInfo(None, "骷髅",   None, "CSKEL", "fm_CSKEL_G0", "ENEMY_CSKEL", "骷髅",   "exe G0 直接 dump (atlas 151)"),
     FormInfo(None, "黄色怪", None, "CGHOU", "fm_CGHOU_G0", "ENEMY_CGHOU", "黄色怪", "exe G0 直接 dump (atlas 153)"),
-    FormInfo(None, "乌鸦怪", None, "CCROW", "fm_CCROW_G0", "ENEMY_CCROW", "乌鸦怪", "exe G0 直接 dump (atlas 192, 1-impact). G1 是 2-impact 变体, selector 没挖暂未接"),
+    FormInfo(None, "乌鸦怪", None, "CCROW", "fm_CCROW_G1", "ENEMY_CCROW", "乌鸦怪", "exe G1 (atlas 193, 2-impact 双啄). G0 单啄是 atlas 192 备选"),
 ]
 
 

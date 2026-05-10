@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from core.raw_attack_seqs import (
     ATK_A, ATK_B, ATK_C,
-    ENEMY_CCROW_G0, ENEMY_CSKEL_G0, ENEMY_CGHOU_G0,
+    ENEMY_CCROW_G0, ENEMY_CCROW_G1, ENEMY_CSKEL_G0, ENEMY_CGHOU_G0,
 )
 
 ATTACK_TICK_MS = 40   # 与 REACTION_TICK_MS 一致
@@ -62,7 +62,7 @@ def attack_seq_for(char_name: str, facing: tuple[int, int]) -> list[tuple]:
         "B":       ATK_B,
         "C":       ATK_C,
         "B_MULTI": ATK_B_MULTI,
-        "ENEMY_CCROW": ENEMY_CCROW_G0,
+        "ENEMY_CCROW": ENEMY_CCROW_G1,   # 双啄 (atlas 193); G0 是单啄 (atlas 192) 备选
         "ENEMY_CSKEL": ENEMY_CSKEL_G0,
         "ENEMY_CGHOU": ENEMY_CGHOU_G0,
     }.get(style, ATK_B)
