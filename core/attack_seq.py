@@ -20,6 +20,7 @@ from __future__ import annotations
 from core.raw_attack_seqs import (
     ATK_A, ATK_B, ATK_C,
     ENEMY_CCROW_G0, ENEMY_CCROW_G1, ENEMY_CSKEL_G0, ENEMY_CGHOU_G0,
+    ATK_UNKNOWN,
 )
 
 ATTACK_TICK_MS = 40   # 与 REACTION_TICK_MS 一致
@@ -54,6 +55,7 @@ def facing_to_atk_index(facing: tuple[int, int]) -> int:
 # 按角色名选风格 (character_sprites.ATTACK_PROFILES 配置).
 # Player style ATK_A/B/C 用 per-character atlas remap (atlas_slot 0/1/5 抽象槽);
 # Enemy style ENEMY_<NAME> 用 mode 0 全局 atlas_slot (直接全局 atlas_idx).
+# Fallback: ATK_UNKNOWN (16B 微 seq, wait+impact, 不画动画), 用于配置缺失的任意角色.
 def attack_seq_for(char_name: str, facing: tuple[int, int]) -> list[tuple]:
     from core.character_sprites import attack_style
     style = attack_style(char_name)
@@ -65,7 +67,7 @@ def attack_seq_for(char_name: str, facing: tuple[int, int]) -> list[tuple]:
         "ENEMY_CCROW": ENEMY_CCROW_G1,   # 双啄 (atlas 193); G0 是单啄 (atlas 192) 备选
         "ENEMY_CSKEL": ENEMY_CSKEL_G0,
         "ENEMY_CGHOU": ENEMY_CGHOU_G0,
-    }.get(style, ATK_B)
+    }.get(style, ATK_UNKNOWN)
     return table[facing_to_atk_index(facing)]
 
 

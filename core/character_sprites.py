@@ -125,11 +125,12 @@ def _form_index(name: str, form: int | None = None) -> FormInfo:
 
 # ---------- 对外 API (兼容旧调用) ----------
 def attack_style(name: str, form: int | None = None) -> str:
-    """角色当前形态对应的 ATK_A/B/C 风格."""
+    """角色当前形态对应的攻击风格 (ATK_A/B/C/B_MULTI/ENEMY_*).
+    未知角色返回 'UNKNOWN' → attack_seq_for 会回落到 ATK_UNKNOWN (16B 微 seq)."""
     try:
         return _form_index(name, form).style
     except KeyError:
-        return "B"
+        return "UNKNOWN"
 
 
 def attack_fm_atlas(name: str, form: int | None = None) -> str | None:

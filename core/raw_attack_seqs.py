@@ -4,8 +4,10 @@
 重 dump: 跑那个 Ghidra 脚本, 输出贴回这里.
 
 包含:
-  ATK_A/B/C    — 玩家普攻 3 套模板 (atlas_slot 0/1/5, 都是 1 impact)
-  ENEMY_TBL_*  — 16 张 enemy seq 指针表 (前 11 个 enemy slot 中的 6 张已知 + 后续 10 张)
+  ATK_A/B/C                  — 玩家普攻 3 套模板 (atlas_slot 0/1/5, 都是 1 impact)
+  ENEMY_<NAME>_<G/M/E><N>    — enemy seq, 命名按主 atlas 文件名 (CWU_G1=atlas 41 等;
+                               CCROW_G0/G1, CSKEL_G0, CGHOU_G0 来自 custom-coded wrapper 后续补挖)
+  ATK_UNKNOWN              — fallback (16B 微 seq: wait 12 ticks → impact → exit, 没动画), 找不到对应 enemy seq 时用
 
 每张表 = 4 段 list, 对应 UP/DN/LF/RT 四个朝向. 每段 = 一串 op tuple:
   ('move', dx_px, dy_px, ticks)     攻击者位移 (插值)
@@ -292,7 +294,7 @@ ATK_C = [
 
 
 # 敌方攻击 seq tables (16 张, 按 enemy slot wrapper 中的 PUSH 立即数去重)
-ENEMY_TBL_66da28 = [
+ENEMY_CWU_G1 = [   # ex-ENEMY_CWU_G1, dump from .rdata @0x66da28
   # UP  (seq @66d728)
   [
     ('sound', 189, 0x0413),
@@ -399,7 +401,7 @@ ENEMY_TBL_66da28 = [
   ],
 ]
 
-ENEMY_TBL_66dcc8 = [
+ENEMY_CWU_G2 = [   # ex-ENEMY_CWU_G2, dump from .rdata @0x66dcc8
   # UP  (seq @66da38)
   [
     ('sound', 189, 0x0413),
@@ -490,7 +492,7 @@ ENEMY_TBL_66dcc8 = [
   ],
 ]
 
-ENEMY_TBL_66e228 = [
+ENEMY_CWU_M1 = [   # ex-ENEMY_CWU_M1, dump from .rdata @0x66e228
   # UP  (seq @66e168)
   [
     ('fm', 44, 0, 8),  # c=0
@@ -529,7 +531,7 @@ ENEMY_TBL_66e228 = [
   ],
 ]
 
-ENEMY_TBL_66e478 = [
+ENEMY_CHEC_G0 = [   # ex-ENEMY_CHEC_G0, dump from .rdata @0x66e478
   # UP  (seq @66e238)
   [
     ('sound', 189, 0x0413),
@@ -612,7 +614,7 @@ ENEMY_TBL_66e478 = [
   ],
 ]
 
-ENEMY_TBL_66e518 = [
+ENEMY_CHEC_M0 = [   # ex-ENEMY_CHEC_M0, dump from .rdata @0x66e518
   # UP  (seq @66e488)
   [
     ('fm', 47, 0, 3),  # c=0
@@ -647,7 +649,7 @@ ENEMY_TBL_66e518 = [
   ],
 ]
 
-ENEMY_TBL_66e808 = [
+ENEMY_CSAMA_G0 = [   # ex-ENEMY_CSAMA_G0, dump from .rdata @0x66e808
   # UP  (seq @66e528)
   [
     ('sound', 189, 0x0413),
@@ -746,7 +748,7 @@ ENEMY_TBL_66e808 = [
   ],
 ]
 
-ENEMY_TBL_66e948 = [
+ENEMY_CSAMA_M0 = [   # ex-ENEMY_CSAMA_M0, dump from .rdata @0x66e948
   # UP  (seq @66e818)
   [
     ('fm', 49, 0, 3),  # c=0
@@ -797,7 +799,7 @@ ENEMY_TBL_66e948 = [
   ],
 ]
 
-ENEMY_TBL_66eea4 = [
+ENEMY_CSADI_G0 = [   # ex-ENEMY_CSADI_G0, dump from .rdata @0x66eea4
   # UP  (seq @66ea64)
   [
     ('sound', 189, 0x0413),
@@ -936,7 +938,7 @@ ENEMY_TBL_66eea4 = [
   ],
 ]
 
-ENEMY_TBL_66f194 = [
+ENEMY_CSADI_G1 = [   # ex-ENEMY_CSADI_G1, dump from .rdata @0x66f194
   # UP  (seq @66eeb4)
   [
     ('sound', 189, 0x0413),
@@ -1035,7 +1037,7 @@ ENEMY_TBL_66f194 = [
   ],
 ]
 
-ENEMY_TBL_66f264 = [
+ENEMY_CSADI_M0 = [   # ex-ENEMY_CSADI_M0, dump from .rdata @0x66f264
   # UP  (seq @66f1a4)
   [
     ('fm', 52, 0, 3),  # c=0
@@ -1074,7 +1076,7 @@ ENEMY_TBL_66f264 = [
   ],
 ]
 
-ENEMY_TBL_66f708 = [
+ENEMY_CNINE_G0 = [   # ex-ENEMY_CNINE_G0, dump from .rdata @0x66f708
   # UP  (seq @66f348)
   [
     ('sound', 189, 0x0413),
@@ -1201,7 +1203,7 @@ ENEMY_TBL_66f708 = [
   ],
 ]
 
-ENEMY_TBL_66fc60 = [
+ENEMY_CZIG_G0 = [   # ex-ENEMY_CZIG_G0, dump from .rdata @0x66fc60
   # UP  (seq @66f9d0)
   [
     ('sound', 178, 0x0413),
@@ -1292,7 +1294,7 @@ ENEMY_TBL_66fc60 = [
   ],
 ]
 
-ENEMY_TBL_6704b4 = [
+ENEMY_CCOMB_G0 = [   # ex-ENEMY_CCOMB_G0, dump from .rdata @0x6704b4
   # UP  (seq @670274)
   [
     ('sound', 189, 0x0413),
@@ -1375,7 +1377,7 @@ ENEMY_TBL_6704b4 = [
   ],
 ]
 
-ENEMY_TBL_670510 = [
+ENEMY_CMUS2_G0 = [   # ex-ENEMY_CMUS2_G0, dump from .rdata @0x670510
   # UP  (seq @6704c4)
   [
     ('move', -4, 4, 0),  # c=0
@@ -1426,58 +1428,8 @@ ENEMY_TBL_670510 = [
   ],
 ]
 
-ENEMY_TBL_670614 = [
-  # UP  (seq @6704c4)
-  [
-    ('move', -4, 4, 0),  # c=0
-    ('raw', 0x0a05, 184, 6, 0, 3),
-    ('move', 4, -4, 0),  # c=0
-    ('raw', 0x0a05, 186, 6, 0, 3),
-    ('move', 0, -3, 0),  # c=0
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    ('impact',),
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    # bail: unknown op 0x0200 at +74
-  ],
-  # DN  (seq @6704c4)
-  [
-    ('move', -4, 4, 0),  # c=0
-    ('raw', 0x0a05, 184, 6, 0, 3),
-    ('move', 4, -4, 0),  # c=0
-    ('raw', 0x0a05, 186, 6, 0, 3),
-    ('move', 0, -3, 0),  # c=0
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    ('impact',),
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    # bail: unknown op 0x0200 at +74
-  ],
-  # LF  (seq @6704c4)
-  [
-    ('move', -4, 4, 0),  # c=0
-    ('raw', 0x0a05, 184, 6, 0, 3),
-    ('move', 4, -4, 0),  # c=0
-    ('raw', 0x0a05, 186, 6, 0, 3),
-    ('move', 0, -3, 0),  # c=0
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    ('impact',),
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    # bail: unknown op 0x0200 at +74
-  ],
-  # RT  (seq @6704c4)
-  [
-    ('move', -4, 4, 0),  # c=0
-    ('raw', 0x0a05, 184, 6, 0, 3),
-    ('move', 4, -4, 0),  # c=0
-    ('raw', 0x0a05, 186, 6, 0, 3),
-    ('move', 0, -3, 0),  # c=0
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    ('impact',),
-    ('raw', 0x0a05, 186, 7, 0, 3),
-    # bail: unknown op 0x0200 at +74
-  ],
-]
-
-ENEMY_TBL_670718 = [
+# ENEMY_CMUS2_G0_B (ex 0x670614) 删除: 跟 ENEMY_CMUS2_G0 字节级完全相同, exe 两处表 (0x670510 / 0x670614) 内容一模一样, 共用同一份"音乐家抖动击打"seq @0x6704c4
+ATK_UNKNOWN = [   # fallback. ex-ENEMY_TBL_670718, dump from .rdata @0x670718. 16B 微 seq: wait 12 ticks → IMPACT → EXIT. 找不到对应 enemy seq 时挂这个
   # UP  (seq @670624)
   [
     ('move', 0, 0, 12),  # c=0
@@ -1506,22 +1458,26 @@ ENEMY_TBL_670718 = [
 
 
 
-# ---- 友好别名 (atlas slot → enemy fm atlas 名) ----
-# 通过 dump_all_wrappers.java + 0x005bf8a8 元数据表交叉得到
-ENEMY_CWU_G1   = ENEMY_TBL_66da28   # atlas 41, 2 impact, 8 帧/dir
-ENEMY_CWU_G2   = ENEMY_TBL_66dcc8   # atlas 42, 1 impact, 8 帧/dir
-ENEMY_CWU_M1   = ENEMY_TBL_66e228   # atlas 44, 1 impact, 4 帧/dir
-ENEMY_CHEC_G0  = ENEMY_TBL_66e478   # atlas 45, 1 impact, 6 帧/dir
-ENEMY_CHEC_M0  = ENEMY_TBL_66e518   # atlas 47, 1 impact, 3 帧/dir
-ENEMY_CSAMA_G0 = ENEMY_TBL_66e808   # atlas 48, 1 impact, 8 帧/dir
-ENEMY_CSAMA_M0 = ENEMY_TBL_66e948   # atlas 49, 1 impact, 4 帧/dir
-ENEMY_CSADI_G0 = ENEMY_TBL_66eea4   # atlas 50, 2 impact, 13 帧/dir (大招)
-ENEMY_CSADI_G1 = ENEMY_TBL_66f194   # atlas 51, 1 impact, 4 帧/dir
-ENEMY_CSADI_M0 = ENEMY_TBL_66f264   # atlas 52, 1 impact, 4 帧/dir
-ENEMY_CNINE_G0 = ENEMY_TBL_66f708   # atlas 53, 2 impact, 12 帧/dir (大招)
-ENEMY_CZIG_G0  = ENEMY_TBL_66fc60   # atlas 56, 1 impact, 6 帧/dir
-ENEMY_CCOMB_G0 = ENEMY_TBL_6704b4   # atlas 59, 1 impact, 6 帧/dir
-# ENEMY_TBL_670510/670614/670718 — atlas slot 未知 (含未解码 op 0x0a05 等)
+# ENEMY 表 atlas/impact/frames 速查 (按主 atlas 排序):
+#   CWU_G1     atlas 41  2 impact  8 frames/dir
+#   CWU_G2     atlas 42  1 impact  8 frames/dir
+#   CWU_M1     atlas 44  1 impact  4 frames/dir
+#   CHEC_G0    atlas 45  1 impact  6 frames/dir
+#   CHEC_M0    atlas 47  1 impact  3 frames/dir
+#   CSAMA_G0   atlas 48  1 impact  8 frames/dir
+#   CSAMA_M0   atlas 49  1 impact  4 frames/dir
+#   CSADI_G0   atlas 50  2 impact 13 frames/dir (大招)
+#   CSADI_G1   atlas 51  1 impact  4 frames/dir
+#   CSADI_M0   atlas 52  1 impact  4 frames/dir
+#   CNINE_G0   atlas 53  2 impact 12 frames/dir (大招)
+#   CZIG_G0    atlas 56  1 impact  6 frames/dir
+#   CCOMB_G0   atlas 59  1 impact  6 frames/dir
+#   CMUS2_G0   atlas 184/186 mixed (op 0x0a05 未完全解码)
+#   CCROW_G0   atlas 192 1 impact  9 frames/dir (单啄)
+#   CCROW_G1   atlas 193 2 impact 10 frames/dir (双啄)
+#   CSKEL_G0   atlas 151 1 impact  6 frames/dir
+#   CGHOU_G0   atlas 153 1 impact  6 frames/dir
+#   ATK_UNKNOWN  - fallback, 16B (wait + impact, 不画动画)
 
 
 # === enemy 攻击 seq (custom-coded wrapper, 直接从 .rdata dump) ===
