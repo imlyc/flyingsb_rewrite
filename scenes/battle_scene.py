@@ -619,12 +619,13 @@ class BattleScene(Scene):
                     else self._face_empty_tint)
             self.surface.blit(tint, self._tile_rect(fx, fy, cam_x, cam_y))
 
-    # 死亡动画时长 (ms). 来自 exe FUN_004399c5/9b42 等 +0x124=0x14 = 20 ticks/帧 = 800ms.
+    # 死亡动画时长 (ms). exe FUN_004399c5/9b42 等 +0x124=0x14 = 20 ticks/帧 = 800ms.
+    # 只 2 帧: row 4 col 0 (倒下中) + col 1 (躺平 corpse). col 2 atlas 空白.
     DEATH_FRAME_MS = 800
-    DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 3            # 3 帧 12/13/14 = 2400ms 完整 fall
-    # 敌人 fall 完成尸体后闪烁多次再消失. 节奏稍慢, 每次明灭清晰可见.
+    DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
+    # 敌人 fall 完成尸体后闪烁多次再消失. 150ms 半周期 = 300ms/cycle = 清晰可见.
     ENEMY_DEATH_FLASH_MS = 2000
-    ENEMY_DEATH_FLASH_PERIOD_MS = 150                   # 150ms 半周期 = 300ms 一个明灭 = ~6.5 次
+    ENEMY_DEATH_FLASH_PERIOD_MS = 150
     ENEMY_DEATH_TOTAL_MS = DEATH_FALL_TOTAL_MS + ENEMY_DEATH_FLASH_MS
 
     def _draw_units(self, cam_x: int, cam_y: int) -> None:
@@ -646,9 +647,14 @@ class BattleScene(Scene):
                 continue
             if rect.bottom < 0 or rect.top > self.surface.get_height():
                 continue
-            # 死亡动画 (HP=0 + reaction done + 数字进 flash 触发后启动). 不画影子.
-            if not u.alive and u.death_anim_time_ms >= 0:
-                self._draw_dead_unit(u, cx, cy)
+            # 死亡分支:
+            #   reaction 完 + 数字 flash → death_anim_time_ms >= 0 → fall + corpse
+            #   reaction 完 + 数字未 flash (空窗 ~900ms) → 显示虚弱姿势, 不画影子 (= 跟原版一致, 不"站起来再倒下")
+            if not u.alive:
+                if u.death_anim_time_ms >= 0:
+                    self._draw_dead_unit(u, cx, cy)
+                else:
+                    self._draw_dying_pose(u, cx, cy)
                 continue
             # 影子: 以 tile 中心为中心 (= feet 位置), 脚踩阴影正中
             blit_shadow(self.surface, self._shadow_surf, cx, cy)
@@ -821,6 +827,24 @@ class BattleScene(Scene):
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
 
+    def _draw_dying_pose(self, u, cx: int, cy: int) -> None:
+        """濒死过渡: HP=0 + reaction 已结束 + 死亡动画未启动 (= 等数字 flash) 时显示虚弱半蹲.
+        防止从站立姿势直接进死亡动画 (= 不"站起来再倒下"). anchor 复用 walk feet."""
+        if not u.sprite_key:
+            return
+        from core.sprites import (
+            get_character_sprite, get_weakened_sprite, weakened_key_from_walk_key,
+        )
+        try:
+            weak = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
+            walk = get_character_sprite(u.sprite_key)
+        except FileNotFoundError:
+            return
+        frame = weak.frame_for_facing(u.facing, 0)   # col 1 半蹲 (跟正常 weakened 同首帧, 不 ping-pong)
+        anchor = walk.feet_for_facing(u.facing)
+        blit_unit(self.surface, frame, anchor,
+                  tile_center_x=cx, tile_center_y=cy)
+
     def _draw_dead_unit(self, u, cx: int, cy: int) -> None:
         """死亡渲染: ps_*04 row 4 三帧 fall (800ms/帧 = 0x14 ticks 来自 exe), 玩家永久躺尸,
         敌人 hold 后闪烁消失. anchor 复用 walk sprite (站立姿势脚点)."""
@@ -834,11 +858,11 @@ class BattleScene(Scene):
         except FileNotFoundError:
             return
         t = max(0, u.death_anim_time_ms)
-        # fall 阶段: 0/1/2 三帧, 每帧 800ms
+        # fall: 0/1 两帧, 每帧 800ms; 之后永久 hold frame 1 (= 躺平 corpse)
         if t < self.DEATH_FALL_TOTAL_MS:
             frame_idx = t // self.DEATH_FRAME_MS
         else:
-            frame_idx = 2
+            frame_idx = 1
         # 敌人闪烁: fall 结束直接闪 → 消失. (帧停在 frame 2 = 躺平 pose)
         if not u.is_player:
             t_post_fall = t - self.DEATH_FALL_TOTAL_MS
@@ -846,12 +870,8 @@ class BattleScene(Scene):
                 if (t_post_fall // self.ENEMY_DEATH_FLASH_PERIOD_MS) % 2 == 1:
                     return
         frame = weak.death_frame(int(frame_idx))
-        try:
-            walk = get_character_sprite(u.sprite_key)
-            anchor = walk.feet_for_facing(u.facing)
-        except FileNotFoundError:
-            fw, fh = frame.get_size()
-            anchor = (fw // 2, fh)
+        # 用 corpse 的 body 中心当 anchor (= 让躺尸居中填 tile, 不再贴 tile 中线上半部)
+        anchor = weak.death_anchor(int(frame_idx))
         blit_unit(self.surface, frame, anchor,
                   tile_center_x=cx, tile_center_y=cy)
 

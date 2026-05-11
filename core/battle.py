@@ -335,8 +335,11 @@ class TacticsBattle:
         return None
 
     def occupant(self, x: int, y: int, ignore: BattleUnit | None = None) -> BattleUnit | None:
-        for u in self.alive_units:
+        # 主角尸体保留格子占位 (可复活), 敌人死亡不占格.
+        for u in self.all_units:
             if u is ignore:
+                continue
+            if not u.alive and not u.is_player:
                 continue
             if u.x == x and u.y == y:
                 return u

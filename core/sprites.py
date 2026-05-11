@@ -308,8 +308,8 @@ WEAKENED_DIRECTION_ROWS: dict[Direction, int] = {
     Direction.RIGHT: 3,
 }
 WEAKENED_PING_PONG_COLS = (1, 2)   # frame 0 reserved
-WEAKENED_DEATH_ROW = 4              # row 4 = 3 帧 fall+corpse 序列 (方向无关, 来自 exe FUN_004399c5/9b42 等)
-WEAKENED_DEATH_FRAMES = 3           # cols 0/1/2 of row 4
+WEAKENED_DEATH_ROW = 4              # row 4 = 2 帧死亡序列 (cols 0=倒下中, 1=躺平; col 2 atlas 空白没素材)
+WEAKENED_DEATH_FRAMES = 2           # 仅 cols 0/1 有内容
 
 
 @dataclass
@@ -327,9 +327,31 @@ class WeakenedSprite:
         return self.frame(facing_to_direction(facing), phase)
 
     def death_frame(self, idx: int) -> pygame.Surface:
-        """row 4 frame (idx 0..2, 来自 exe frames 12/13/14 = ps_*04 row4 cols 0/1/2).
-        0 = 倒下瞬间, 1 = 半倒, 2 = 躺平 (corpse pose)."""
+        """row 4 frame (idx 0..1, exe frames 12/13). 0 = 倒下中, 1 = 躺平 (corpse pose).
+        col 2 atlas 空白, 没素材."""
         return self.sheet.frame(idx % WEAKENED_DEATH_FRAMES, WEAKENED_DEATH_ROW)
+
+    def death_anchor(self, idx: int = 1) -> tuple[int, int]:
+        """corpse 帧的 body 中心 anchor (= 让躺尸居中填满 tile, 不像站立姿势那样用脚点).
+        扫像素找非透明 BBox, 取中心. lazily cached."""
+        if not hasattr(self, '_death_anchor_cache'):
+            self._death_anchor_cache = {}
+        if idx not in self._death_anchor_cache:
+            fr = self.death_frame(idx).convert_alpha()
+            min_x = fr.get_width(); max_x = 0
+            min_y = fr.get_height(); max_y = 0
+            for x in range(fr.get_width()):
+                for y in range(fr.get_height()):
+                    if fr.get_at((x, y))[3] > 0:
+                        if x < min_x: min_x = x
+                        if x > max_x: max_x = x
+                        if y < min_y: min_y = y
+                        if y > max_y: max_y = y
+            if max_x < min_x:   # 空帧 fallback
+                self._death_anchor_cache[idx] = (fr.get_width() // 2, fr.get_height() // 2)
+            else:
+                self._death_anchor_cache[idx] = ((min_x + max_x) // 2, (min_y + max_y) // 2)
+        return self._death_anchor_cache[idx]
 
     def feet_for_direction(self, direction: Direction) -> tuple[int, int]:
         """anchor 检测 col=1 row[direction] (ping-pong 第一帧, 同方向所有帧共用)."""
