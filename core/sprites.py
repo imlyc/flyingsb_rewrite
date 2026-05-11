@@ -24,8 +24,11 @@ import pygame
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 SPRITES_DIR = ASSETS_DIR / "sprites"
 
-# 世界 tile 大小 (像素). 场景渲染、anchor 计算都从这里取, 改一次即可全工程同步.
-TILE_SIZE = 48
+# 世界 tile 像素尺寸 (横 × 纵, 4:3 比例).
+# ps_ atlas cell = 64×96, tile = 64×48 → sprite 占 1×2 tile (身体 1 格 + 头部/装备上溢 1 格),
+# 符合 SLG 标准 sprite-to-tile 比例. 640×480 屏幕 = 10×10 整数网格.
+TILE_W = 64
+TILE_H = 48
 UI_DIR = ASSETS_DIR / "ui"
 
 # ----- 朝向 -----
@@ -116,9 +119,9 @@ class SpriteSheet:
 
     def feet_anchor(self, col: int, row: int) -> tuple[int, int]:
         """ps_ atlas 的每个 cell 美术已预先排版好 (居中 + 底部对齐).
-        anchor 让 cell 底沿对齐到 tile 底沿: anchor_y = frame_h - TILE_SIZE/2.
-        blit_y = tile_center_y - anchor_y → sprite 底 = tile_center_y + TILE_SIZE/2 = tile 底."""
-        return (self.frame_w // 2, self.frame_h - TILE_SIZE // 2)
+        anchor 让 cell 底沿对齐到 tile 底沿: anchor_y = frame_h - TILE_H/2.
+        blit_y = tile_center_y - anchor_y → sprite 底 = tile_center_y + TILE_H/2 = tile 底."""
+        return (self.frame_w // 2, self.frame_h - TILE_H // 2)
 
 
 # ----- 角色 atlas -----

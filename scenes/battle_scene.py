@@ -47,7 +47,7 @@ from scenes.menu import load_chinese_font
 if TYPE_CHECKING:
     from scenes.world_map import WorldMapScene
 
-from core.sprites import TILE_SIZE as TILE  # 单一权威源
+from core.sprites import TILE_W, TILE_H  # 单一权威源
 
 # HUD
 HUD_X = 12
@@ -293,12 +293,12 @@ class BattleScene(Scene):
             u.anim.idle_time_ms = 0
 
     def _make_tint(self, rgba: tuple) -> pygame.Surface:
-        s = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+        s = pygame.Surface((TILE_W, TILE_H), pygame.SRCALPHA)
         s.fill(rgba)
         return s
 
     def _make_shadow(self) -> pygame.Surface:
-        s = pygame.Surface((TILE, TILE // 2), pygame.SRCALPHA)
+        s = pygame.Surface((TILE_W, TILE_H // 2), pygame.SRCALPHA)
         pygame.draw.ellipse(s, self.SHADOW, s.get_rect())
         return s
 
@@ -363,8 +363,8 @@ class BattleScene(Scene):
         # 多段攻击: 每次 IMPACT 都 spawn, 但同位置先前的标记为非 final → 立即消失,
         # 让最后一发占位 (= 最后一发才走完整 rise + hold + flash 生命周期).
         for ev in self.battle.damage_events:
-            wx = ev.x * TILE + TILE // 2
-            wy = ev.y * TILE + TILE // 2 - 10
+            wx = ev.x * TILE_W + TILE_W // 2
+            wy = ev.y * TILE_H + TILE_H // 2 - 10
             # 同位置先前的 float 全部 demote (instant remove), 只留新一发
             self._floats = [f for f in self._floats
                             if abs(f.world_x - wx) > 4 or abs(f.world_y - wy) > 4]
@@ -385,7 +385,7 @@ class BattleScene(Scene):
                 # 找该 unit 的最近一发伤害数字, 看是否进 flash
                 ready = False
                 for f in self._floats:
-                    if (abs(f.world_x - (unit.x * TILE + TILE // 2)) <= TILE
+                    if (abs(f.world_x - (unit.x * TILE_W + TILE_W // 2)) <= TILE_W
                             and f.flash_started_at(now)):
                         ready = True; break
                 if ready or not self._floats:    # 没数字也立即开 (配置缺失兜底)
@@ -548,7 +548,7 @@ class BattleScene(Scene):
             self._draw_end_banner()
 
     def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:
-        return pygame.Rect(x * TILE - cam_x, y * TILE - cam_y, TILE, TILE)
+        return pygame.Rect(x * TILE_W - cam_x, y * TILE_H - cam_y, TILE_W, TILE_H)
 
     def _tile_center(self, x: int, y: int, cam_x: int, cam_y: int) -> tuple[int, int]:
         r = self._tile_rect(x, y, cam_x, cam_y)
@@ -556,21 +556,21 @@ class BattleScene(Scene):
 
     def _unit_rect(self, u, cam_x: int, cam_y: int) -> pygame.Rect:
         """用 render_x/y (浮点 tile) 算单位的渲染像素 rect."""
-        px = int(round(u.render_x * TILE)) - cam_x
-        py = int(round(u.render_y * TILE)) - cam_y
-        return pygame.Rect(px, py, TILE, TILE)
+        px = int(round(u.render_x * TILE_W)) - cam_x
+        py = int(round(u.render_y * TILE_H)) - cam_y
+        return pygame.Rect(px, py, TILE_W, TILE_H)
 
     def _compute_camera_offset(self, focus_x: int, focus_y: int) -> tuple[int, int]:
         """像 world_map.camera_offset_for, 但顶/底各留出 HUD/log 高度,
         让 HUD 不挡角色 sprite. 露出的屏幕空间显示底色 (黑/深紫)."""
         sw, sh = self.surface.get_size()
-        cx = focus_x * TILE + TILE // 2 - sw // 2
-        cy = focus_y * TILE + TILE // 2 - sh // 2
+        cx = focus_x * TILE_W + TILE_W // 2 - sw // 2
+        cy = focus_y * TILE_H + TILE_H // 2 - sh // 2
         # X 轴: 标准夹紧
-        map_w_px = self.battle.map.w * TILE
+        map_w_px = self.battle.map.w * TILE_W
         cx = max(0, min(cx, max(0, map_w_px - sw)))
         # Y 轴: 顶部允许 cam 到 -HUD_TOP_BUFFER, 底部允许 cam 走到 +LOG_BOTTOM_BUFFER
-        map_h_px = self.battle.map.h * TILE
+        map_h_px = self.battle.map.h * TILE_H
         min_cy = -self.HUD_TOP_BUFFER
         max_cy = max(min_cy, map_h_px - sh + self.LOG_BOTTOM_BUFFER)
         cy = max(min_cy, min(cy, max_cy))
@@ -942,9 +942,10 @@ class BattleScene(Scene):
         """在 tile 边框对应朝向的边上画一个小黄三角."""
         cx, cy = tile_rect.centerx, tile_rect.centery
         dx, dy = u.facing
-        offset = TILE // 2 - 2
-        tip = (cx + dx * offset, cy + dy * offset)
-        # 三角的两个底角: 沿垂直方向各偏 4px
+        # 三角顶点贴 tile 边沿 (-2 留缝). 横向用 TILE_W/2, 纵向用 TILE_H/2.
+        tip_x = cx + dx * (TILE_W // 2 - 2)
+        tip_y = cy + dy * (TILE_H // 2 - 2)
+        tip = (tip_x, tip_y)
         if dx != 0:  # 左/右
             base1 = (tip[0] - dx * 6, tip[1] - 5)
             base2 = (tip[0] - dx * 6, tip[1] + 5)
@@ -958,8 +959,8 @@ class BattleScene(Scene):
         if not self._menu_open:
             return
         u = self.battle.current
-        ucx = u.x * TILE - cam_x + TILE // 2
-        ucy = u.y * TILE - cam_y + TILE // 2
+        ucx = u.x * TILE_W - cam_x + TILE_W // 2
+        ucy = u.y * TILE_H - cam_y + TILE_H // 2
         box_w, box_h = 56, 36
         offset = 48  # 距单位中心
         # 4 个框的 (label, center_x, center_y, hint_key)

@@ -20,10 +20,10 @@ from scenes.unit_render import blit_unit, pick_locomotion_frame
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
-from core.sprites import TILE_SIZE  # 单一权威源
+from core.sprites import TILE_W, TILE_H  # 单一权威源
 MAP_W = 30
 MAP_H = 30
-WALK_SPEED_PX_PER_SEC = 480.0   # 10 tile/秒 (= TILE_SIZE * 10)
+WALK_SPEED_TILES_PER_SEC = 10.0   # 10 tile/秒, 各轴像素速度 = 该轴 tile 尺寸 * 这里
 WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
 WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
 RANDOM_BATTLE_EVERY = 3
@@ -166,19 +166,22 @@ class WorldMapScene(Scene):
             self._poll_input_for_next_step(dt_ms)
 
     def _advance_movement(self, dt_ms: int) -> None:
-        """像素级推进 subpx/subpy 朝 (0,0). 到位后落地到目标 tile 并触发战斗判定."""
-        step = WALK_SPEED_PX_PER_SEC * (dt_ms / 1000.0)
+        """像素级推进 subpx/subpy 朝 (0,0). 到位后落地到目标 tile 并触发战斗判定.
+        各轴用各自 tile 尺寸 * 速度: 保证横纵向都是 10 tile/秒 (= 同样时间过 1 tile)."""
+        sec = dt_ms / 1000.0
+        step_x = WALK_SPEED_TILES_PER_SEC * TILE_W * sec
+        step_y = WALK_SPEED_TILES_PER_SEC * TILE_H * sec
         # subpx/y 符号与 moving_dir 相反 (从前一格滑入), 朝 0 收敛
         if self.subpx != 0:
-            if abs(self.subpx) <= step:
+            if abs(self.subpx) <= step_x:
                 self.subpx = 0.0
             else:
-                self.subpx += step if self.subpx < 0 else -step
+                self.subpx += step_x if self.subpx < 0 else -step_x
         if self.subpy != 0:
-            if abs(self.subpy) <= step:
+            if abs(self.subpy) <= step_y:
                 self.subpy = 0.0
             else:
-                self.subpy += step if self.subpy < 0 else -step
+                self.subpy += step_y if self.subpy < 0 else -step_y
         self._anim.tick(dt_ms, moving=True)
         if self.subpx == 0 and self.subpy == 0:
             self.moving_dir = (0, 0)
@@ -219,8 +222,8 @@ class WorldMapScene(Scene):
         nx, ny = self.player_x + dx, self.player_y + dy
         if 0 <= nx < MAP_W and 0 <= ny < MAP_H and TILES[self.grid[ny][nx]].passable:
             self.player_x, self.player_y = nx, ny
-            self.subpx = -dx * TILE_SIZE
-            self.subpy = -dy * TILE_SIZE
+            self.subpx = -dx * TILE_W
+            self.subpy = -dy * TILE_H
             self.moving_dir = (dx, dy)
         else:
             # 撞墙: 原地踏步动画, 帧继续切换
@@ -230,10 +233,10 @@ class WorldMapScene(Scene):
     def camera_offset_for(self, focus_x: int, focus_y: int) -> tuple[int, int]:
         """让 (focus_x, focus_y) 这格在屏幕中心, 边缘夹紧."""
         sw, sh = self.surface.get_size()
-        cx = focus_x * TILE_SIZE + TILE_SIZE // 2 - sw // 2
-        cy = focus_y * TILE_SIZE + TILE_SIZE // 2 - sh // 2
-        max_cx = MAP_W * TILE_SIZE - sw
-        max_cy = MAP_H * TILE_SIZE - sh
+        cx = focus_x * TILE_W + TILE_W // 2 - sw // 2
+        cy = focus_y * TILE_H + TILE_H // 2 - sh // 2
+        max_cx = MAP_W * TILE_W - sw
+        max_cy = MAP_H * TILE_H - sh
         cx = max(0, min(cx, max(0, max_cx)))
         cy = max(0, min(cy, max(0, max_cy)))
         return cx, cy
@@ -241,12 +244,12 @@ class WorldMapScene(Scene):
     def _camera_offset(self) -> tuple[int, int]:
         # 用像素位置 (含 subpx/y) 让相机跟随平滑
         sw, sh = self.surface.get_size()
-        focus_px = self.player_x * TILE_SIZE + self.subpx + TILE_SIZE / 2
-        focus_py = self.player_y * TILE_SIZE + self.subpy + TILE_SIZE / 2
+        focus_px = self.player_x * TILE_W + self.subpx + TILE_W / 2
+        focus_py = self.player_y * TILE_H + self.subpy + TILE_H / 2
         cx = int(focus_px - sw / 2)
         cy = int(focus_py - sh / 2)
-        max_cx = MAP_W * TILE_SIZE - sw
-        max_cy = MAP_H * TILE_SIZE - sh
+        max_cx = MAP_W * TILE_W - sw
+        max_cy = MAP_H * TILE_H - sh
         cx = max(0, min(cx, max(0, max_cx)))
         cy = max(0, min(cy, max(0, max_cy)))
         return cx, cy
@@ -254,16 +257,16 @@ class WorldMapScene(Scene):
     def draw_terrain(self, surface: pygame.Surface, cam_x: int, cam_y: int) -> None:
         """只画地形格子 (BattleScene 战斗时复用)."""
         sw, sh = surface.get_size()
-        x_start = max(0, cam_x // TILE_SIZE)
-        y_start = max(0, cam_y // TILE_SIZE)
-        x_end = min(MAP_W, (cam_x + sw) // TILE_SIZE + 1)
-        y_end = min(MAP_H, (cam_y + sh) // TILE_SIZE + 1)
+        x_start = max(0, cam_x // TILE_W)
+        y_start = max(0, cam_y // TILE_H)
+        x_end = min(MAP_W, (cam_x + sw) // TILE_W + 1)
+        y_end = min(MAP_H, (cam_y + sh) // TILE_H + 1)
         for y in range(y_start, y_end):
             for x in range(x_start, x_end):
                 tile = TILES[self.grid[y][x]]
                 rect = pygame.Rect(
-                    x * TILE_SIZE - cam_x, y * TILE_SIZE - cam_y,
-                    TILE_SIZE, TILE_SIZE,
+                    x * TILE_W - cam_x, y * TILE_H - cam_y,
+                    TILE_W, TILE_H,
                 )
                 pygame.draw.rect(surface, tile.color, rect)
                 if tile.terrain in (TerrainType.TOWN, TerrainType.DUNGEON):
@@ -289,13 +292,13 @@ class WorldMapScene(Scene):
             self._leader_sprite, None, self.facing, self._anim,
             walk_period_ms=WALK_FRAME_PERIOD_MS,
         )
-        px = self.player_x * TILE_SIZE + self.subpx
-        py = self.player_y * TILE_SIZE + self.subpy
+        px = self.player_x * TILE_W + self.subpx
+        py = self.player_y * TILE_H + self.subpy
         # 脚点对齐 tile 中心
         blit_unit(
             self.surface, frame, anchor,
-            tile_center_x=int(px - cx + TILE_SIZE // 2),
-            tile_center_y=int(py - cy + TILE_SIZE // 2),
+            tile_center_x=int(px - cx + TILE_W // 2),
+            tile_center_y=int(py - cy + TILE_H // 2),
         )
 
         self._draw_hud()
