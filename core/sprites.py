@@ -83,38 +83,9 @@ def load_image(
 
 
 # ----- 通用 sheet -----
-def detect_feet_anchor(
-    surface: pygame.Surface,
-    x: int, y: int, w: int, h: int,
-    colorkey: tuple[int, int, int],
-) -> tuple[int, int]:
-    """扫描 sprite 区域, 自动定位脚点 anchor.
-    feet_y = 最底部非 colorkey 像素的 y + 1 (= baseline 像素行下沿).
-    feet_x = 底部 4 行内非 colorkey 像素的 x 平均值 (= 脚部中心).
-    若全空返回 (w//2, h).
-    """
-    bottom_y = -1
-    for off_y in range(h - 1, -1, -1):
-        for off_x in range(w):
-            if surface.get_at((x + off_x, y + off_y))[:3] != colorkey:
-                bottom_y = off_y
-                break
-        if bottom_y >= 0:
-            break
-    if bottom_y < 0:
-        return (w // 2, h)
-    xs = []
-    for sy in range(max(0, bottom_y - 3), bottom_y + 1):
-        for sx in range(w):
-            if surface.get_at((x + sx, y + sy))[:3] != colorkey:
-                xs.append(sx)
-    feet_x = sum(xs) // len(xs) if xs else w // 2
-    return (feet_x, bottom_y + 1)
-
-
 class SpriteSheet:
     """把一张 atlas 按固定 frame_w × frame_h 切成网格. 透明色已应用在 surface.
-    feet_anchor(col, row) lazily 检测每帧的脚点位置 (用 colorkey 之上最底像素).
+    feet_anchor() 返回固定锚点 (ps_ 美术约定: 居中 + 脚靠近 y≈88).
     """
 
     def __init__(self, surface: pygame.Surface, frame_w: int, frame_h: int):
@@ -123,7 +94,6 @@ class SpriteSheet:
         self.frame_h = frame_h
         self.cols = surface.get_width() // frame_w
         self.rows = surface.get_height() // frame_h
-        self._feet_cache: dict[tuple[int, int], tuple[int, int]] = {}
 
     def __repr__(self) -> str:
         return (f"<SpriteSheet {self.surface.get_size()} "
@@ -142,20 +112,12 @@ class SpriteSheet:
         return [self.frame(c, row) for c in range(self.cols)]
 
     def feet_anchor(self, col: int, row: int) -> tuple[int, int]:
-        """返回该 (col, row) 帧的原始脚点检测. 不做共享 — 调用方决定如何共享 anchor.
-        典型用法: CharacterSprite 按 row (=方向) 共享, IdleSprite 按 col (=方向) 共享.
+        """ps_ atlas 的 sprite 是按"水平居中 + 脚靠近 y≈88"摆放的 (原版美术约定),
+        各方向、各帧位置一致 — 直接返回固定 anchor, 不再扫底部像素.
+        老的 detect_feet_anchor 会把翅尖当脚 (CCROW LEFT/RIGHT 翅尖在一侧 → anchor_x 偏 ±25px).
+        实测 ps_C*00 / ps_C*06 各方向 bbox: cx≈30-33, bottom≈86-90, (32, 88) 兼顾大多数.
         """
-        if not (0 <= col < self.cols and 0 <= row < self.rows):
-            return (self.frame_w // 2, self.frame_h)
-        key = (col, row)
-        if key not in self._feet_cache:
-            ck = self.surface.get_colorkey()
-            ck_rgb = ck[:3] if ck is not None else (0, 0, 0)
-            self._feet_cache[key] = detect_feet_anchor(
-                self.surface, col * self.frame_w, row * self.frame_h,
-                self.frame_w, self.frame_h, ck_rgb,
-            )
-        return self._feet_cache[key]
+        return (self.frame_w // 2, self.frame_h - 8)
 
 
 # ----- 角色 atlas -----
