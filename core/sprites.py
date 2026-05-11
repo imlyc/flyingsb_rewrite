@@ -308,11 +308,13 @@ WEAKENED_DIRECTION_ROWS: dict[Direction, int] = {
     Direction.RIGHT: 3,
 }
 WEAKENED_PING_PONG_COLS = (1, 2)   # frame 0 reserved
+WEAKENED_DEATH_ROW = 4              # row 4 = 3 帧 fall+corpse 序列 (方向无关, 来自 exe FUN_004399c5/9b42 等)
+WEAKENED_DEATH_FRAMES = 3           # cols 0/1/2 of row 4
 
 
 @dataclass
 class WeakenedSprite:
-    """ps_*04 atlas wrapper: 4 朝向 ping-pong 帧 + 死亡帧."""
+    """ps_*04 atlas wrapper: 4 朝向 ping-pong 帧 + row 4 死亡帧."""
     sheet: SpriteSheet
     direction_rows: dict[Direction, int]
 
@@ -323,6 +325,11 @@ class WeakenedSprite:
 
     def frame_for_facing(self, facing: tuple[int, int], phase: int = 0) -> pygame.Surface:
         return self.frame(facing_to_direction(facing), phase)
+
+    def death_frame(self, idx: int) -> pygame.Surface:
+        """row 4 frame (idx 0..2, 来自 exe frames 12/13/14 = ps_*04 row4 cols 0/1/2).
+        0 = 倒下瞬间, 1 = 半倒, 2 = 躺平 (corpse pose)."""
+        return self.sheet.frame(idx % WEAKENED_DEATH_FRAMES, WEAKENED_DEATH_ROW)
 
     def feet_for_direction(self, direction: Direction) -> tuple[int, int]:
         """anchor 检测 col=1 row[direction] (ping-pong 第一帧, 同方向所有帧共用)."""
@@ -415,6 +422,35 @@ def clear_cache() -> None:
 # fm atlas 不是均匀网格! 帧大小因姿态变化, 用逐帧 BBox 才能取出干净 sprite.
 # 数据在 core/fm_frames.py (6610 帧, 334 个 atlas, 从 FlyingSB.exe 0x5bf8a8 表逆向).
 _FM_SURF_CACHE: dict[str, pygame.Surface] = {}
+
+
+# ---------- SBTLFONT 伤害/MISS 数字字体 ----------
+# fm_SBTLFONT.pcx (130x56, 52 帧 unique BBox, 来自 fm_frames.SBTLFONT).
+# 来源 exe FUN_004d05d8 + FUN_004d074e: 把 char (ASCII) 转 frame_idx.
+#   FUN_004d074e 路径 (mass-spawn): frame_idx = char - 0x30 → 数字 '0'..'9' = frames 0..9
+#   FUN_004d0488 路径 (drip-spawn): frame_idx = char - 0x23 → '0'..'9' = frames 13..22
+# 我们用 drip 路径 (frames 13-22) 作为标准伤害数字, 跟用户观察一致.
+# MISS: exe 用 chars 0x3a/0x3b/0x3c/0x3c (-0x23) = frames 23/24/25/25 (字母 'MISS' 在 atlas 后段)
+SBTLFONT_DIGIT_BASE_FRAME = 13                         # row 1 cols 0-9 = 红色伤害数字 (跟 MISS 同行同色)
+SBTLFONT_MISS_FRAMES = (23, 24, 25, 25)                # row 1 cols 10-12 = 红色 M/I/S/S
+SBTLFONT_DAMAGE_BASE_FRAME = SBTLFONT_DIGIT_BASE_FRAME # 别名: 伤害数字也是红色 (= 跟 MISS 一致)
+
+
+def get_sbtlfont_surface() -> pygame.Surface:
+    return get_fm_surface("fm_SBTLFONT")
+
+
+def sbtlfont_frame(char_or_digit: int) -> tuple[pygame.Surface, int, int]:
+    """digit 0..9 → atlas frame 13..22; 也可传 frame index 直接取.
+    返回 (subsurface, render_anchor_x, render_anchor_y) — anchor 从 fm_frames 取."""
+    from core.fm_frames import FM_FRAMES
+    frame_idx = char_or_digit if char_or_digit >= 13 else SBTLFONT_DIGIT_BASE_FRAME + char_or_digit
+    bbox_data = FM_FRAMES.get("sbtlfont")
+    if not bbox_data or frame_idx >= len(bbox_data):
+        raise IndexError(f"sbtlfont frame {frame_idx} out of range")
+    fx, fy, fw, fh, ax, ay = bbox_data[frame_idx]
+    surf = get_sbtlfont_surface().subsurface(pygame.Rect(fx, fy, fw, fh))
+    return surf, ax, ay
 
 
 def get_fm_surface(resource_name: str) -> pygame.Surface:

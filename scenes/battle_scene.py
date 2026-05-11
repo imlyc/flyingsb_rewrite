@@ -31,6 +31,9 @@ from core.character import UNSET
 from core.movement_input import DirectionalHold
 from core.sprites import (
     DEFAULT_IDLE_DIRECTION_COLS,
+    SBTLFONT_DAMAGE_BASE_FRAME,
+    SBTLFONT_DIGIT_BASE_FRAME,
+    SBTLFONT_MISS_FRAMES,
     facing_to_direction,
     get_character_sprite,
     get_idle_sprite,
@@ -57,52 +60,100 @@ LOG_H = 100
 
 
 class FloatText:
-    """浮动伤害数字: 绿色大伤害 + 蓝色小剩余 HP, 1.2 秒上升淡出 (对照原版 d090/f120)."""
-    DURATION_MS = 1200
-    RISE_PX = 32
-    DAMAGE_COLOR = (90, 230, 110)    # 绿色
-    HP_COLOR = (90, 170, 255)        # 蓝色
-
-    MISS_COLOR = (220, 220, 220)     # 白色 MISS
+    """伤害数字 (per-digit drip + rise + hold + flash) — 仿原版 FUN_004d05d8/04d0488/04d0330.
+    时序 (40ms/tick):
+      drip:  spawn 一位 / 80ms (奇 tick 触发, 跟 exe FUN_004d0488 +0x144 & 1 同节奏)
+      rise:  spawn 后 ~5 ticks (200ms) 弧线上升到峰值
+      hold:  32 ticks (1280ms) 静止悬停
+      flash: 32 ticks (1280ms) 每 2 ticks (80ms) 翻可见性
+      done:  消失
+    每位用 fm_SBTLFONT atlas frames 13..22 (= digit 0..9), MISS 用 frames 23/24/25/25.
+    """
+    TICK_MS = 40
+    DRIP_PERIOD_TICKS = 2          # 1 位 / 2 ticks (= 80ms/digit)
+    RISE_TICKS = 10                 # 400ms 完整跳跃 (起跳 → 峰 → 落回原点)
+    HOLD_TICKS = 32                 # 1280ms 静止 (落回原点后)
+    FLASH_TICKS = 32                # 1280ms 闪烁
+    FLASH_TOGGLE_TICKS = 2          # 80ms 闪烁周期
+    DIGIT_STRIDE_PX = 10            # 位间距 (跟 exe `local_14 * 0xa0000` = 10px 一致)
+    RISE_PEAK_PX = 36               # 跳跃峰值高度
 
     def __init__(self, damage: int, remaining_hp: int,
                  world_x: int, world_y: int, started_at: int,
                  miss: bool = False) -> None:
         self.damage = damage
-        self.remaining_hp = remaining_hp
+        self.remaining_hp = remaining_hp   # 兼容字段, 不在 float 里渲染 (持久 HP 标签另渲)
         self.world_x = world_x
         self.world_y = world_y
         self.started_at = started_at
         self.miss = miss
+        # 单行 frame 序列: MISS 红色字母 / 普通黄色 damage 数字
+        if miss:
+            self._frames = list(SBTLFONT_MISS_FRAMES)
+        else:
+            self._frames = [SBTLFONT_DAMAGE_BASE_FRAME + int(c)
+                            for c in str(max(0, damage))]
+        self._n = len(self._frames)
+
+    def _digit_state(self, digit_idx: int, now_ms: int) -> tuple[int, str, int]:
+        """返回 (life_ticks, phase, sub_phase_ticks). phase ∈ 'pre','rise','hold','flash','done'."""
+        spawn_offset_ms = digit_idx * self.DRIP_PERIOD_TICKS * self.TICK_MS
+        elapsed = now_ms - self.started_at - spawn_offset_ms
+        if elapsed < 0:
+            return -1, 'pre', 0
+        ticks = elapsed // self.TICK_MS
+        if ticks < self.RISE_TICKS:
+            return ticks, 'rise', ticks
+        ticks -= self.RISE_TICKS
+        if ticks < self.HOLD_TICKS:
+            return ticks, 'hold', ticks
+        ticks -= self.HOLD_TICKS
+        if ticks < self.FLASH_TICKS:
+            return ticks, 'flash', ticks
+        return ticks, 'done', ticks
 
     def alive(self, now_ms: int) -> bool:
-        return now_ms - self.started_at < self.DURATION_MS
+        # 全部 digit 都 done 才算结束
+        last_idx = self._n - 1
+        _, phase, _ = self._digit_state(last_idx, now_ms)
+        return phase != 'done'
+
+    @property
+    def flash_started(self) -> bool:
+        """是否任何一位进了 flash 阶段 (= 死亡动画触发点)."""
+        return False   # 用 flash_started_at(now) 取代; 留 stub 兼容
+
+    def flash_started_at(self, now_ms: int) -> bool:
+        # 第一位最早进 flash, 用它当判据
+        _, phase, _ = self._digit_state(0, now_ms)
+        return phase in ('flash', 'done')
 
     def draw(self, surface: pygame.Surface,
              big_font: pygame.font.Font, small_font: pygame.font.Font,
              cam_x: int, cam_y: int, now_ms: int) -> None:
-        t = (now_ms - self.started_at) / self.DURATION_MS
-        if t >= 1.0:
-            return
-        # 前 70% 不透明, 后 30% 淡出
-        alpha = int(255 * (1.0 if t < 0.7 else (1.0 - (t - 0.7) / 0.3)))
-        dy = int(self.RISE_PX * t)
-        cx, cy = self.world_x - cam_x, self.world_y - cam_y - dy
-        if self.miss:
-            big = big_font.render("MISS", True, self.MISS_COLOR)
-            big.set_alpha(alpha)
-            surface.blit(big, big.get_rect(midbottom=(cx, cy)))
-            return
-        # 绿色伤害 (上)
-        big = big_font.render(str(self.damage), True, self.DAMAGE_COLOR)
-        big.set_alpha(alpha)
-        big_rect = big.get_rect(midbottom=(cx, cy))
-        surface.blit(big, big_rect)
-        # 蓝色剩余 HP (紧贴下方)
-        small = small_font.render(str(self.remaining_hp), True, self.HP_COLOR)
-        small.set_alpha(alpha)
-        small_rect = small.get_rect(midtop=(cx, big_rect.bottom - 2))
-        surface.blit(small, small_rect)
+        from core.sprites import sbtlfont_frame
+        total_w = (self._n - 1) * self.DIGIT_STRIDE_PX + 10
+        base_x = self.world_x - cam_x - total_w // 2
+        base_y = self.world_y - cam_y
+        for i, frame_idx in enumerate(self._frames):
+            _, phase, sub = self._digit_state(i, now_ms)
+            if phase in ('pre', 'done'):
+                continue
+            if phase == 'flash' and (sub // self.FLASH_TOGGLE_TICKS) % 2 == 1:
+                continue
+            if phase == 'rise':
+                t = sub / self.RISE_TICKS
+                arc = 4.0 * t * (1.0 - t)
+                dy = int(self.RISE_PEAK_PX * arc)
+            else:
+                dy = 0
+            try:
+                surf, ax, ay = sbtlfont_frame(frame_idx)
+            except (FileNotFoundError, IndexError):
+                continue
+            x = base_x + i * self.DIGIT_STRIDE_PX
+            y = base_y - dy
+            surface.blit(surf, (x, y - surf.get_height()))
 
 
 class BattleScene(Scene):
@@ -116,7 +167,10 @@ class BattleScene(Scene):
     FACE_EMPTY_TINT = (255, 255, 255, 110)   # 朝向空格 = 浅白
     FACE_ENEMY_TINT = (255, 120, 120, 140)   # 朝向敌人 = 浅红
     CURSOR_COLOR = (255, 240, 120)
-    HP_NUM_COLOR = (140, 240, 140)
+    HP_NUM_COLOR = (140, 240, 140)         # 绿色, 健康
+    HP_WEAKENED_COLOR = (255, 220, 80)     # 黄色, HP < 40% (虚弱)
+    HP_CRITICAL_COLOR = (240, 80, 80)      # 红色, 待挖具体触发条件 (毒/濒死?)
+    MP_NUM_COLOR = (130, 170, 255)         # 蓝色
     MOVE_NUM_COLOR = (140, 200, 255)
     SHADOW = (0, 0, 0, 110)
 
@@ -204,8 +258,9 @@ class BattleScene(Scene):
         u = self.battle.current
         if not u.is_player:
             return
-        # 攻击/受击动画期间禁止新输入
-        if u.is_attacking or u.reaction_seq is not None:
+        # 攻击 / 受击 / 任何动画 (包含飘字 / 死亡) 期间禁止新输入.
+        # 用 _units_animating 统一判定 — 跟回合切换 gating 一致.
+        if self._units_animating():
             return
         # 还在向逻辑位置插值, 不接受新输入 (避免叠加多步领先渲染)
         if abs(u.render_x - u.x) > self.ANIM_EPSILON or abs(u.render_y - u.y) > self.ANIM_EPSILON:
@@ -304,10 +359,15 @@ class BattleScene(Scene):
         # 当前玩家长按方向键 → 连续移动
         self._poll_player_hold(dt_ms)
 
-        # 把 battle 的伤害事件转成浮动文字 (绿+蓝 双行 / MISS)
+        # 把 battle 的伤害事件转飘字, 立即 spawn (跟攻击动画 IMPACT 同步).
+        # 多段攻击: 每次 IMPACT 都 spawn, 但同位置先前的标记为非 final → 立即消失,
+        # 让最后一发占位 (= 最后一发才走完整 rise + hold + flash 生命周期).
         for ev in self.battle.damage_events:
             wx = ev.x * TILE + TILE // 2
-            wy = ev.y * TILE + 6
+            wy = ev.y * TILE + TILE // 2 - 10
+            # 同位置先前的 float 全部 demote (instant remove), 只留新一发
+            self._floats = [f for f in self._floats
+                            if abs(f.world_x - wx) > 4 or abs(f.world_y - wy) > 4]
             self._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss))
         self.battle.damage_events.clear()
         self._floats = [f for f in self._floats if f.alive(now)]
@@ -316,6 +376,22 @@ class BattleScene(Scene):
         for unit in self.battle.all_units:
             if unit.reaction_seq is not None:
                 self._advance_reaction(unit, dt_ms)
+        # 死亡动画计时: HP=0 + reaction 已结束 + 该 unit 的最近一发伤害数字进入 flash 阶段
+        # → 启动死亡 tick. 跟原版"死亡动画在数字闪烁时触发"对齐.
+        for unit in self.battle.all_units:
+            if unit.hp > 0 or unit.reaction_seq is not None:
+                continue
+            if unit.death_anim_time_ms < 0:
+                # 找该 unit 的最近一发伤害数字, 看是否进 flash
+                ready = False
+                for f in self._floats:
+                    if (abs(f.world_x - (unit.x * TILE + TILE // 2)) <= TILE
+                            and f.flash_started_at(now)):
+                        ready = True; break
+                if ready or not self._floats:    # 没数字也立即开 (配置缺失兜底)
+                    unit.death_anim_time_ms = 0
+            else:
+                unit.death_anim_time_ms += dt_ms
         # 推进 anim_engine: 累积 ms, 每满 ATTACK_TICK_MS (40ms) 调一次 engine.tick().
         # tick 内部会跑所有 attacking entity 的 seq, 触发 SIGNAL/move/frame_change 事件.
         # MOVE 起点+总 ticks 由 _on_engine_move 在 op 触发瞬间记录 (避免被后续 op 覆盖丢失).
@@ -324,6 +400,10 @@ class BattleScene(Scene):
         while self._eng_acc_ms >= ATTACK_TICK_MS:
             self._eng_acc_ms -= ATTACK_TICK_MS
             self.battle.engine.tick()
+
+        # 攻击 SIGNAL -110 后切回合: 等所有动画 (伤害数字 + 死亡动画) 跑完才推进
+        if not self._units_animating():
+            self.battle.advance_turn_when_ready()
 
         # 镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)
         u = self.battle.current
@@ -343,13 +423,28 @@ class BattleScene(Scene):
                     self._enemy_turn_started_at = None
                     self.battle.post_enemy_turn()
         elif (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
-              and not self._battle_over_signaled):
+              and not self._battle_over_signaled
+              and not self._death_animations_pending()):
             self._battle_over_signaled = True
             wav = "Victory.wav" if self.battle.phase == Phase.VICTORY else "Gameover.wav"
             try:
                 self.audio.play_bgm(wav, loops=0)
             except FileNotFoundError:
                 pass
+
+    def _death_animations_pending(self) -> bool:
+        """有任何死单位还在跑死亡动画 (= 拖延 victory banner 的判据)."""
+        for u in self.battle.all_units:
+            if u.alive:
+                continue
+            t = u.death_anim_time_ms
+            if t < 0:
+                return True
+            if not u.is_player and t < self.ENEMY_DEATH_TOTAL_MS:
+                return True
+            if u.is_player and t < self.DEATH_FALL_TOTAL_MS:
+                return True
+        return False
 
     # ------- 输入 -------
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -362,9 +457,8 @@ class BattleScene(Scene):
             return True
         if self.battle.phase == Phase.ENEMY_TURN:
             return True
-        # 攻击/受击动画期间不接键
-        cur = self.battle.current
-        if cur.is_attacking:
+        # 攻击 / 受击 / 飘字 / 死亡动画 任一在播放 → 都不接键
+        if self._units_animating():
             return True
 
         # 菜单打开时: 方向键直接选项, ESC 关闭, 其它忽略
@@ -480,9 +574,24 @@ class BattleScene(Scene):
         return cx, cy
 
     def _units_animating(self) -> bool:
-        """是否有任何单位还在播放动画 (移动 / 攻击 / 受击). 用于决定是否能推进回合."""
+        """是否有任何单位还在播放动画. 用于回合切换 + 玩家输入门控.
+        伤害数字: 只要 flash 开始就算"动画完成" (= 当前角色回合可结束); 没死的目标 flash
+        阶段允许下家行动. 死亡动画: 完整跑完才放行 (= 死亡时序晚于 flash 时, 等死亡完).
+        """
+        now = pygame.time.get_ticks()
+        # 飘字 gating: 任何一个还没进 flash 阶段 = 还在动
+        for f in self._floats:
+            if not f.flash_started_at(now):
+                return True
         for u in self.battle.all_units:
-            if not u.alive:
+            if u.hp <= 0:
+                # 死亡动画跑完才放行
+                if u.death_anim_time_ms < 0:
+                    return True
+                if not u.is_player and u.death_anim_time_ms < self.ENEMY_DEATH_TOTAL_MS:
+                    return True
+                if u.is_player and u.death_anim_time_ms < self.DEATH_FALL_TOTAL_MS:
+                    return True
                 continue
             if (abs(u.render_x - u.x) > self.ANIM_EPSILON
                     or abs(u.render_y - u.y) > self.ANIM_EPSILON):
@@ -510,10 +619,23 @@ class BattleScene(Scene):
                     else self._face_empty_tint)
             self.surface.blit(tint, self._tile_rect(fx, fy, cam_x, cam_y))
 
+    # 死亡动画时长 (ms). 来自 exe FUN_004399c5/9b42 等 +0x124=0x14 = 20 ticks/帧 = 800ms.
+    DEATH_FRAME_MS = 800
+    DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 3            # 3 帧 12/13/14 = 2400ms 完整 fall
+    # 敌人 fall 完成尸体后闪烁多次再消失. 节奏稍慢, 每次明灭清晰可见.
+    ENEMY_DEATH_FLASH_MS = 2000
+    ENEMY_DEATH_FLASH_PERIOD_MS = 150                   # 150ms 半周期 = 300ms 一个明灭 = ~6.5 次
+    ENEMY_DEATH_TOTAL_MS = DEATH_FALL_TOTAL_MS + ENEMY_DEATH_FLASH_MS
+
     def _draw_units(self, cam_x: int, cam_y: int) -> None:
         # Y-排序: render_y 大的 (屏幕下方) 后画 → 在前. 同 y 时把当前行动单位放最后, 防被遮.
+        # 死单位: 玩家永远显示 (尸体可被复活), 敌人完成闪烁后跳过 (= 视觉消失但仍在 list).
+        def _should_render(u):
+            if u.alive: return True
+            if u.is_player: return True   # 留尸
+            return u.death_anim_time_ms < self.ENEMY_DEATH_TOTAL_MS
         units = sorted(
-            (u for u in self.battle.all_units if u.alive),
+            (u for u in self.battle.all_units if _should_render(u)),
             key=lambda u: (u.render_y, u is self.battle.current),
         )
         for u in units:
@@ -523,6 +645,10 @@ class BattleScene(Scene):
             if rect.right < 0 or rect.left > self.surface.get_width():
                 continue
             if rect.bottom < 0 or rect.top > self.surface.get_height():
+                continue
+            # 死亡动画 (HP=0 + reaction done + 数字进 flash 触发后启动). 不画影子.
+            if not u.alive and u.death_anim_time_ms >= 0:
+                self._draw_dead_unit(u, cx, cy)
                 continue
             # 影子: 以 tile 中心为中心 (= feet 位置), 脚踩阴影正中
             blit_shadow(self.surface, self._shadow_surf, cx, cy)
@@ -676,17 +802,58 @@ class BattleScene(Scene):
                 pygame.draw.rect(self.surface, self.HIGHLIGHT, rect.inflate(-2, -2), 2)
                 # 朝向小三角 (黄)
                 self._draw_facing_arrow(u, rect)
-            # 头顶 HP (sprite 整体上移到 tile 中心后, HP 紧贴 sprite 顶, 不再用 tile 顶)
-            if u.sprite_key:
-                hp_top = sprite_top_y - 1
-            else:
-                hp_top = r.top - 1
-            hp = self.tiny.render(str(u.hp), True, self.HP_NUM_COLOR)
-            self.surface.blit(hp, hp.get_rect(midbottom=(cx, hp_top)))
+            # HP / MP 持久标签: 仅敌人显示 (己方状态后续移到屏幕顶部 HUD).
+            # 字号 ≈ float text (sbtlfont 14px); 用普通像素字 self.small (13).
+            # 布局 (按截图): 居中堆叠在角色头顶, 从上到下 HP → MP → float text.
+            # 颜色: HP 绿(健康) / 黄(虚弱 < 40%) / 红(??? TODO 触发条件待挖); MP 蓝.
+            if not u.is_player:
+                # float text 顶边 ≈ cy - 24 (baseline=cy-10, height=14).
+                # MP 紧贴 float text 上方, HP 紧贴 MP 上方, 各 ~14px.
+                hp_color = self.HP_WEAKENED_COLOR if u.is_weakened else self.HP_NUM_COLOR
+                label_cx = cx + 8        # 中间偏右
+                mp = self.small.render(str(u.mp), True, self.MP_NUM_COLOR)
+                mp_rect = mp.get_rect(midbottom=(label_cx, cy - 25))
+                self.surface.blit(mp, mp_rect)
+                hp = self.small.render(str(u.hp), True, hp_color)
+                self.surface.blit(hp, hp.get_rect(midbottom=(label_cx, mp_rect.top - 1)))
             # 当前单位 + 移动阶段: 蓝色 M{move} (放 tile 底部)
             if u is self.battle.current and self.battle.phase == Phase.PLAYER_MOVE:
                 mv = self.tiny.render(f"M{u.move}", True, self.MOVE_NUM_COLOR)
                 self.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
+
+    def _draw_dead_unit(self, u, cx: int, cy: int) -> None:
+        """死亡渲染: ps_*04 row 4 三帧 fall (800ms/帧 = 0x14 ticks 来自 exe), 玩家永久躺尸,
+        敌人 hold 后闪烁消失. anchor 复用 walk sprite (站立姿势脚点)."""
+        if not u.sprite_key:
+            return
+        from core.sprites import (
+            get_character_sprite, get_weakened_sprite, weakened_key_from_walk_key,
+        )
+        try:
+            weak = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
+        except FileNotFoundError:
+            return
+        t = max(0, u.death_anim_time_ms)
+        # fall 阶段: 0/1/2 三帧, 每帧 800ms
+        if t < self.DEATH_FALL_TOTAL_MS:
+            frame_idx = t // self.DEATH_FRAME_MS
+        else:
+            frame_idx = 2
+        # 敌人闪烁: fall 结束直接闪 → 消失. (帧停在 frame 2 = 躺平 pose)
+        if not u.is_player:
+            t_post_fall = t - self.DEATH_FALL_TOTAL_MS
+            if t_post_fall >= 0:
+                if (t_post_fall // self.ENEMY_DEATH_FLASH_PERIOD_MS) % 2 == 1:
+                    return
+        frame = weak.death_frame(int(frame_idx))
+        try:
+            walk = get_character_sprite(u.sprite_key)
+            anchor = walk.feet_for_facing(u.facing)
+        except FileNotFoundError:
+            fw, fh = frame.get_size()
+            anchor = (fw // 2, fh)
+        blit_unit(self.surface, frame, anchor,
+                  tile_center_x=cx, tile_center_y=cy)
 
     def _on_engine_frame_change(self, ent, atlas_slot: int, frame_idx: int) -> None:
         """FM/IDLE/SET_FRAME op 触发瞬间记录 total_ticks, render 用来算 sub-frame 插值."""

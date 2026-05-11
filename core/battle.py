@@ -114,6 +114,11 @@ class BattleUnit:
         """HP < 40% (= 原版 FUN_004c2492 的 hp*100/max_hp < 0x28 阈值). 死亡不算虚弱."""
         return self.hp > 0 and self.hp * 100 < self.max_hp * 40
 
+    # 死亡动画计时 (HP=0 + reaction 结束 + 数字进 flash 阶段后开始累计 ms; -1 = 未启动).
+    # 时序源 exe FUN_004399c5 / 00439b42 等: 切 ps_*04 row 4 (frames 12/13/14), 每帧 hold 0x14=20 ticks=800ms.
+    # 玩家: 走完 fall 永久 hold (尸体, 可复活); 敌人: hold 一段后闪烁消失.
+    death_anim_time_ms: int = -1
+
     @property
     def alive(self) -> bool:
         return self.hp > 0
@@ -244,6 +249,8 @@ class TacticsBattle:
         self.level_ups: list[LevelUpReport] = []
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)
         self._pending_enemy_attack: BattleUnit | None = None
+        # 攻击 SIGNAL -110 END 触发后, 等所有动画跑完才切回合 (= advance_turn_when_ready 触发)
+        self._pending_turn_end: bool = False
         # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
         # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
         from core.anim_engine import Engine, SIG_IMPACT, SIG_END
@@ -530,8 +537,16 @@ class TacticsBattle:
         return True
 
     def post_attack_anim(self, attacker: BattleUnit) -> None:
-        """UI 在 attack_seq 跑到 'end' 步骤后调: 清攻击状态, 检查胜负, 结束回合."""
+        """UI 在 attack_seq END 时调: 清攻击状态. *不立即* 切回合 — 标记 pending,
+        scene 等所有动画 (伤害数字 + 死亡动画) 跑完才调 advance_turn_when_ready()."""
         self._clear_pending_attack(attacker)
+        self._pending_turn_end = True
+
+    def advance_turn_when_ready(self) -> None:
+        """scene 在 _units_animating() 全部清空后调; 处理 pending turn 切换."""
+        if not self._pending_turn_end:
+            return
+        self._pending_turn_end = False
         if self._check_end():
             return
         self.end_unit_turn()
