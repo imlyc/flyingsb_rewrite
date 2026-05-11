@@ -44,6 +44,11 @@ def pick_locomotion_frame(
         # 帧时 = 2 × idle_period_ms / walk_frames (CCROW 4 帧 → 200ms/帧, 配 idle_period_ms=400).
         # 累加两路时间避免静↔动切换重置
         t = anim.anim_time_ms + anim.idle_time_ms
+        # 虚弱优先于飞行扇翅膀: HP<40% 时切到 ps_*04 ping-pong (跟地面单位同节奏).
+        # 用累加 t 避免 reaction 间隙的时间重置.
+        if weakened_sprite is not None:
+            phase = int(t // weakened_period_ms) % 2
+            return weakened_sprite.frame_for_facing(facing, phase), walk_sprite.feet_for_facing(facing)
         flap_period_ms = max(1, idle_period_ms * 2 // walk_sprite.walk_frames)
         anim_idx = int(t // flap_period_ms) % walk_sprite.walk_frames
         return walk_sprite.frame_for_facing(facing, anim_idx), walk_sprite.feet_for_facing(facing)
