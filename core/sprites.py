@@ -290,6 +290,67 @@ def idle_key_from_walk_key(walk_key: str) -> str:
     return walk_key[:-2] + "06"
 
 
+def weakened_key_from_walk_key(walk_key: str) -> str:
+    """'ps_CSON100' -> 'ps_CSON104'; ps_*04 atlas 是 HP<40% 虚弱态 + 第 5 行死亡帧."""
+    return walk_key[:-2] + "04"
+
+
+# ---------- ps_*04 虚弱/死亡 atlas ----------
+# 192×480 = 3 列 × 5 行, 单帧 64×96. 来自 exe FUN_004c2492 case 0 weakened 分支:
+#   行 0..3 = 4 朝向 (UP/DN/LF/RT), 每行 3 帧
+#     - 帧 0 = 静止/初始姿势 (虚弱态不用, 留给特殊场景)
+#     - 帧 1 / 帧 2 = ping-pong 动画 (HP<40% 时按周期切换)
+#   行 4 = 死亡帧 (3 帧, 玩家躺尸 / 敌人闪烁消失用, 实现待 death 阶段)
+WEAKENED_DIRECTION_ROWS: dict[Direction, int] = {
+    Direction.UP:    0,
+    Direction.DOWN:  1,
+    Direction.LEFT:  2,
+    Direction.RIGHT: 3,
+}
+WEAKENED_PING_PONG_COLS = (1, 2)   # frame 0 reserved
+
+
+@dataclass
+class WeakenedSprite:
+    """ps_*04 atlas wrapper: 4 朝向 ping-pong 帧 + 死亡帧."""
+    sheet: SpriteSheet
+    direction_rows: dict[Direction, int]
+
+    def frame(self, direction: Direction, phase: int = 0) -> pygame.Surface:
+        row = self.direction_rows[direction]
+        col = WEAKENED_PING_PONG_COLS[phase % len(WEAKENED_PING_PONG_COLS)]
+        return self.sheet.frame(col, row)
+
+    def frame_for_facing(self, facing: tuple[int, int], phase: int = 0) -> pygame.Surface:
+        return self.frame(facing_to_direction(facing), phase)
+
+    def feet_for_direction(self, direction: Direction) -> tuple[int, int]:
+        """anchor 检测 col=1 row[direction] (ping-pong 第一帧, 同方向所有帧共用)."""
+        row = self.direction_rows[direction]
+        return self.sheet.feet_anchor(WEAKENED_PING_PONG_COLS[0], row)
+
+    def feet_for_facing(self, facing: tuple[int, int]) -> tuple[int, int]:
+        return self.feet_for_direction(facing_to_direction(facing))
+
+
+_WEAKENED_CACHE: dict[str, WeakenedSprite] = {}
+
+
+def get_weakened_sprite(resource_name: str) -> WeakenedSprite:
+    if resource_name not in _WEAKENED_CACHE:
+        path = SPRITES_DIR / f"{resource_name}.pcx"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        surf = load_image(path, color_key=AUTO)
+        # 显式 64×96 (= DEFAULT_CHAR_FRAME_SIZE), atlas 自动算 cols×rows = 3×5
+        sheet = SpriteSheet(surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
+        _WEAKENED_CACHE[resource_name] = WeakenedSprite(
+            sheet=sheet,
+            direction_rows=WEAKENED_DIRECTION_ROWS,
+        )
+    return _WEAKENED_CACHE[resource_name]
+
+
 _IDLE_CACHE: dict[str, IdleSprite] = {}
 
 

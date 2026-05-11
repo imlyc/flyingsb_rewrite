@@ -616,17 +616,25 @@ class BattleScene(Scene):
                         except (FileNotFoundError, IndexError):
                             frame = cs.frame_for_facing(u.facing, 0)
                 else:
-                    # 通用 locomotion: 走路 / 待机, 用共享 picker
+                    # 通用 locomotion: 走路 / 待机 / (HP<40%) 虚弱, 用共享 picker
                     flying = is_flying_sprite(u.sprite_key)
                     try:
                         idle_sprite = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
                     except FileNotFoundError:
                         idle_sprite = None
+                    weakened_sprite = None
+                    if u.is_weakened:
+                        from core.sprites import get_weakened_sprite, weakened_key_from_walk_key
+                        try:
+                            weakened_sprite = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
+                        except FileNotFoundError:
+                            pass    # 该角色无 ps_*04 atlas, 退回普通 walk/idle
                     frame, anchor = pick_locomotion_frame(
                         cs, idle_sprite, u.facing, u.anim,
                         walk_period_ms=self.WALK_FRAME_PERIOD_MS,
                         idle_period_ms=self.IDLE_FRAME_PERIOD_MS,
                         flying=flying,
+                        weakened_sprite=weakened_sprite,
                     )
                 # 攻击中不要变半透明 (会让玩家误以为已结束行动)
                 alpha = 140 if (u.has_acted and not u.is_attacking) else None

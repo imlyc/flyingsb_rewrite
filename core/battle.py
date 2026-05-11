@@ -110,6 +110,11 @@ class BattleUnit:
         return self.entity is not None and self.entity.is_playing()
 
     @property
+    def is_weakened(self) -> bool:
+        """HP < 40% (= 原版 FUN_004c2492 的 hp*100/max_hp < 0x28 阈值). 死亡不算虚弱."""
+        return self.hp > 0 and self.hp * 100 < self.max_hp * 40
+
+    @property
     def alive(self) -> bool:
         return self.hp > 0
 

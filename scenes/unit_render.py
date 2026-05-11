@@ -12,6 +12,7 @@ from core.sprites import (
     CharacterSprite,
     Direction,
     IdleSprite,
+    WeakenedSprite,
     facing_to_direction,
 )
 
@@ -27,12 +28,16 @@ def pick_locomotion_frame(
     walk_period_ms: int = 80,
     idle_period_ms: int = 400,
     flying: bool = False,
+    weakened_sprite: WeakenedSprite | None = None,
+    weakened_period_ms: int = 280,
 ) -> tuple[pygame.Surface, tuple[int, int]]:
     """根据 (facing, anim) 返回 (frame, feet_anchor).
-    优先级: 走路帧 > 待机呼吸帧.
+    优先级: 走路帧 > 虚弱帧 (HP<40%, 仅站立时) > 待机呼吸帧.
     anchor 按 *方向* 共享 (sprite.feet_for_facing), 同方向所有动画帧共用 — 防迈步左右晃.
-    flying=True: 飞行单位待机/移动都用 walk atlas 循环 (扇翅膀), 节奏 = idle_period_ms
-    (= 其他角色待机呼吸节奏), 不走 idle atlas 行 0/1.
+    虚弱帧的 anchor 复用 walk_sprite 的 (= 站立姿势的脚点), 避免半蹲姿势自动检测偏移.
+    flying=True: 飞行单位待机/移动都用 walk atlas 循环 (扇翅膀), 节奏 = idle_period_ms.
+    weakened_sprite!=None: 站立时用 ps_*04 ping-pong (col 1↔2, 周期 280ms);
+    移动时仍用走路帧 (虚弱不影响移动姿势, 跟原版一致).
     """
     if flying:
         # 飞行: 不区分静止/移动, 整圈扇翅膀总时长 = 其他角色呼吸总时长 (2 帧 × idle_period_ms).
@@ -43,8 +48,14 @@ def pick_locomotion_frame(
         anim_idx = int(t // flap_period_ms) % walk_sprite.walk_frames
         return walk_sprite.frame_for_facing(facing, anim_idx), walk_sprite.feet_for_facing(facing)
     if anim.anim_time_ms > 0:
+        # 移动中: 走路帧优先 (虚弱状态也直立移动, 跟原版一致)
         anim_idx = int(anim.anim_time_ms // walk_period_ms) % walk_sprite.walk_frames
         return walk_sprite.frame_for_facing(facing, anim_idx), walk_sprite.feet_for_facing(facing)
+    if weakened_sprite is not None:
+        # 站立 + 虚弱: ps_*04 ping-pong. anchor 复用 walk sprite (= 站立姿势脚点),
+        # 不用 weakened 自己的检测 (蹲姿身体偏移会让脚点 x 跑偏).
+        phase = int(anim.idle_time_ms // weakened_period_ms) % 2
+        return weakened_sprite.frame_for_facing(facing, phase), walk_sprite.feet_for_facing(facing)
     if idle_sprite is not None:
         phase = int(anim.idle_time_ms // idle_period_ms) % 2
         return idle_sprite.frame_for_facing(facing, phase), idle_sprite.feet_for_facing(facing)
