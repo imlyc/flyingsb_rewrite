@@ -453,6 +453,8 @@ class BattleScene(Scene):
         if event.type != pygame.KEYDOWN:
             return True
         if self.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
+            if self._death_animations_pending():
+                return True   # 死亡动画跑完再接 banner 的输入
             self._advance_end_screen()
             return True
         if self.battle.phase == Phase.ENEMY_TURN:
@@ -540,8 +542,9 @@ class BattleScene(Scene):
         self._draw_hud()
         # 7) 日志
         self._draw_log()
-        # 8) 胜负
-        if self.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
+        # 8) 胜负 (等死亡动画跑完再出 banner, 否则技能秒杀最后一个敌人会跳过死亡演出)
+        if (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
+                and not self._death_animations_pending()):
             self._draw_end_banner()
 
     def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:
