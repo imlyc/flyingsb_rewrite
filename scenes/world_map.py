@@ -20,7 +20,7 @@ from scenes.unit_render import blit_unit, pick_locomotion_frame
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 
-TILE_SIZE = 48
+from core.sprites import TILE_SIZE  # 单一权威源
 MAP_W = 30
 MAP_H = 30
 WALK_SPEED_PX_PER_SEC = 480.0   # 10 tile/秒 (= TILE_SIZE * 10)

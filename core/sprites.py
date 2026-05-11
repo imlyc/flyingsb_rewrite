@@ -23,6 +23,9 @@ import pygame
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 SPRITES_DIR = ASSETS_DIR / "sprites"
+
+# 世界 tile 大小 (像素). 场景渲染、anchor 计算都从这里取, 改一次即可全工程同步.
+TILE_SIZE = 48
 UI_DIR = ASSETS_DIR / "ui"
 
 # ----- 朝向 -----
@@ -112,12 +115,10 @@ class SpriteSheet:
         return [self.frame(c, row) for c in range(self.cols)]
 
     def feet_anchor(self, col: int, row: int) -> tuple[int, int]:
-        """ps_ atlas 的 sprite 是按"水平居中 + 脚靠近 y≈88"摆放的 (原版美术约定),
-        各方向、各帧位置一致 — 直接返回固定 anchor, 不再扫底部像素.
-        老的 detect_feet_anchor 会把翅尖当脚 (CCROW LEFT/RIGHT 翅尖在一侧 → anchor_x 偏 ±25px).
-        实测 ps_C*00 / ps_C*06 各方向 bbox: cx≈30-33, bottom≈86-90, (32, 88) 兼顾大多数.
-        """
-        return (self.frame_w // 2, self.frame_h - 8)
+        """ps_ atlas 的每个 cell 美术已预先排版好 (居中 + 底部对齐).
+        anchor 让 cell 底沿对齐到 tile 底沿: anchor_y = frame_h - TILE_SIZE/2.
+        blit_y = tile_center_y - anchor_y → sprite 底 = tile_center_y + TILE_SIZE/2 = tile 底."""
+        return (self.frame_w // 2, self.frame_h - TILE_SIZE // 2)
 
 
 # ----- 角色 atlas -----
@@ -294,26 +295,9 @@ class WeakenedSprite:
         return self.sheet.frame(idx % WEAKENED_DEATH_FRAMES, WEAKENED_DEATH_ROW)
 
     def death_anchor(self, idx: int = 1) -> tuple[int, int]:
-        """corpse 帧的 body 中心 anchor (= 让躺尸居中填满 tile, 不像站立姿势那样用脚点).
-        扫像素找非透明 BBox, 取中心. lazily cached."""
-        if not hasattr(self, '_death_anchor_cache'):
-            self._death_anchor_cache = {}
-        if idx not in self._death_anchor_cache:
-            fr = self.death_frame(idx).convert_alpha()
-            min_x = fr.get_width(); max_x = 0
-            min_y = fr.get_height(); max_y = 0
-            for x in range(fr.get_width()):
-                for y in range(fr.get_height()):
-                    if fr.get_at((x, y))[3] > 0:
-                        if x < min_x: min_x = x
-                        if x > max_x: max_x = x
-                        if y < min_y: min_y = y
-                        if y > max_y: max_y = y
-            if max_x < min_x:   # 空帧 fallback
-                self._death_anchor_cache[idx] = (fr.get_width() // 2, fr.get_height() // 2)
-            else:
-                self._death_anchor_cache[idx] = ((min_x + max_x) // 2, (min_y + max_y) // 2)
-        return self._death_anchor_cache[idx]
+        """corpse 帧 anchor — 跟 feet_anchor 用同一个 (32, 88) 固定锚点 (ps_ 美术约定:
+        躺尸帧也按"水平居中 + 底部对齐"摆放, 不再扫 bbox)."""
+        return self.sheet.feet_anchor(0, 0)
 
     def feet_for_direction(self, direction: Direction) -> tuple[int, int]:
         """anchor 检测 col=1 row[direction] (ping-pong 第一帧, 同方向所有帧共用)."""

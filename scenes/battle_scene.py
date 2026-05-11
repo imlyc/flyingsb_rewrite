@@ -47,7 +47,7 @@ from scenes.menu import load_chinese_font
 if TYPE_CHECKING:
     from scenes.world_map import WorldMapScene
 
-TILE = 48  # 世界 tile 大小, 与 world_map.TILE_SIZE 同步
+from core.sprites import TILE_SIZE as TILE  # 单一权威源
 
 # HUD
 HUD_X = 12
