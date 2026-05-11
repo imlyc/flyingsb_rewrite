@@ -624,8 +624,8 @@ class BattleScene(Scene):
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
     # 敌人 fall 完成尸体后闪烁多次再消失. 150ms 半周期 = 300ms/cycle = 清晰可见.
-    ENEMY_DEATH_FLASH_MS = 2000
-    ENEMY_DEATH_FLASH_PERIOD_MS = 150
+    ENEMY_DEATH_FLASH_MS = 1000
+    ENEMY_DEATH_FLASH_PERIOD_MS = 80
     ENEMY_DEATH_TOTAL_MS = DEATH_FALL_TOTAL_MS + ENEMY_DEATH_FLASH_MS
 
     def _draw_units(self, cam_x: int, cam_y: int) -> None:
