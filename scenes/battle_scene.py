@@ -47,7 +47,7 @@ from scenes.menu import load_chinese_font
 if TYPE_CHECKING:
     from scenes.world_map import WorldMapScene
 
-from core.sprites import TILE_W, TILE_H  # 单一权威源
+from core.sprites import TILE_W, TILE_H, load_shadow  # 单一权威源
 
 # HUD
 HUD_X = 12
@@ -298,9 +298,8 @@ class BattleScene(Scene):
         return s
 
     def _make_shadow(self) -> pygame.Surface:
-        s = pygame.Surface((TILE_W, TILE_H // 2), pygame.SRCALPHA)
-        pygame.draw.ellipse(s, self.SHADOW, s.get_rect())
-        return s
+        # 用原版 SHADOW.png 的 band 4 (29×11, 普通体型). boss 可改 SHADOW_BOSS=6.
+        return load_shadow()
 
     # ------- 生命周期 -------
     def on_enter(self) -> None:

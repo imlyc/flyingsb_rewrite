@@ -31,6 +31,39 @@ TILE_W = 64
 TILE_H = 48
 UI_DIR = ASSETS_DIR / "ui"
 
+# 原版预渲染阴影 (assets/ui/SHADOW.png 内 7 个递增椭圆 band, 按 unit 体型选用):
+# band 0 最小 (虫/小怪), band 4 普通角色, band 6 最大 (boss).
+# (x, y, w, h) 是 SHADOW.png 里每个 band 的子区, 颜色 = 纯黑 (0,2,7), 背景 colorkey (0,163,0).
+SHADOW_BANDS: list[tuple[int, int, int, int]] = [
+    (19, 28,  11,  3),
+    (17, 47,  15,  5),
+    (15, 66,  19,  7),
+    (12, 85,  25,  9),
+    (10, 104, 29, 11),
+    ( 7, 122, 35, 15),
+    ( 4, 141, 41, 17),
+]
+SHADOW_NORMAL = 4   # 普通玩家/敌人体型
+SHADOW_BOSS = 6
+_shadow_atlas: pygame.Surface | None = None
+_shadow_cache: dict[tuple[int, int], pygame.Surface] = {}
+
+
+def load_shadow(size_idx: int = SHADOW_NORMAL, alpha: int = 140) -> pygame.Surface:
+    """加载原版 SHADOW.png 第 size_idx 号阴影 band, 整体 alpha 调到 alpha (0-255)."""
+    global _shadow_atlas
+    if _shadow_atlas is None:
+        _shadow_atlas = pygame.image.load(str(UI_DIR / "SHADOW.png")).convert()
+        _shadow_atlas.set_colorkey((0, 163, 0))
+    key = (size_idx, alpha)
+    if key not in _shadow_cache:
+        x, y, w, h = SHADOW_BANDS[size_idx]
+        band = _shadow_atlas.subsurface(pygame.Rect(x, y, w, h)).copy()
+        band.set_colorkey((0, 163, 0))
+        band.set_alpha(alpha)
+        _shadow_cache[key] = band
+    return _shadow_cache[key]
+
 # ----- 朝向 -----
 class Direction(Enum):
     DOWN = (0, 1)
