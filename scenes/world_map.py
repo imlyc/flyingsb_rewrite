@@ -397,7 +397,7 @@ class WorldMapScene(Scene):
         return out
 
     def _start_battle(self, enemies: list[BattleUnit]) -> None:
-        from scenes.battle_scene import BattleScene
+        from scenes.battle import BattleScene
         party = self._build_party()
         battle_map = self._make_battle_map_from_world()
         center = (self.player_x, self.player_y)
