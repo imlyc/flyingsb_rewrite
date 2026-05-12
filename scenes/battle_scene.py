@@ -151,7 +151,8 @@ class FloatText:
                 surf, ax, ay = sbtlfont_frame(frame_idx)
             except (FileNotFoundError, IndexError):
                 continue
-            x = base_x + i * self.DIGIT_STRIDE_PX
+            # monospace 10px 槽 + ax 把窄字符居中 (I/1 宽 6, ax=-2 → 左 padding 2px).
+            x = base_x + i * self.DIGIT_STRIDE_PX - ax
             y = base_y - dy
             surface.blit(surf, (x, y - surf.get_height()))
 
