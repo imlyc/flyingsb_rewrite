@@ -152,9 +152,9 @@ class SpriteSheet:
 
     def feet_anchor(self, col: int, row: int) -> tuple[int, int]:
         """ps_ atlas 的每个 cell 美术已预先排版好 (居中 + 底部对齐).
-        anchor 让 cell 底沿对齐到 tile 底沿: anchor_y = frame_h - TILE_H/2.
-        blit_y = tile_center_y - anchor_y → sprite 底 = tile_center_y + TILE_H/2 = tile 底."""
-        return (self.frame_w // 2, self.frame_h - TILE_H // 2)
+        基准: cell 底沿对齐 tile 底沿 (anchor_y = frame_h - TILE_H/2).
+        额外上移 12 px 让 sprite 视觉脚点落在阴影中心 (cell 底部留白 + 阴影画在 tile 中心)."""
+        return (self.frame_w // 2, self.frame_h - TILE_H // 2 + 12)
 
 
 # ----- 角色 atlas -----
