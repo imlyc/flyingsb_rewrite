@@ -1,92 +1,38 @@
-"""世界地图场景: 30x30 占位 tile, WASD/方向键移动, 镜头跟随玩家."""
+"""世界地图场景: 30x30 占位 tile, WASD/方向键移动, 镜头跟随玩家.
+
+战斗触发逻辑在 battle_launch.py, 地形数据在 terrain.py.
+"""
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from enum import Enum
 
 import pygame
 
 from core.anim_state import AnimationState
 from core.audio_manager import AudioManager
-from core.battle.data import BattleMap, BattleUnit
-from core.battle.setup import make_enemy, unit_from_character
-from core.battle.tactics import TacticsBattle
-from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
 from core.character_sprites import sprite_resource
 from core.movement_input import DirectionalHold
 from core.save_manager import SaveData
-from core.sprites import facing_to_direction, get_character_sprite, get_idle_sprite, idle_key_from_walk_key
-from scenes.unit_render import blit_unit, pick_locomotion_frame
+from core.sprites.atlas_classes import idle_key_from_walk_key
+from core.sprites.base import TILE_W, TILE_H
+from core.sprites.loaders import get_character_sprite, get_idle_sprite
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
+from scenes.unit_render import blit_unit, pick_locomotion_frame
+from scenes.world_map import battle_launch
+from scenes.world_map.terrain import (
+    MAP_H,
+    MAP_W,
+    TILES,
+    TerrainType,
+    build_test_map,
+)
 
-from core.sprites import TILE_W, TILE_H  # 单一权威源
-MAP_W = 30
-MAP_H = 30
+
 WALK_SPEED_TILES_PER_SEC = 10.0   # 10 tile/秒, 各轴像素速度 = 该轴 tile 尺寸 * 这里
 WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
 WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
-RANDOM_BATTLE_EVERY = 3
-RANDOM_BATTLE_CHANCE = 0.00
-PARTY_SIZE = 2
-
-
-class TerrainType(Enum):
-    GRASS = "grass"
-    WATER = "water"
-    MOUNTAIN = "mountain"
-    TOWN = "town"
-    DUNGEON = "dungeon"
-
-
-@dataclass(frozen=True)
-class Tile:
-    terrain: TerrainType
-    color: tuple[int, int, int]
-    passable: bool
-
-
-TILES: dict[TerrainType, Tile] = {
-    TerrainType.GRASS:    Tile(TerrainType.GRASS,    (76, 160, 80),   True),
-    TerrainType.WATER:    Tile(TerrainType.WATER,    (50, 100, 200),  False),
-    TerrainType.MOUNTAIN: Tile(TerrainType.MOUNTAIN, (130, 130, 130), False),
-    TerrainType.TOWN:     Tile(TerrainType.TOWN,     (220, 200, 80),  True),
-    TerrainType.DUNGEON:  Tile(TerrainType.DUNGEON,  (180, 60, 60),   True),
-}
-
-
-def _build_test_map() -> list[list[TerrainType]]:
-    """30x30 测试地图: 边缘水, 中部山脉带, 散布城镇/地牢."""
-    G, W, M, T, D = (
-        TerrainType.GRASS, TerrainType.WATER, TerrainType.MOUNTAIN,
-        TerrainType.TOWN, TerrainType.DUNGEON,
-    )
-    grid = [[G for _ in range(MAP_W)] for _ in range(MAP_H)]
-
-    # 边缘一圈水
-    for x in range(MAP_W):
-        grid[0][x] = grid[MAP_H - 1][x] = W
-    for y in range(MAP_H):
-        grid[y][0] = grid[y][MAP_W - 1] = W
-
-    # 中部一条山脉带 (留缺口)
-    for x in range(3, MAP_W - 3):
-        if x in (10, 11, 18, 19):
-            continue  # 通行缺口
-        grid[14][x] = M
-        grid[15][x] = M
-
-    # 几个城镇
-    for (x, y) in [(5, 5), (24, 6), (8, 22), (22, 24)]:
-        grid[y][x] = T
-
-    # 两个地牢
-    for (x, y) in [(15, 8), (5, 18)]:
-        grid[y][x] = D
-
-    return grid
 
 
 class WorldMapScene(Scene):
@@ -105,7 +51,7 @@ class WorldMapScene(Scene):
         super().__init__(surface)
         self.audio = audio
         self.save = save
-        self.grid = _build_test_map()
+        self.grid = build_test_map()
         # 玩家 tile 坐标 (静止时); 移动时已经更新为目标 tile, 用 subpx/py 做插值.
         self.player_x = 3
         self.player_y = 3
@@ -188,7 +134,7 @@ class WorldMapScene(Scene):
         if self.subpx == 0 and self.subpy == 0:
             self.moving_dir = (0, 0)
             self.steps += 1
-            self._maybe_trigger_battle()
+            battle_launch.maybe_trigger_battle(self)
 
     def _poll_input_for_next_step(self, dt_ms: int) -> None:
         """复刻原版语义: 引擎里 <DIR> 与 <WALK> 是独立 primitive.
@@ -317,133 +263,3 @@ class WorldMapScene(Scene):
             True, self.HUD_TEXT,
         )
         self.surface.blit(text, (10, 8))
-
-    # ------- 战斗触发 -------
-    def _build_party(self) -> list[BattleUnit]:
-        if self.save is not None:
-            chars: list[BattleUnit] = []
-            for slot in PLAYABLE_SLOTS:
-                ch = self.save.characters.get(slot)
-                if ch is None or ch.MaxHP <= 0:
-                    continue
-                chars.append(unit_from_character(CHARACTER_NAMES[slot], ch))
-                if len(chars) >= PARTY_SIZE:
-                    break
-            if chars:
-                return chars
-        # 无存档时的默认队伍
-        return [
-            BattleUnit(name="孙悟空", level=1, max_hp=30, hp=30, max_mp=10, mp=10, sg=20,
-                       attack=22, defence=12, agile=50, move=4, is_player=True,
-                       color=(120, 200, 230),
-                       sprite_key=sprite_resource("孙悟空")),
-            BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30, max_mp=15, mp=15, sg=18,
-                       attack=24, defence=11, agile=40, move=4, is_player=True,
-                       color=(160, 160, 200),
-                       sprite_key=sprite_resource("蒙面人")),
-        ]
-
-    def _maybe_trigger_battle(self) -> None:
-        # 走到地牢: 两个地牢分别对应不同敌人组
-        if TILES[self.grid[self.player_y][self.player_x]].terrain == TerrainType.DUNGEON:
-            pos = (self.player_x, self.player_y)
-            if pos == (5, 18):
-                self._start_battle([make_enemy("乌鸦怪"), make_enemy("乌鸦怪")])
-            else:  # (15, 8)
-                self._start_battle([make_enemy("黄色怪"), make_enemy("骷髅")])
-            return
-        # 每 N 步骰: 随机战斗
-        if self.steps % RANDOM_BATTLE_EVERY == 0 and self.rng.random() < RANDOM_BATTLE_CHANCE:
-            template = self.rng.choice(["骷髅", "乌鸦怪"])
-            count = self.rng.randint(1, 2)
-            enemies = [make_enemy(template) for _ in range(count)]
-            self._start_battle(enemies)
-
-    def _make_battle_map_from_world(self) -> BattleMap:
-        """把整张世界地图当战场: 不可通行 (水/山) → 障碍物."""
-        bm = BattleMap(MAP_W, MAP_H)
-        for y in range(MAP_H):
-            for x in range(MAP_W):
-                if not TILES[self.grid[y][x]].passable:
-                    bm.obstacles.add((x, y))
-        return bm
-
-    def _scatter_positions(
-        self, center: tuple[int, int], count: int, ring_min: int, ring_max: int,
-        avoid: set[tuple[int, int]],
-    ) -> list[tuple[int, int]]:
-        """在 center 周围 ring_min..ring_max 步范围内挑 count 个空格."""
-        cx, cy = center
-        cands = []
-        for r in range(ring_min, ring_max + 1):
-            for dy in range(-r, r + 1):
-                for dx in range(-r, r + 1):
-                    if abs(dx) + abs(dy) != r:
-                        continue
-                    p = (cx + dx, cy + dy)
-                    if not (0 <= p[0] < MAP_W and 0 <= p[1] < MAP_H):
-                        continue
-                    if not TILES[self.grid[p[1]][p[0]]].passable:
-                        continue
-                    if p in avoid:
-                        continue
-                    cands.append(p)
-        self.rng.shuffle(cands)
-        out: list[tuple[int, int]] = []
-        for p in cands:
-            if p in out:
-                continue
-            out.append(p)
-            if len(out) >= count:
-                break
-        return out
-
-    def _start_battle(self, enemies: list[BattleUnit]) -> None:
-        from scenes.battle import BattleScene
-        party = self._build_party()
-        battle_map = self._make_battle_map_from_world()
-        center = (self.player_x, self.player_y)
-
-        # 玩家方在中心 + 周围 1-2 圈
-        used: set[tuple[int, int]] = set()
-        player_positions: list[tuple[int, int]] = [center]
-        used.add(center)
-        if len(party) > 1:
-            extras = self._scatter_positions(center, len(party) - 1, 1, 2, used)
-            for p in extras:
-                used.add(p)
-                player_positions.append(p)
-            # 不够就硬塞 center (重叠); 一般 4 人队伍在 1-2 圈足够
-            while len(player_positions) < len(party):
-                player_positions.append(center)
-
-        # 敌人在外圈 4-7 步
-        enemy_positions = self._scatter_positions(center, len(enemies), 4, 7, used)
-        # 不够就再放宽
-        if len(enemy_positions) < len(enemies):
-            more = self._scatter_positions(center, len(enemies), 8, 12, used | set(enemy_positions))
-            enemy_positions.extend(more)
-        while len(enemy_positions) < len(enemies):
-            # 兜底: 找任意空格
-            for y in range(MAP_H):
-                for x in range(MAP_W):
-                    if (x, y) not in used and TILES[self.grid[y][x]].passable:
-                        enemy_positions.append((x, y))
-                        used.add((x, y))
-                        if len(enemy_positions) >= len(enemies):
-                            break
-                if len(enemy_positions) >= len(enemies):
-                    break
-            break  # 防止死循环
-
-        battle = TacticsBattle(
-            party, enemies,
-            battle_map=battle_map,
-            rng=self.rng,
-            player_positions=player_positions,
-            enemy_positions=enemy_positions,
-        )
-        self.next_scene = BattleScene(
-            self.surface, self.audio, battle,
-            world_map=self, return_scene=self,
-        )

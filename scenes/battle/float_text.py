@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pygame
 
-from core.sprites import (
+from core.sprites.loaders import (
     SBTLFONT_DAMAGE_BASE_FRAME,
     SBTLFONT_MISS_FRAMES,
 )
@@ -85,7 +85,7 @@ class FloatText:
     def draw(self, surface: pygame.Surface,
              big_font: pygame.font.Font, small_font: pygame.font.Font,
              cam_x: int, cam_y: int, now_ms: int) -> None:
-        from core.sprites import sbtlfont_frame
+        from core.sprites.loaders import sbtlfont_frame
         total_w = (self._n - 1) * self.DIGIT_STRIDE_PX + 10
         base_x = self.world_x - cam_x - total_w // 2
         base_y = self.world_y - cam_y

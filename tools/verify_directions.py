@@ -21,7 +21,9 @@ pygame.init()
 pygame.display.set_mode((1, 1))
 
 from core.character_sprites import CHARACTER_SPRITES, sprite_resource  # noqa: E402
-from core.sprites import DEFAULT_DIRECTION_ROWS, Direction, load_character_sprite  # noqa: E402
+from core.sprites.atlas_classes import DEFAULT_DIRECTION_ROWS  # noqa: E402
+from core.sprites.base import Direction  # noqa: E402
+from core.sprites.loaders import load_character_sprite  # noqa: E402
 
 # 反查: row -> Direction 名称
 ROW_TO_DIR: dict[int, str] = {row: d.name for d, row in DEFAULT_DIRECTION_ROWS.items()}

@@ -9,7 +9,7 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from core.anim_engine import Entity
+from core.anim_engine.entity import Entity
 from core.anim_state import AnimationState
 
 

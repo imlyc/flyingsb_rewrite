@@ -1,5 +1,7 @@
 """快速 smoke test: 跑垂直斬 UP seq 看事件流."""
-from anim_engine import Engine, Entity, encode_op
+from anim_engine.engine import Engine
+from anim_engine.entity import Entity
+from anim_engine.bytecode import encode_op
 from raw_attack_seqs import ATK_C  # any seq table works
 
 
@@ -77,7 +79,7 @@ def test_unknown_op_skipped():
 
 def test_legacy_atk_c():
     """跑实际游戏数据 ATK_C UP (美娜普攻 6 帧/dir)."""
-    from anim_engine import tuple_to_bytecode
+    from anim_engine.bytecode import tuple_to_bytecode
     from raw_attack_seqs import ATK_C
     eng = Engine()
 

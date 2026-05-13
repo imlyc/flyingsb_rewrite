@@ -13,16 +13,13 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from core.sprites import (
+from core.sprites.atlas_classes import (
     DEFAULT_IDLE_DIRECTION_COLS,
-    TILE_W,
-    TILE_H,
-    facing_to_direction,
-    get_character_sprite,
-    get_idle_sprite,
     idle_key_from_walk_key,
     is_flying_sprite,
 )
+from core.sprites.base import TILE_W, TILE_H, facing_to_direction
+from core.sprites.loaders import get_character_sprite, get_idle_sprite
 from scenes.unit_render import blit_shadow, blit_unit, pick_locomotion_frame
 
 if TYPE_CHECKING:
@@ -132,7 +129,8 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
             idle_sprite = None
         weakened_sprite = None
         if u.is_weakened:
-            from core.sprites import get_weakened_sprite, weakened_key_from_walk_key
+            from core.sprites.atlas_classes import weakened_key_from_walk_key
+            from core.sprites.loaders import get_weakened_sprite
             try:
                 weakened_sprite = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
             except FileNotFoundError:
@@ -182,7 +180,7 @@ def _resolve_attack_frame(scene: "BattleScene", u, cs):
     返回 (frame_surface, anchor). 找不到对应 fm 资源时退到 ps_*06 row 2 (出招前倾)."""
     from core.character_sprites import attack_fm_atlas, attack_total_frames
     from core.attack_seq import frames_per_dir, ATTACK_TICK_MS
-    from core.sprites import get_fm_surface
+    from core.sprites.loaders import get_fm_surface
     from core.fm_frames import FM_FRAMES, cols_in_atlas
     from core.raw_attack_seqs import atlas_resource
 
@@ -251,9 +249,8 @@ def draw_dying_pose(scene: "BattleScene", u, cx: int, cy: int) -> None:
     防止从站立姿势直接进死亡动画 (= 不"站起来再倒下"). anchor 复用 walk feet."""
     if not u.sprite_key:
         return
-    from core.sprites import (
-        get_weakened_sprite, weakened_key_from_walk_key,
-    )
+    from core.sprites.atlas_classes import weakened_key_from_walk_key
+    from core.sprites.loaders import get_weakened_sprite
     try:
         weak = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
         walk = get_character_sprite(u.sprite_key)
@@ -280,9 +277,8 @@ def draw_dead_unit(scene: "BattleScene", u, cx: int, cy: int) -> None:
     敌人 hold 后闪烁消失 (闪烁的 off 帧由 dead_blink_off 拦在调用前)."""
     if not u.sprite_key:
         return
-    from core.sprites import (
-        get_weakened_sprite, weakened_key_from_walk_key,
-    )
+    from core.sprites.atlas_classes import weakened_key_from_walk_key
+    from core.sprites.loaders import get_weakened_sprite
     try:
         weak = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
     except FileNotFoundError:

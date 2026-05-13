@@ -11,7 +11,7 @@ import pygame
 
 from core.battle.data import BattleUnit, LevelUpReport, Phase
 from core.character import UNSET
-from core.sprites import TILE_W, TILE_H
+from core.sprites.base import TILE_W, TILE_H
 
 if TYPE_CHECKING:
     from scenes.battle.scene import BattleScene

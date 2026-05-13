@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pygame
 
 from core.battle.data import Phase
-from core.sprites import TILE_W, TILE_H
+from core.sprites.base import TILE_W, TILE_H
 from scenes.battle import input as input_mod
 from scenes.battle.float_text import FloatText
 

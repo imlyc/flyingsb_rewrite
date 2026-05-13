@@ -1,0 +1,148 @@
+"""资源加载入口 + 缓存. PCX 磁盘读取只发生一次.
+
+公开:
+  load_character_sprite / get_character_sprite
+  get_idle_sprite / get_weakened_sprite
+  get_fm_surface / get_sbtlfont_surface / sbtlfont_frame
+  clear_cache
+"""
+
+from __future__ import annotations
+
+import pygame
+
+from core.sprites.base import (
+    AUTO,
+    DEFAULT_CHAR_FRAME_SIZE,
+    Direction,
+    SPRITES_DIR,
+    SpriteSheet,
+    load_image,
+)
+from core.sprites.atlas_classes import (
+    CharacterSprite,
+    DEFAULT_DIRECTION_ROWS,
+    DEFAULT_IDLE_DIRECTION_COLS,
+    IdleSprite,
+    WEAKENED_DIRECTION_ROWS,
+    WeakenedSprite,
+    is_flying_sprite,
+)
+
+
+# ----- 角色 walk atlas -----
+_CACHE: dict[str, CharacterSprite] = {}
+
+
+def load_character_sprite(
+    resource_name: str,
+    frame_w: int = DEFAULT_CHAR_FRAME_SIZE[0],
+    frame_h: int = DEFAULT_CHAR_FRAME_SIZE[1],
+    direction_rows: dict[Direction, int] | None = None,
+) -> CharacterSprite:
+    """从 assets/sprites/<resource_name>.pcx 加载角色 atlas.
+
+    名字通常带 'ps_' / 'fm_' 前缀, 决定色键. 例: 'ps_CAMAZ000'.
+    """
+    path = SPRITES_DIR / f"{resource_name}.pcx"
+    if not path.exists():
+        raise FileNotFoundError(path)
+    surf = load_image(path, color_key=AUTO)
+    sheet = SpriteSheet(surf, frame_w, frame_h)
+    return CharacterSprite(
+        sheet=sheet,
+        direction_rows=direction_rows or DEFAULT_DIRECTION_ROWS,
+    )
+
+
+def get_character_sprite(resource_name: str, **kwargs) -> CharacterSprite:
+    if resource_name not in _CACHE:
+        cs = load_character_sprite(resource_name, **kwargs)
+        if is_flying_sprite(resource_name):
+            cs.walk_frames = 4   # col 4 空白, 只循环 cols 0-3
+        _CACHE[resource_name] = cs
+    return _CACHE[resource_name]
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
+
+
+# ----- 待机 + 虚弱 atlas -----
+_IDLE_CACHE: dict[str, IdleSprite] = {}
+_WEAKENED_CACHE: dict[str, WeakenedSprite] = {}
+
+
+def get_idle_sprite(resource_name: str) -> IdleSprite:
+    if resource_name not in _IDLE_CACHE:
+        path = SPRITES_DIR / f"{resource_name}.pcx"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        surf = load_image(path, color_key=AUTO)
+        sheet = SpriteSheet(surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
+        _IDLE_CACHE[resource_name] = IdleSprite(
+            sheet=sheet,
+            direction_cols=DEFAULT_IDLE_DIRECTION_COLS,
+        )
+    return _IDLE_CACHE[resource_name]
+
+
+def get_weakened_sprite(resource_name: str) -> WeakenedSprite:
+    if resource_name not in _WEAKENED_CACHE:
+        path = SPRITES_DIR / f"{resource_name}.pcx"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        surf = load_image(path, color_key=AUTO)
+        # 显式 64×96 (= DEFAULT_CHAR_FRAME_SIZE), atlas 自动算 cols×rows = 3×5
+        sheet = SpriteSheet(surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
+        _WEAKENED_CACHE[resource_name] = WeakenedSprite(
+            sheet=sheet,
+            direction_rows=WEAKENED_DIRECTION_ROWS,
+        )
+    return _WEAKENED_CACHE[resource_name]
+
+
+# ----- fm_ atlas (攻击/特效) -----
+# 逆向得到的真实数据: 每帧有显式 BBox (x, y, w, h) + 锚点 (ax, ay).
+# fm atlas 不是均匀网格! 帧大小因姿态变化, 用逐帧 BBox 才能取出干净 sprite.
+# 数据在 core/fm_frames.py (6610 帧, 334 个 atlas, 从 FlyingSB.exe 0x5bf8a8 表逆向).
+_FM_SURF_CACHE: dict[str, pygame.Surface] = {}
+
+
+def get_fm_surface(resource_name: str) -> pygame.Surface:
+    """加载 fm_ atlas 大图. 帧从 fm_frames.FM_FRAMES 取 BBox 子表面."""
+    if resource_name not in _FM_SURF_CACHE:
+        path = SPRITES_DIR / f"{resource_name}.pcx"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        _FM_SURF_CACHE[resource_name] = load_image(path, color_key=AUTO)
+    return _FM_SURF_CACHE[resource_name]
+
+
+# ---------- SBTLFONT 伤害/MISS 数字字体 ----------
+# fm_SBTLFONT.pcx (130x56, 52 帧 unique BBox, 来自 fm_frames.SBTLFONT).
+# 来源 exe FUN_004d05d8 + FUN_004d074e: 把 char (ASCII) 转 frame_idx.
+#   FUN_004d074e 路径 (mass-spawn): frame_idx = char - 0x30 → 数字 '0'..'9' = frames 0..9
+#   FUN_004d0488 路径 (drip-spawn): frame_idx = char - 0x23 → '0'..'9' = frames 13..22
+# 我们用 drip 路径 (frames 13-22) 作为标准伤害数字, 跟用户观察一致.
+# MISS: exe 用 chars 0x3a/0x3b/0x3c/0x3c (-0x23) = frames 23/24/25/25 (字母 'MISS' 在 atlas 后段)
+SBTLFONT_DIGIT_BASE_FRAME = 13                         # row 1 cols 0-9 = 红色伤害数字 (跟 MISS 同行同色)
+SBTLFONT_MISS_FRAMES = (23, 24, 25, 25)                # row 1 cols 10-12 = 红色 M/I/S/S
+SBTLFONT_DAMAGE_BASE_FRAME = SBTLFONT_DIGIT_BASE_FRAME # 别名: 伤害数字也是红色 (= 跟 MISS 一致)
+
+
+def get_sbtlfont_surface() -> pygame.Surface:
+    return get_fm_surface("fm_SBTLFONT")
+
+
+def sbtlfont_frame(char_or_digit: int) -> tuple[pygame.Surface, int, int]:
+    """digit 0..9 → atlas frame 13..22; 也可传 frame index 直接取.
+    返回 (subsurface, render_anchor_x, render_anchor_y) — anchor 从 fm_frames 取."""
+    from core.fm_frames import FM_FRAMES
+    frame_idx = char_or_digit if char_or_digit >= 13 else SBTLFONT_DIGIT_BASE_FRAME + char_or_digit
+    bbox_data = FM_FRAMES.get("sbtlfont")
+    if not bbox_data or frame_idx >= len(bbox_data):
+        raise IndexError(f"sbtlfont frame {frame_idx} out of range")
+    fx, fy, fw, fh, ax, ay = bbox_data[frame_idx]
+    surf = get_sbtlfont_surface().subsurface(pygame.Rect(fx, fy, fw, fh))
+    return surf, ax, ay

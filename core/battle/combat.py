@@ -74,7 +74,7 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     多段攻击: seq 含多个 SIGNAL -100, 每次独立判定 (= 原版多次 jump -100).
     """
     from core.attack_seq import attack_seq_for
-    from core.anim_engine import tuple_to_bytecode
+    from core.anim_engine.bytecode import tuple_to_bytecode
     attacker.pending_attack_target = defender
     attacker.pending_attack_skill = False
     attacker.pending_attack_kind = ""

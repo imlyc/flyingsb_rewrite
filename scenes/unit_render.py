@@ -8,13 +8,8 @@ from __future__ import annotations
 import pygame
 
 from core.anim_state import AnimationState
-from core.sprites import (
-    CharacterSprite,
-    Direction,
-    IdleSprite,
-    WeakenedSprite,
-    facing_to_direction,
-)
+from core.sprites.atlas_classes import CharacterSprite, IdleSprite, WeakenedSprite
+from core.sprites.base import Direction, facing_to_direction
 
 # 重导出, 方便上层 import
 __all__ = ["AnimationState", "pick_locomotion_frame", "blit_unit", "blit_shadow"]

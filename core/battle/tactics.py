@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import random
 
-from core.anim_engine import Entity
+from core.anim_engine.entity import Entity
 from core.character import UNSET
 from core.battle import ai, combat
 from core.battle.queries import BattleQueries
@@ -65,7 +65,8 @@ class TacticsBattle:
         self._pending_turn_end: bool = False
         # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
         # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
-        from core.anim_engine import Engine, SIG_IMPACT, SIG_END
+        from core.anim_engine.engine import Engine
+        from core.anim_engine.entity import SIG_IMPACT, SIG_END
         self.engine = Engine()
         self._SIG_IMPACT = SIG_IMPACT
         self._SIG_END = SIG_END

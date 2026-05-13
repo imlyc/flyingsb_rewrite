@@ -27,7 +27,7 @@ from core.audio_manager import AudioManager
 from core.battle.data import BattleUnit, Phase
 from core.battle.tactics import TacticsBattle
 from core.movement_input import DirectionalHold
-from core.sprites import TILE_W, TILE_H, load_shadow
+from core.sprites.base import TILE_W, TILE_H, load_shadow
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
 from scenes.battle import hud as hud_mod
@@ -37,7 +37,7 @@ from scenes.battle import update as update_mod
 from scenes.battle.float_text import FloatText
 
 if TYPE_CHECKING:
-    from scenes.world_map import WorldMapScene
+    from scenes.world_map.scene import WorldMapScene
 
 
 class BattleScene(Scene):

@@ -80,11 +80,11 @@ class TitleScene(Scene):
     # ------- 菜单动作 -------
     def _action_new_game(self) -> None:
         # 延迟 import 避免 menu <-> world_map 循环导入
-        from scenes.world_map import WorldMapScene
+        from scenes.world_map.scene import WorldMapScene
         self.next_scene = WorldMapScene(self.surface, self.audio, save=None)
 
     def _action_load_save(self) -> None:
-        from scenes.world_map import WorldMapScene
+        from scenes.world_map.scene import WorldMapScene
         try:
             save = load_save(DEFAULT_SAVE)
             print(f"[读取存档] {DEFAULT_SAVE}  地点={save.location}  金钱={save.money}")
