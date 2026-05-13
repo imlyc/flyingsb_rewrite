@@ -1,2 +1,7 @@
 pygame-ce>=2.5.0
 
+# 测试
+pytest>=9.0.0
+
+# 离线工具 (一次性: 给 mod item.txt 做 t2s 转换, 见 core/items.py 注释)
+opencc-python-reimplemented>=0.1.7

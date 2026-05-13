@@ -1,8 +1,10 @@
-"""快速 smoke test: 跑垂直斬 UP seq 看事件流."""
-from anim_engine.engine import Engine
-from anim_engine.entity import Entity
-from anim_engine.bytecode import encode_op
-from raw_attack_seqs import ATK_C  # any seq table works
+"""快速 smoke test: 跑垂直斬 UP seq 看事件流.
+
+原 core/test_anim_engine.py 搬过来, 改用 core.* 全路径 import.
+"""
+
+from core.anim_engine.engine import Engine
+from core.anim_engine.bytecode import encode_op
 
 
 def test_basic_ops():
@@ -22,32 +24,25 @@ def test_basic_ops():
     eng.on('frame_change', lambda ent, slot, fr: frames_seen.append((ent.ticks, slot & 0xffff, fr)))
 
     eng.attach_seq(e, seq)
-    print(f"after attach: ticks={e.ticks} offset={e.offset} frame={e.frame_idx} flags={hex(e.flags)}")
-    print(f"frames seen during attach: {frames_seen}")
     assert e.ticks == 3, "should block at first FM with ticks=3"
     assert e.frame_idx == 0
 
-    # tick 3 frames — ticks counts down 3,2,1, then 0 → run next op (FM frame=1 + WAIT 2)
-    for i in range(5):
+    # tick 几帧让 seq 推进
+    for _ in range(5):
         eng.tick()
-        print(f"after tick {i+1}: ticks={e.ticks} offset={e.offset} frame={e.frame_idx} flags={hex(e.flags)}")
-    print(f"all frames: {frames_seen}")
 
 
 def test_signal_routing():
     """验证 op 0x0e SIGNAL 路由给 active_action."""
     eng = Engine()
-    log = []
 
     def my_wrapper(action, engine):
-        log.append(('wrapper', action.state_code, action.signal_target.id if action.signal_target else None))
         # 模拟 DOIT_melee: state -100 = IMPACT, do something
         if action.state_code == -100:
             action.user_data['hit_count'] = action.user_data.get('hit_count', 0) + 1
 
     action = eng.spawn(think_fn=my_wrapper)
     eng.active_action = action
-    print(f"action created, init log: {log}")
 
     unit = eng.spawn()
     seq = (
@@ -58,8 +53,6 @@ def test_signal_routing():
         + encode_op(0x00)
     )
     eng.attach_seq(unit, seq)
-    print(f"after attach: log={log}")
-    print(f"action.user_data: {action.user_data}")
     assert action.user_data.get('hit_count') == 1
 
 
@@ -73,17 +66,15 @@ def test_unknown_op_skipped():
         + encode_op(0x00)
     )
     eng.attach_seq(e, seq)
-    print(f"after attach unknown-op seq: ticks={e.ticks} frame={e.frame_idx}")
     assert e.frame_idx == 7, "should have skipped unknown op and run FM"
 
 
 def test_legacy_atk_c():
     """跑实际游戏数据 ATK_C UP (美娜普攻 6 帧/dir)."""
-    from anim_engine.bytecode import tuple_to_bytecode
-    from raw_attack_seqs import ATK_C
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    from core.raw_attack_seqs import ATK_C
     eng = Engine()
 
-    # 假装挂个 wrapper 接信号
     sigs = []
     def wrapper(action, e):
         sigs.append((action.state_code, action.signal_target.id if action.signal_target else None))
@@ -92,32 +83,17 @@ def test_legacy_atk_c():
 
     unit = eng.spawn()
     seq_bc = tuple_to_bytecode(ATK_C[0])  # UP
-    print(f"ATK_C[UP] tuple len = {len(ATK_C[0])}, bytecode len = {len(seq_bc)} bytes")
 
     events = []
     eng.on('frame_change', lambda e, slot, fr: events.append(('frame', slot & 0xffff, fr)))
     eng.on('sound_play', lambda e, sid: events.append(('sound', sid)))
 
     eng.attach_seq(unit, seq_bc)
-    print(f"after attach: ticks={unit.ticks} offset={unit.offset} flags={hex(unit.flags)}")
-    print(f"first events: {events[:5]}")
-    print(f"signals seen during attach: {sigs[1:]}  (excluding init -1)")
 
-    # 推帧到结束
+    # 推帧到结束 (有上限防 seq 写错卡死)
     max_ticks = 500
     while unit.is_playing() and max_ticks > 0:
         eng.tick()
         max_ticks -= 1
-    print(f"sequence finished after {500 - max_ticks} ticks, total events={len(events)}, signals={len(sigs)-1}")
-
-
-if __name__ == '__main__':
-    print("=== test_basic_ops ===")
-    test_basic_ops()
-    print("\n=== test_signal_routing ===")
-    test_signal_routing()
-    print("\n=== test_unknown_op_skipped ===")
-    test_unknown_op_skipped()
-    print("\n=== test_legacy_atk_c ===")
-    test_legacy_atk_c()
-    print("\nall green ✓")
+    assert max_ticks > 0, "ATK_C UP seq took too many ticks (suspicious infinite loop)"
+    assert len(events) > 0, "ATK_C UP should emit frame_change events"
