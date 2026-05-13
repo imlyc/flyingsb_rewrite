@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING
 import pygame
 
 from core.audio_manager import AudioManager
-from core.battle import BattleUnit, Phase, TacticsBattle
+from core.battle.data import BattleUnit, Phase
+from core.battle.tactics import TacticsBattle
 from core.movement_input import DirectionalHold
 from core.sprites import TILE_W, TILE_H, load_shadow
 from scenes.base import Scene

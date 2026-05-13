@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from core.battle import BattleUnit, LevelUpReport, Phase
+from core.battle.data import BattleUnit, LevelUpReport, Phase
 from core.character import UNSET
 from core.sprites import TILE_W, TILE_H
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from core.battle import Phase
+from core.battle.data import Phase
 from core.sprites import (
     DEFAULT_IDLE_DIRECTION_COLS,
     TILE_W,

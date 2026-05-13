@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from core.battle import Phase
+from core.battle.data import Phase
 from scenes.battle import update as update_mod
 
 if TYPE_CHECKING:

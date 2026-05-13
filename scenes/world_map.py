@@ -10,7 +10,9 @@ import pygame
 
 from core.anim_state import AnimationState
 from core.audio_manager import AudioManager
-from core.battle import BattleMap, BattleUnit, TacticsBattle, make_enemy, unit_from_character
+from core.battle.data import BattleMap, BattleUnit
+from core.battle.setup import make_enemy, unit_from_character
+from core.battle.tactics import TacticsBattle
 from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
 from core.character_sprites import sprite_resource
 from core.movement_input import DirectionalHold
