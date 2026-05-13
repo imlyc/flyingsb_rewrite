@@ -1,9 +1,10 @@
 """TacticsBattle — 战斗主状态机. 持有 players / enemies / map / phase / turn_order.
 
-实际结算 (伤害/反应/必杀) 转发到 core.battle.combat, AI 走位转发到 core.battle.ai.
+实际结算 (伤害/反应/必杀) 转发到 core.battle.combat, AI 走位转发到 core.battle.ai,
+空间查询 (occupant / movement_range / bfs_path / attack_tiles) 转发到 self.q
+(BattleQueries 实例, 见 core.battle.queries).
 本文件只管:
   - 摆阵 / 回合流转 (start_round, enter_current, end_unit_turn, post_enemy_turn)
-  - 战场查询 (occupant, alive_units, attack_tiles, movement_range, bfs_path)
   - 玩家行动公开 API (player_step / player_attack_facing / player_use_skill / ...)
   - anim_engine glue (engine.on signal → 派发)
   - 胜负检测 + 升级分配
@@ -12,11 +13,11 @@
 from __future__ import annotations
 
 import random
-from collections import deque
 
 from core.anim_engine import Entity
 from core.character import UNSET
 from core.battle import ai, combat
+from core.battle.queries import BattleQueries
 from core.battle.data import (
     BattleMap,
     BattleUnit,
@@ -41,6 +42,8 @@ class TacticsBattle:
         self.players = players
         self.enemies = enemies
         self.map = battle_map or default_battle_map(rng=self.rng)
+        # 空间查询: 共享 map/players/enemies 引用; 见 core.battle.queries
+        self.q = BattleQueries(self.map, self.players, self.enemies)
         self.messages: list[str] = []
         self.exp_gained = 0
         self.money_gained = 0
@@ -92,7 +95,7 @@ class TacticsBattle:
         else:
             for i, p in enumerate(self.players):
                 p.x, p.y = 1, min(self.map.h - 2, 1 + i * 2)
-                while not self._is_free(p.x, p.y, p):
+                while not self.q.is_free(p.x, p.y, p):
                     p.y = (p.y + 1) % self.map.h
         if enemy_positions is not None:
             for e, pos in zip(self.enemies, enemy_positions):
@@ -100,23 +103,20 @@ class TacticsBattle:
         else:
             for i, e in enumerate(self.enemies):
                 e.x, e.y = self.map.w - 2, min(self.map.h - 2, 1 + i * 2)
-                while not self._is_free(e.x, e.y, e):
+                while not self.q.is_free(e.x, e.y, e):
                     e.y = (e.y + 1) % self.map.h
         # 摆阵后初始化渲染坐标 (避免开局所有人从 (0,0) 滑出来)
         for u in self.all_units:
             u.snap_render()
 
-    def _is_free(self, x: int, y: int, ignore: BattleUnit) -> bool:
-        return self.map.passable(x, y) and self.occupant(x, y, ignore=ignore) is None
-
-    # ---- 查询 ----
+    # ---- 查询 (空间相关全部在 self.q; 这里只留回合/状态相关的) ----
     @property
     def all_units(self) -> list[BattleUnit]:
-        return self.players + self.enemies
+        return self.q.all_units
 
     @property
     def alive_units(self) -> list[BattleUnit]:
-        return [u for u in self.all_units if u.alive]
+        return self.q.alive_units
 
     @property
     def current(self) -> BattleUnit:
@@ -143,86 +143,6 @@ class TacticsBattle:
                 return u
         return None
 
-    def occupant(self, x: int, y: int, ignore: BattleUnit | None = None) -> BattleUnit | None:
-        # 主角尸体保留格子占位 (可复活), 敌人死亡不占格.
-        for u in self.all_units:
-            if u is ignore:
-                continue
-            if not u.alive and not u.is_player:
-                continue
-            if u.x == x and u.y == y:
-                return u
-        return None
-
-    # ---- 范围 ----
-    def movement_range(self, unit: BattleUnit) -> set[tuple[int, int]]:
-        start = (unit.x, unit.y)
-        dist = {start: 0}
-        q = deque([start])
-        while q:
-            x, y = q.popleft()
-            d = dist[(x, y)]
-            if d >= unit.move:
-                continue
-            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                nx, ny = x + dx, y + dy
-                if (nx, ny) in dist:
-                    continue
-                if not self.map.passable(nx, ny):
-                    continue
-                if self.occupant(nx, ny, ignore=unit) is not None:
-                    continue
-                dist[(nx, ny)] = d + 1
-                q.append((nx, ny))
-        return set(dist.keys())
-
-    def bfs_path(self, unit: BattleUnit, dst: tuple[int, int]) -> list[tuple[int, int]]:
-        """从 unit 当前位置到 dst 的最短路径 (不含起点, 含终点). 不通时返回空."""
-        start = (unit.x, unit.y)
-        if start == dst:
-            return []
-        parent: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
-        q = deque([start])
-        while q:
-            cur = q.popleft()
-            if cur == dst:
-                path: list[tuple[int, int]] = []
-                node: tuple[int, int] | None = cur
-                while node is not None and parent[node] is not None:
-                    path.append(node)
-                    node = parent[node]
-                path.reverse()
-                return path
-            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                nxt = (cur[0] + dx, cur[1] + dy)
-                if nxt in parent:
-                    continue
-                if not self.map.passable(*nxt):
-                    continue
-                if self.occupant(*nxt, ignore=unit) is not None:
-                    continue
-                parent[nxt] = cur
-                q.append(nxt)
-        return []
-
-    def attack_tiles(self, unit: BattleUnit, x: int, y: int) -> set[tuple[int, int]]:
-        r = unit.attack_range
-        out = set()
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                d = abs(dx) + abs(dy)
-                if d == 0 or d > r:
-                    continue
-                nx, ny = x + dx, y + dy
-                if self.map.in_bounds(nx, ny):
-                    out.add((nx, ny))
-        return out
-
-    def attackable_enemies(self, unit: BattleUnit) -> list[BattleUnit]:
-        tiles = self.attack_tiles(unit, unit.x, unit.y)
-        return [u for u in self.alive_units
-                if u.is_player != unit.is_player and (u.x, u.y) in tiles]
-
     # ---- 回合 ----
     def _start_round(self) -> None:
         self._turn_order = sorted(self.alive_units, key=lambda u: -u.agile)
@@ -239,7 +159,7 @@ class TacticsBattle:
                 if u.is_player:
                     self.phase = Phase.PLAYER_MOVE
                     self._pre_move_pos = (u.x, u.y)
-                    self.turn_move_range = self.movement_range(u)
+                    self.turn_move_range = self.q.movement_range(u)
                     return
                 else:
                     self.phase = Phase.ENEMY_TURN
@@ -329,7 +249,7 @@ class TacticsBattle:
             return False
         if not self.map.passable(nx, ny):
             return False
-        if self.occupant(nx, ny, ignore=u) is not None:
+        if self.q.occupant(nx, ny, ignore=u) is not None:
             return False
         u.x, u.y = nx, ny
         return True
@@ -340,10 +260,10 @@ class TacticsBattle:
         if self.phase != Phase.PLAYER_MOVE or not u.is_player:
             return False
         fx, fy = u.x + u.facing[0], u.y + u.facing[1]
-        target = self.occupant(fx, fy)
+        target = self.q.occupant(fx, fy)
         if target is None or target.is_player == u.is_player:
             return False
-        if (fx, fy) not in self.attack_tiles(u, u.x, u.y):
+        if (fx, fy) not in self.q.attack_tiles(u, u.x, u.y):
             return False
         combat.begin_attack(self, u, target)
         return True
@@ -378,7 +298,7 @@ class TacticsBattle:
             return False
         if (x, y) not in self.turn_move_range:
             return False
-        if (x, y) != (u.x, u.y) and self.occupant(x, y) is not None:
+        if (x, y) != (u.x, u.y) and self.q.occupant(x, y) is not None:
             return False
         u.x, u.y = x, y
         return True
@@ -399,7 +319,7 @@ class TacticsBattle:
             return False
         targets = [e for e in self.alive_units
                    if e.is_player != u.is_player
-                   and (e.x, e.y) in self.attack_tiles(u, u.x, u.y)]
+                   and (e.x, e.y) in self.q.attack_tiles(u, u.x, u.y)]
         if not targets:
             self._log(f"{u.name} 攻击范围内无敌人")
             return False

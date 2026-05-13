@@ -18,20 +18,20 @@ def take_turn(battle: "TacticsBattle", unit: BattleUnit) -> None:
     target = min(targets, key=lambda p: abs(p.x - unit.x) + abs(p.y - unit.y))
 
     # 已经能打就不动
-    if (target.x, target.y) in battle.attack_tiles(unit, unit.x, unit.y):
+    if (target.x, target.y) in battle.q.attack_tiles(unit, unit.x, unit.y):
         face_toward(unit, target)
         battle._pending_enemy_attack = target
         return
 
     # 朝目标走一步: 取可达格子里 Manhattan 最近的
-    reachable = battle.movement_range(unit)
+    reachable = battle.q.movement_range(unit)
     cands = [(x, y) for (x, y) in reachable
-             if (x, y) == (unit.x, unit.y) or battle.occupant(x, y) is None]
+             if (x, y) == (unit.x, unit.y) or battle.q.occupant(x, y) is None]
     best = min(cands, key=lambda p: abs(p[0] - target.x) + abs(p[1] - target.y))
     if best != (unit.x, unit.y):
         battle._log(f"{unit.name} 移动到 {best}")
         # 计算真实路径让 render 沿格逐步走 (避免两轴并行 lerp 出 45° 飞行)
-        path = battle.bfs_path(unit, best)
+        path = battle.q.bfs_path(unit, best)
         unit.move_path = list(path)
         # 朝向 = 第一段方向
         if path:
@@ -45,7 +45,7 @@ def take_turn(battle: "TacticsBattle", unit: BattleUnit) -> None:
             unit.reaction_saved_facing = None    # 同 face_toward, 防 reaction 恢复覆盖
         unit.x, unit.y = best
     # 走到了能攻击的位置就计划攻击, 但留到 post_enemy_turn 才打
-    if target.alive and (target.x, target.y) in battle.attack_tiles(unit, unit.x, unit.y):
+    if target.alive and (target.x, target.y) in battle.q.attack_tiles(unit, unit.x, unit.y):
         face_toward(unit, target)
         # 移动期间 render 会把 facing 改成最后一段移动方向; 标记一下让 UI 走完路径后还原
         if unit.move_path:

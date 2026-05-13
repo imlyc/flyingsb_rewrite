@@ -183,7 +183,7 @@ class BattleScene(Scene):
             return
         fx, fy = u.x + u.facing[0], u.y + u.facing[1]
         if self.battle.map.in_bounds(fx, fy):
-            occ = self.battle.occupant(fx, fy)
+            occ = self.battle.q.occupant(fx, fy)
             tint = (self._face_enemy_tint
                     if (occ is not None and occ.is_player != u.is_player)
                     else self._face_empty_tint)
