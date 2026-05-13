@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from core.battle.data import Phase
 from core.sprites import (
     DEFAULT_IDLE_DIRECTION_COLS,
     TILE_W,
@@ -95,10 +94,6 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
             scene.surface.blit(mp, mp_rect)
             hp = scene.small.render(str(u.hp), True, hp_color)
             scene.surface.blit(hp, hp.get_rect(midbottom=(label_cx, mp_rect.top - 1)))
-        # 当前单位 + 移动阶段: 蓝色 M{move} (放 tile 底部)
-        if u is scene.battle.current and scene.battle.phase == Phase.PLAYER_MOVE:
-            mv = scene.tiny.render(f"M{u.move}", True, scene.MOVE_NUM_COLOR)
-            scene.surface.blit(mv, mv.get_rect(midtop=(cx, rect.bottom + 1)))
 
 
 def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
