@@ -112,9 +112,11 @@ class BattleScene(Scene):
         self._victory_acknowledged = False
         self._float_big = load_chinese_font(22)
         self._float_small = load_chinese_font(14)
-        # 行动菜单: ESC 弹出十字 4 选项 (上=攻 / 右=技 / 下=终 / 左=道)
+        # 行动菜单: ESC 弹出十字 4 选项 (上=技能, 左=道具, 右=设置, 下=回合结束)
         self._menu_open = False
         self._menu_font = load_chinese_font(16)
+        # 二级菜单: None / 'skill' (上→技能列表). 在二级菜单按 ESC 回退到一级.
+        self._submenu: str | None = None
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None

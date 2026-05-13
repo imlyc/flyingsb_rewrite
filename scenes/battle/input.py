@@ -57,24 +57,35 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
 
 
 def _handle_menu_key(scene: "BattleScene", key: int) -> None:
-    """十字菜单: 上=攻击, 右=技能, 下=结束, 左=道具. ESC 关闭."""
+    """十字菜单: 上=技能, 左=道具, 右=设置, 下=回合结束.
+    ESC 一级关闭; 二级 (skill 列表) 按 ESC 回退到一级.
+    """
+    # 二级菜单: 只处理 ESC 回退, 其它键暂忽略 (列表为空 → 无可选项)
+    if scene._submenu is not None:
+        if key in (pygame.K_ESCAPE, pygame.K_x):
+            scene._submenu = None
+        return
+
+    # 一级菜单
     if key in (pygame.K_ESCAPE, pygame.K_x):
         scene._menu_open = False
         scene._input_gated = True   # 关菜单后, 防止菜单时按下的方向键续走
         return
     if key in (pygame.K_UP, pygame.K_w):
+        # 技能 → 打开二级菜单 (空列表). 一级菜单保持开 (二级在它上面叠加).
+        scene._submenu = 'skill'
+    elif key in (pygame.K_LEFT, pygame.K_a):
+        # 道具 → 暂时直接回战斗 (TODO: 道具系统)
         scene._menu_open = False
-        if not scene.battle.player_attack_facing():
-            scene.battle._log(f"{scene.battle.current.name} 朝向无敌人, 无法攻击")
+        scene._input_gated = True
     elif key in (pygame.K_RIGHT, pygame.K_d):
+        # 设置 → 暂时直接回战斗 (TODO: 设置面板)
         scene._menu_open = False
-        scene.battle.player_use_skill()  # 失败原因已 log
+        scene._input_gated = True
     elif key in (pygame.K_DOWN, pygame.K_s):
+        # 回合结束
         scene._menu_open = False
         scene.battle.player_end_turn()
-    elif key in (pygame.K_LEFT, pygame.K_a):
-        scene._menu_open = False
-        scene.battle._log(f"{scene.battle.current.name} 翻找道具袋... (尚未实现)")
 
 
 def _advance_end_screen(scene: "BattleScene") -> None:

@@ -32,31 +32,63 @@ def draw_floats(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
 
 
 def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
-    """十字 4 选项, 围在当前单位四周 (上=攻 / 右=技 / 下=终 / 左=道)."""
+    """十字 4 选项, 围在当前单位四周 — 用 SMENU.png 原版图标.
+    映射: 上=技能, 左=道具, 右=设置, 下=回合结束.
+    若 scene._submenu == 'skill': 额外画右侧二级菜单.
+    """
     if not scene._menu_open:
         return
+    from core.sprites.loaders import (
+        SMENU_END, SMENU_ITEM, SMENU_SETTINGS, SMENU_SKILL, load_smenu_icon,
+    )
+
     u = scene.battle.current
     ucx = u.x * TILE_W - cam_x + TILE_W // 2
-    ucy = u.y * TILE_H - cam_y + TILE_H // 2
-    box_w, box_h = 56, 36
-    offset = 48  # 距单位中心
-    # 4 个框的 (label, center_x, center_y)
-    boxes = [
-        ("↑ 攻击", ucx, ucy - offset),
-        ("→ 技能", ucx + offset + box_w // 2, ucy),
-        ("↓ 结束", ucx, ucy + offset),
-        ("← 道具", ucx - offset - box_w // 2, ucy),
+    # ucy 落在当前 tile 顶边 (= 上一 tile 底边), 让九宫格跨这条边居中.
+    ucy = u.y * TILE_H - cam_y
+    # 4 个 32×32 icon 紧挨成 3×3 九宫格 (中心格留给 unit, 透明黑边正好充当格子间隙).
+    # 图标中心距 unit 中心 = 一格边长 = 32.
+    offset = 32
+    placements = [
+        (SMENU_SKILL,    ucx,          ucy - offset),
+        (SMENU_ITEM,     ucx - offset, ucy),
+        (SMENU_SETTINGS, ucx + offset, ucy),
+        (SMENU_END,      ucx,          ucy + offset),
     ]
-    for label, x, y in boxes:
-        rect = pygame.Rect(0, 0, box_w, box_h)
-        rect.center = (x, y)
-        # 半透明黑底 + 黄边
-        bg = pygame.Surface(rect.size, pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 220))
-        scene.surface.blit(bg, rect)
-        pygame.draw.rect(scene.surface, scene.HIGHLIGHT, rect, 2)
-        txt = scene._menu_font.render(label, True, scene.HIGHLIGHT)
-        scene.surface.blit(txt, txt.get_rect(center=rect.center))
+    for icon_idx, x, y in placements:
+        icon = load_smenu_icon(icon_idx)
+        scene.surface.blit(icon, icon.get_rect(center=(x, y)))
+    # 九宫格中心: 2×2 白方块 (视觉锚定).
+    scene.surface.fill((255, 255, 255), pygame.Rect(ucx - 1, ucy - 1, 2, 2))
+
+    if scene._submenu == 'skill':
+        _draw_skill_submenu(scene)
+
+
+def _draw_skill_submenu(scene: "BattleScene") -> None:
+    """二级菜单: 标题「特殊能力」+ 技能列表 (当前为空, ESC 返回一级)."""
+    sw, sh = scene.surface.get_size()
+    # 右侧 panel 占 ~40% 宽, 顶到地图区域底
+    panel = pygame.Rect(sw - 280, 80, 260, sh - 200)
+    bg = pygame.Surface(panel.size, pygame.SRCALPHA)
+    bg.fill((20, 30, 40, 230))
+    scene.surface.blit(bg, panel)
+    pygame.draw.rect(scene.surface, scene.PANEL_BORDER, panel, 2)
+
+    # 标题
+    title = scene.font.render("特殊能力", True, scene.HIGHLIGHT)
+    scene.surface.blit(title, (panel.x + 14, panel.y + 10))
+
+    # 选中行高亮 (空列表 → 空横条占位, 跟原版 h070 一致)
+    row = pygame.Rect(panel.x + 12, panel.y + 42, panel.w - 24, 26)
+    pygame.draw.rect(scene.surface, scene.HIGHLIGHT, row, 1)
+    # 空列表提示
+    empty = scene.small.render("(暂无可用技能)", True, scene.DIM)
+    scene.surface.blit(empty, empty.get_rect(midleft=(row.x + 8, row.centery)))
+
+    # 底部 ESC 返回提示
+    hint = scene.tiny.render("ESC 返回", True, scene.DIM)
+    scene.surface.blit(hint, hint.get_rect(bottomright=(panel.right - 8, panel.bottom - 6)))
 
 
 def draw_hud(scene: "BattleScene") -> None:

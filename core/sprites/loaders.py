@@ -102,6 +102,36 @@ def get_weakened_sprite(resource_name: str) -> WeakenedSprite:
     return _WEAKENED_CACHE[resource_name]
 
 
+# ----- SMENU 战斗行动菜单图标 -----
+# assets/ui/SMENU.png 是 128×96 = 4 列 × 3 行 × 32×32 图标. row 0 是 ESC 弹出的十字菜单
+# 4 个图标 (左→右): SKILL (面孔), ITEM (宝珠), SETTINGS (OP), END (回合结束).
+# 其它两行是 HUD 用 (HP/MP 数字 + 状态), 暂未用.
+SMENU_ICON_SIZE = 32
+SMENU_SKILL = 0
+SMENU_ITEM = 1
+SMENU_SETTINGS = 2
+SMENU_END = 3
+_smenu_atlas: pygame.Surface | None = None
+_smenu_cache: dict[int, pygame.Surface] = {}
+
+
+def load_smenu_icon(idx: int) -> pygame.Surface:
+    """加载 SMENU.png 第 idx 个图标 (0..11, 行优先). 0-3 是 ESC 菜单的四个."""
+    from core.sprites.base import UI_DIR
+    global _smenu_atlas
+    if _smenu_atlas is None:
+        # 黑底 (0,0,0) 是透明色 — 实测每个 icon 右/下边的黑像素应该透出底层 (tile/sprite).
+        _smenu_atlas = pygame.image.load(str(UI_DIR / "SMENU.png")).convert()
+        _smenu_atlas.set_colorkey((0, 0, 0))
+    if idx not in _smenu_cache:
+        col = idx % 4
+        row = idx // 4
+        rect = pygame.Rect(col * SMENU_ICON_SIZE, row * SMENU_ICON_SIZE,
+                           SMENU_ICON_SIZE, SMENU_ICON_SIZE)
+        _smenu_cache[idx] = _smenu_atlas.subsurface(rect).copy()
+    return _smenu_cache[idx]
+
+
 # ----- fm_ atlas (攻击/特效) -----
 # 逆向得到的真实数据: 每帧有显式 BBox (x, y, w, h) + 锚点 (ax, ay).
 # fm atlas 不是均匀网格! 帧大小因姿态变化, 用逐帧 BBox 才能取出干净 sprite.
