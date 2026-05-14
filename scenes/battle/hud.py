@@ -40,7 +40,8 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
       _menu_open + _submenu=None → 静态一级
       _submenu='skill'           → 静态二级
     """
-    if not scene._menu_open and scene._submenu is None:
+    if (not scene._menu_open and scene._submenu is None
+            and scene._menu_close_t is None):
         return
     from core.sprites.loaders import (
         SMENU_END, SMENU_ITEM, SMENU_SETTINGS, SMENU_SKILL, load_smenu_icon,
@@ -59,12 +60,19 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         (SMENU_END,      ucx,          ucy + offset,  math.pi / 2),
     ]
 
-    # 1. 一级打开动画
+    # 1. 反向关闭 (二级 → 一级): 二级 panel 缩小消失, 白框已无
+    if scene._menu_close_t is not None:
+        progress = scene._menu_close_t / scene.MENU_CLOSE_MS
+        _draw_skill_submenu(scene, scale=max(0.0, 1.0 - progress),
+                            draw_highlight_row=False)
+        return
+
+    # 2. 一级打开动画
     if scene._menu_anim_t is not None:
         _draw_menu_open_anim(scene, ucx, ucy, placements, offset)
         return
 
-    # 2. 一级 → 二级 过渡动画
+    # 3. 一级 → 二级 过渡动画
     if scene._menu_transition_t is not None:
         _draw_menu_transition(scene, ucx, ucy, placements, offset)
         return

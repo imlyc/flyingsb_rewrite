@@ -34,8 +34,10 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
     if update_mod.units_animating(scene):
         return True
 
-    # 菜单 / 二级菜单 / 过渡动画 期间: 走菜单键路由, 不让方向键漏给角色移动
-    if scene._menu_open or scene._submenu is not None or scene._menu_transition_t is not None:
+    # 菜单 / 二级菜单 / 过渡动画 / 反向关闭 期间: 走菜单键路由, 不让方向键漏给角色移动
+    if (scene._menu_open or scene._submenu is not None
+            or scene._menu_transition_t is not None
+            or scene._menu_close_t is not None):
         _handle_menu_key(scene, event.key)
         return True
 
@@ -63,16 +65,16 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
     """
     from core.sprites.loaders import SMENU_SKILL
 
-    # 打开动画 / 过渡动画 期间不接键
-    if scene._menu_anim_t is not None or scene._menu_transition_t is not None:
+    # 打开动画 / 过渡动画 / 反向关闭动画 期间不接键
+    if (scene._menu_anim_t is not None
+            or scene._menu_transition_t is not None
+            or scene._menu_close_t is not None):
         return
 
-    # 二级菜单: 只处理 ESC 回退, 其它键暂忽略 (列表为空 → 无可选项)
+    # 二级菜单: 只处理 ESC 回退 → 触发反向动画 (二级缩小 → 一级 open anim)
     if scene._submenu is not None:
         if key in (pygame.K_ESCAPE, pygame.K_x):
-            # 关二级 → 回到静态一级 (不再播打开动画, 直接显示)
-            scene._submenu = None
-            scene._menu_open = True
+            scene._menu_close_t = 0
         return
 
     # 一级菜单
@@ -131,7 +133,8 @@ def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:
     if (scene.battle.phase != Phase.PLAYER_MOVE
             or scene._menu_open
             or scene._submenu is not None
-            or scene._menu_transition_t is not None):
+            or scene._menu_transition_t is not None
+            or scene._menu_close_t is not None):
         return
     u = scene.battle.current
     if not u.is_player:

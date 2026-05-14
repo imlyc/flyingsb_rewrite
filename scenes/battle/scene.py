@@ -81,6 +81,8 @@ class BattleScene(Scene):
     MENU_TRANSITION_B_MS = 180
     MENU_TRANSITION_C_MS = 180
     MENU_TRANSITION_TOTAL_MS = MENU_TRANSITION_A_MS + MENU_TRANSITION_B_MS + MENU_TRANSITION_C_MS
+    # 二级 → 一级 反向动画: 二级 panel 缩小消失. 完成后立即接 _menu_anim_t (= 一级打开动画).
+    MENU_CLOSE_MS = 200
 
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
@@ -133,6 +135,8 @@ class BattleScene(Scene):
         self._menu_transition_t: int | None = None
         # 过渡选中的 icon (= 白框终点 / 二级菜单类型). 仅 SMENU_SKILL 实装.
         self._menu_transition_target: int = 0
+        # 二级 → 一级 反向动画 (panel 缩小消失). 完成后会自动接 _menu_anim_t 重播打开动画.
+        self._menu_close_t: int | None = None
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None
