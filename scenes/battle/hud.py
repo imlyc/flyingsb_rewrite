@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import pygame
@@ -47,22 +48,64 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     # ucy 落在当前 tile 顶边 (= 上一 tile 底边), 让九宫格跨这条边居中.
     ucy = u.y * TILE_H - cam_y
     # 4 个 32×32 icon 紧挨成 3×3 九宫格 (中心格留给 unit, 透明黑边正好充当格子间隙).
-    # 图标中心距 unit 中心 = 一格边长 = 32.
     offset = 32
+    # icon 最终位置 + 极角 (用于动画). 极角约定: 0=右, π/2=下, π=左, -π/2=上.
     placements = [
-        (SMENU_SKILL,    ucx,          ucy - offset),
-        (SMENU_ITEM,     ucx - offset, ucy),
-        (SMENU_SETTINGS, ucx + offset, ucy),
-        (SMENU_END,      ucx,          ucy + offset),
+        (SMENU_SKILL,    ucx,          ucy - offset, -math.pi / 2),
+        (SMENU_ITEM,     ucx - offset, ucy,           math.pi),
+        (SMENU_SETTINGS, ucx + offset, ucy,           0.0),
+        (SMENU_END,      ucx,          ucy + offset,  math.pi / 2),
     ]
-    for icon_idx, x, y in placements:
+
+    if scene._menu_anim_t is not None:
+        _draw_menu_open_anim(scene, ucx, ucy, placements, offset)
+        return
+
+    # 静态状态: 4 个 icon 入位 + 中心白点
+    for icon_idx, x, y, _ in placements:
         icon = load_smenu_icon(icon_idx)
         scene.surface.blit(icon, icon.get_rect(center=(x, y)))
-    # 九宫格中心: 2×2 白方块 (视觉锚定).
     scene.surface.fill((255, 255, 255), pygame.Rect(ucx - 1, ucy - 1, 2, 2))
 
     if scene._submenu == 'skill':
         _draw_skill_submenu(scene)
+
+
+def _draw_menu_open_anim(scene: "BattleScene", ucx: int, ucy: int,
+                         placements, offset: int) -> None:
+    """打开菜单的同步动画 (单段 progress 0→1):
+      白方框 (border only) 从大收到 0,
+      4 icon 同时顺时针绕中心一圈, scale 0→1, radius 0→32.
+    """
+    from core.sprites.loaders import load_smenu_icon
+    progress = scene._menu_anim_t / scene.MENU_ANIM_TOTAL_MS
+    progress = max(0.0, min(1.0, progress))
+
+    # 白方框收缩 (按 tile 比例 64:48, 起始 3× tile = 192×144)
+    OUTER_W = TILE_W * 3
+    OUTER_H = TILE_H * 3
+    w = int(OUTER_W * (1 - progress))
+    h = int(OUTER_H * (1 - progress))
+    if w > 0 and h > 0:
+        rect = pygame.Rect(0, 0, w, h)
+        rect.center = (ucx, ucy)
+        pygame.draw.rect(scene.surface, (255, 255, 255), rect, 1)
+
+    # 4 icon 旋转 + 放大. 顺时针 90°. pygame y 朝下, 视觉顺时针 = math 角度递增,
+    # 所以 sweep 用负号: start = final - 90°, 向 final 推进时角度增大 → 屏幕顺时针.
+    sweep = -math.pi / 2
+    for icon_idx, fx, fy, final_angle in placements:
+        angle = final_angle + (1 - progress) * sweep
+        r = progress * offset
+        x = ucx + int(r * math.cos(angle))
+        y = ucy + int(r * math.sin(angle))
+        scaled_size = max(1, int(32 * progress))
+        icon = load_smenu_icon(icon_idx)
+        if scaled_size != 32:
+            icon = pygame.transform.scale(icon, (scaled_size, scaled_size))
+        scene.surface.blit(icon, icon.get_rect(center=(x, y)))
+    # 中心白点 (锚定)
+    scene.surface.fill((255, 255, 255), pygame.Rect(ucx - 1, ucy - 1, 2, 2))
 
 
 def _draw_skill_submenu(scene: "BattleScene") -> None:

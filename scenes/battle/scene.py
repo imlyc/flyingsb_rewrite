@@ -73,6 +73,9 @@ class BattleScene(Scene):
 
     # 死亡动画时长 (ms). exe FUN_004399c5/9b42 等 +0x124=0x14 = 20 ticks/帧 = 800ms.
     # 只 2 帧: row 4 col 0 (倒下中) + col 1 (躺平 corpse).
+    # 一级菜单打开动画 (同步进行): 白方框收缩 + 4 icon 顺时针旋转放大入位.
+    MENU_ANIM_TOTAL_MS = 360
+
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
     ENEMY_DEATH_FLASH_MS = 1000
@@ -117,6 +120,9 @@ class BattleScene(Scene):
         self._menu_font = load_chinese_font(16)
         # 二级菜单: None / 'skill' (上→技能列表). 在二级菜单按 ESC 回退到一级.
         self._submenu: str | None = None
+        # 打开一级菜单的动画计时 (ms 累加; None = 已完成静态显示).
+        # phase 1: 白方框收缩, phase 2: 4 icon 旋转放大入位. 见 scenes.battle.hud.
+        self._menu_anim_t: int | None = None
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None

@@ -40,6 +40,17 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
 
     _tick_camera(scene)
     _tick_phase_transitions(scene, now)
+    _tick_menu_anim(scene, dt_ms)
+
+
+def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
+    """打开一级菜单的两段动画 (phase 1 白方框收缩 + phase 2 icon 旋转放大).
+    跑完后置 None, draw 进入静态状态."""
+    if scene._menu_anim_t is None:
+        return
+    scene._menu_anim_t += dt_ms
+    if scene._menu_anim_t >= scene.MENU_ANIM_TOTAL_MS:
+        scene._menu_anim_t = None
 
 
 def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:

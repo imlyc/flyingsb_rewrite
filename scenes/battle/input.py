@@ -51,6 +51,7 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
         scene.battle.player_attack_facing()
     elif event.key == pygame.K_ESCAPE:
         scene._menu_open = True
+        scene._menu_anim_t = 0   # 打开动画起点 (update tick 会推进)
     elif event.key == pygame.K_x:
         scene.battle.cancel_to_move()
     return True
