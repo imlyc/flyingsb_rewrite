@@ -83,6 +83,9 @@ class BattleScene(Scene):
     MENU_TRANSITION_TOTAL_MS = MENU_TRANSITION_A_MS + MENU_TRANSITION_B_MS + MENU_TRANSITION_C_MS
     # 二级 → 一级 反向动画: 二级 panel 缩小消失. 完成后立即接 _menu_anim_t (= 一级打开动画).
     MENU_CLOSE_MS = 200
+    # 一级菜单关闭回战斗的动画 (跟 L1→L2 phase A 同形): icons 转 90° 淡出 + 选中 icon 的
+    # 白框形成. ESC 路径不画白框; End/Item/Settings 走完白框成型后整体消失.
+    MENU_DISMISS_MS = 220
 
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
@@ -137,6 +140,11 @@ class BattleScene(Scene):
         self._menu_transition_target: int = 0
         # 二级 → 一级 反向动画 (panel 缩小消失). 完成后会自动接 _menu_anim_t 重播打开动画.
         self._menu_close_t: int | None = None
+        # 一级 → 战斗 关闭动画. target = 选中 icon idx (None = ESC 路径, 无白框).
+        # action = 完成时执行的回合动作 ('end_turn' 或 None).
+        self._menu_dismiss_t: int | None = None
+        self._menu_dismiss_target: int | None = None
+        self._menu_dismiss_action: str | None = None
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None

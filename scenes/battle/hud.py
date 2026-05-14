@@ -41,7 +41,8 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
       _submenu='skill'           → 静态二级
     """
     if (not scene._menu_open and scene._submenu is None
-            and scene._menu_close_t is None):
+            and scene._menu_close_t is None
+            and scene._menu_dismiss_t is None):
         return
     from core.sprites.loaders import (
         SMENU_END, SMENU_ITEM, SMENU_SETTINGS, SMENU_SKILL, load_smenu_icon,
@@ -77,6 +78,11 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         _draw_menu_transition(scene, ucx, ucy, placements, offset)
         return
 
+    # 4. 一级关闭动画 (回战斗): icons 旋转淡出 + 可选白框移到选中 icon 位置
+    if scene._menu_dismiss_t is not None:
+        _draw_menu_dismiss(scene, ucx, ucy, placements, offset)
+        return
+
     # 3. 静态一级
     if scene._menu_open:
         for icon_idx, x, y, _ in placements:
@@ -89,23 +95,72 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         _draw_skill_submenu(scene, draw_highlight_row=True)
 
 
+_SURROUND_SIZE = 36   # 白框包住一个 icon 的边长 (略大于 32 给视觉间隙)
+
+
+def _draw_icons_rotate_out(scene: "BattleScene", ucx: int, ucy: int,
+                           placements, offset: int, progress: float,
+                           target_icon: int | None) -> None:
+    """复用动画原语: 4 个 icon 顺时针再转 90° + 淡出, 同时白点扩成白框移到 target icon.
+    progress 0→1. target_icon=None 时白框不画 (ESC 路径).
+    用于 L1→战斗 的 dismiss 和 L1→L2 过渡 phase A.
+    """
+    from core.sprites.loaders import load_smenu_icon
+
+    # 4 icons 旋转 + 淡出
+    for icon_idx, fx, fy, final_angle in placements:
+        angle = final_angle + progress * (math.pi / 2)
+        x = ucx + int(offset * math.cos(angle))
+        y = ucy + int(offset * math.sin(angle))
+        icon = load_smenu_icon(icon_idx).copy()
+        icon.set_alpha(int(255 * (1 - progress)))
+        scene.surface.blit(icon, icon.get_rect(center=(x, y)))
+
+    if target_icon is None:
+        return
+
+    # 白点/白框: 中心 → target icon 位置 + 2 → SURROUND_SIZE
+    sel_x, sel_y = ucx, ucy
+    for icon_idx, fx, fy, _ in placements:
+        if icon_idx == target_icon:
+            sel_x, sel_y = fx, fy
+            break
+    fx_pos = int(ucx + (sel_x - ucx) * progress)
+    fy_pos = int(ucy + (sel_y - ucy) * progress)
+    size = int(2 + (_SURROUND_SIZE - 2) * progress)
+    rect = pygame.Rect(0, 0, size, size)
+    rect.center = (fx_pos, fy_pos)
+    if size <= 2:
+        scene.surface.fill((255, 255, 255), rect)
+    else:
+        pygame.draw.rect(scene.surface, (255, 255, 255), rect, 1)
+
+
+def _draw_menu_dismiss(scene: "BattleScene", ucx: int, ucy: int,
+                       placements, offset: int) -> None:
+    """一级菜单关闭回战斗 — 直接复用 _draw_icons_rotate_out."""
+    progress = min(1.0, scene._menu_dismiss_t / scene.MENU_DISMISS_MS)
+    _draw_icons_rotate_out(scene, ucx, ucy, placements, offset, progress,
+                           scene._menu_dismiss_target)
+
+
 def _draw_menu_transition(scene: "BattleScene", ucx: int, ucy: int,
                           placements, offset: int) -> None:
     """一级 → 二级 三段过渡:
-       A: 4 icon 再顺时针 90° + 淡出; 白点扩成白框, 中心移到选中 icon 的位置.
+       A: 4 icon 再顺时针 90° + 淡出; 白点扩成白框, 中心移到选中 icon 的位置 (复用 dismiss 原语).
        B: 二级菜单 panel 从中心缩放出现 (白框保持在选中 icon 位置).
        C: 白框移动 + 变形, 包到二级菜单首行选项.
     """
-    from core.sprites.loaders import load_smenu_icon
     t = scene._menu_transition_t
     A = scene.MENU_TRANSITION_A_MS
     B = A + scene.MENU_TRANSITION_B_MS
     sw, sh = scene.surface.get_size()
 
     # 选中 icon 的一级 final 位置 (白框中转点)
+    target = scene._menu_transition_target
     sel_x, sel_y = ucx, ucy
     for icon_idx, fx, fy, _ in placements:
-        if icon_idx == scene._menu_transition_target:
+        if icon_idx == target:
             sel_x, sel_y = fx, fy
             break
 
@@ -114,37 +169,17 @@ def _draw_menu_transition(scene: "BattleScene", ucx: int, ucy: int,
     target_row = pygame.Rect(panel_full.x + 12, panel_full.y + 42,
                              panel_full.w - 24, 26)
 
-    # 白框 36×36 包住一格 icon (略大于 32 给视觉间隙)
-    SURROUND = 36
-
     if t < A:
-        # Phase A: icons 旋转 + 淡出; 白点 (2px) → 白框 (36×36) 同时从中心移到 sel icon 位置
-        progress_a = t / A
-        for icon_idx, fx, fy, final_angle in placements:
-            # 顺时针再 90°: 角度从 final 向 final + π/2 (math angle), 屏幕上看 CW
-            angle = final_angle + progress_a * (math.pi / 2)
-            x = ucx + int(offset * math.cos(angle))
-            y = ucy + int(offset * math.sin(angle))
-            icon = load_smenu_icon(icon_idx).copy()
-            icon.set_alpha(int(255 * (1 - progress_a)))
-            scene.surface.blit(icon, icon.get_rect(center=(x, y)))
-        # 白框
-        fx_pos = int(ucx + (sel_x - ucx) * progress_a)
-        fy_pos = int(ucy + (sel_y - ucy) * progress_a)
-        size = int(2 + (SURROUND - 2) * progress_a)
-        rect = pygame.Rect(0, 0, size, size)
-        rect.center = (fx_pos, fy_pos)
-        if size <= 2:
-            scene.surface.fill((255, 255, 255), rect)
-        else:
-            pygame.draw.rect(scene.surface, (255, 255, 255), rect, 1)
+        # Phase A: 跟 dismiss 同形 — 直接复用 _draw_icons_rotate_out
+        _draw_icons_rotate_out(scene, ucx, ucy, placements, offset,
+                               progress=t / A, target_icon=target)
         return
 
     if t < B:
         # Phase B: 二级菜单 panel scale 0→1; 白框停在 sel icon 位置
         progress_b = (t - A) / (B - A)
         _draw_skill_submenu(scene, draw_highlight_row=False, scale=progress_b)
-        rect = pygame.Rect(0, 0, SURROUND, SURROUND)
+        rect = pygame.Rect(0, 0, _SURROUND_SIZE, _SURROUND_SIZE)
         rect.center = (sel_x, sel_y)
         pygame.draw.rect(scene.surface, (255, 255, 255), rect, 1)
         return
@@ -152,10 +187,8 @@ def _draw_menu_transition(scene: "BattleScene", ucx: int, ucy: int,
     # Phase C: 二级菜单已完整; 白框从 (sel icon 位置, 36×36) → 首行选项 rect
     progress_c = (t - B) / (scene.MENU_TRANSITION_TOTAL_MS - B)
     _draw_skill_submenu(scene, draw_highlight_row=False)
-    # 起点 rect (36×36 围在 sel icon)
-    start = pygame.Rect(0, 0, SURROUND, SURROUND)
+    start = pygame.Rect(0, 0, _SURROUND_SIZE, _SURROUND_SIZE)
     start.center = (sel_x, sel_y)
-    # 插值 → target_row
     cur_x = int(start.x + (target_row.x - start.x) * progress_c)
     cur_y = int(start.y + (target_row.y - start.y) * progress_c)
     cur_w = int(start.w + (target_row.w - start.w) * progress_c)

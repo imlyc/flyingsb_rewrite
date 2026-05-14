@@ -71,6 +71,18 @@ def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
             # 接着播一级 open 动画 (跟 ESC 触发的相同)
             scene._menu_anim_t = 0
 
+    if scene._menu_dismiss_t is not None:
+        scene._menu_dismiss_t += dt_ms
+        if scene._menu_dismiss_t >= scene.MENU_DISMISS_MS:
+            scene._menu_dismiss_t = None
+            scene._menu_open = False
+            scene._input_gated = True
+            action = scene._menu_dismiss_action
+            scene._menu_dismiss_target = None
+            scene._menu_dismiss_action = None
+            if action == 'end_turn':
+                scene.battle.player_end_turn()
+
 
 def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:
     """单位渲染坐标按速度向当前路径节点插值. 沿格逐步走, 防止两轴并行 lerp 出 45° 飞行."""

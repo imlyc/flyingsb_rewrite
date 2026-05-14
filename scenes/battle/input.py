@@ -34,10 +34,11 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
     if update_mod.units_animating(scene):
         return True
 
-    # 菜单 / 二级菜单 / 过渡动画 / 反向关闭 期间: 走菜单键路由, 不让方向键漏给角色移动
+    # 菜单 / 二级 / 各种过渡 / 关闭动画 期间: 走菜单键路由, 不让方向键漏给角色移动
     if (scene._menu_open or scene._submenu is not None
             or scene._menu_transition_t is not None
-            or scene._menu_close_t is not None):
+            or scene._menu_close_t is not None
+            or scene._menu_dismiss_t is not None):
         _handle_menu_key(scene, event.key)
         return True
 
@@ -63,12 +64,15 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
     """十字菜单: 上=技能, 左=道具, 右=设置, 下=回合结束.
     ESC 一级关闭; 二级 (skill 列表) 按 ESC 回退到一级.
     """
-    from core.sprites.loaders import SMENU_SKILL
+    from core.sprites.loaders import (
+        SMENU_END, SMENU_ITEM, SMENU_SETTINGS, SMENU_SKILL,
+    )
 
-    # 打开动画 / 过渡动画 / 反向关闭动画 期间不接键
+    # 打开动画 / 过渡动画 / 反向关闭 / 一级关闭动画 期间不接键
     if (scene._menu_anim_t is not None
             or scene._menu_transition_t is not None
-            or scene._menu_close_t is not None):
+            or scene._menu_close_t is not None
+            or scene._menu_dismiss_t is not None):
         return
 
     # 二级菜单: 只处理 ESC 回退 → 触发反向动画 (二级缩小 → 一级 open anim)
@@ -77,27 +81,32 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
             scene._menu_close_t = 0
         return
 
-    # 一级菜单
+    # 一级菜单 — 全部通过 dismiss 动画收掉
     if key in (pygame.K_ESCAPE, pygame.K_x):
-        scene._menu_open = False
-        scene._input_gated = True   # 关菜单后, 防止菜单时按下的方向键续走
+        # ESC: 白点直接消失 (target=None), icons 转出
+        scene._menu_dismiss_t = 0
+        scene._menu_dismiss_target = None
+        scene._menu_dismiss_action = None
         return
     if key in (pygame.K_UP, pygame.K_w):
-        # 技能 → 启动过渡动画 (3 phase); 完成后 _submenu='skill' / _menu_open=False
+        # 技能 → L1→L2 过渡动画 (含 phase A 同样的白框动画)
         scene._menu_transition_t = 0
         scene._menu_transition_target = SMENU_SKILL
     elif key in (pygame.K_LEFT, pygame.K_a):
-        # 道具 → 暂时直接回战斗 (TODO: 道具系统)
-        scene._menu_open = False
-        scene._input_gated = True
+        # 道具 → 走 dismiss 动画 (含白框移到 item icon), 暂无实际效果
+        scene._menu_dismiss_t = 0
+        scene._menu_dismiss_target = SMENU_ITEM
+        scene._menu_dismiss_action = None
     elif key in (pygame.K_RIGHT, pygame.K_d):
-        # 设置 → 暂时直接回战斗 (TODO: 设置面板)
-        scene._menu_open = False
-        scene._input_gated = True
+        # 设置 → 同上, 暂无实际效果
+        scene._menu_dismiss_t = 0
+        scene._menu_dismiss_target = SMENU_SETTINGS
+        scene._menu_dismiss_action = None
     elif key in (pygame.K_DOWN, pygame.K_s):
-        # 回合结束
-        scene._menu_open = False
-        scene.battle.player_end_turn()
+        # 回合结束 → dismiss 动画完成后执行
+        scene._menu_dismiss_t = 0
+        scene._menu_dismiss_target = SMENU_END
+        scene._menu_dismiss_action = 'end_turn'
 
 
 def _advance_end_screen(scene: "BattleScene") -> None:
@@ -134,7 +143,8 @@ def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:
             or scene._menu_open
             or scene._submenu is not None
             or scene._menu_transition_t is not None
-            or scene._menu_close_t is not None):
+            or scene._menu_close_t is not None
+            or scene._menu_dismiss_t is not None):
         return
     u = scene.battle.current
     if not u.is_player:
