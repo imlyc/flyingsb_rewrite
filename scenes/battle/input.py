@@ -34,8 +34,8 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
     if update_mod.units_animating(scene):
         return True
 
-    # 菜单打开时: 方向键直接选项, ESC 关闭, 其它忽略
-    if scene._menu_open:
+    # 菜单 / 二级菜单 / 过渡动画 期间: 走菜单键路由, 不让方向键漏给角色移动
+    if scene._menu_open or scene._submenu is not None or scene._menu_transition_t is not None:
         _handle_menu_key(scene, event.key)
         return True
 
@@ -61,10 +61,18 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
     """十字菜单: 上=技能, 左=道具, 右=设置, 下=回合结束.
     ESC 一级关闭; 二级 (skill 列表) 按 ESC 回退到一级.
     """
+    from core.sprites.loaders import SMENU_SKILL
+
+    # 打开动画 / 过渡动画 期间不接键
+    if scene._menu_anim_t is not None or scene._menu_transition_t is not None:
+        return
+
     # 二级菜单: 只处理 ESC 回退, 其它键暂忽略 (列表为空 → 无可选项)
     if scene._submenu is not None:
         if key in (pygame.K_ESCAPE, pygame.K_x):
+            # 关二级 → 回到静态一级 (不再播打开动画, 直接显示)
             scene._submenu = None
+            scene._menu_open = True
         return
 
     # 一级菜单
@@ -73,8 +81,9 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
         scene._input_gated = True   # 关菜单后, 防止菜单时按下的方向键续走
         return
     if key in (pygame.K_UP, pygame.K_w):
-        # 技能 → 打开二级菜单 (空列表). 一级菜单保持开 (二级在它上面叠加).
-        scene._submenu = 'skill'
+        # 技能 → 启动过渡动画 (3 phase); 完成后 _submenu='skill' / _menu_open=False
+        scene._menu_transition_t = 0
+        scene._menu_transition_target = SMENU_SKILL
     elif key in (pygame.K_LEFT, pygame.K_a):
         # 道具 → 暂时直接回战斗 (TODO: 道具系统)
         scene._menu_open = False
@@ -119,7 +128,10 @@ def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:
         scene._last_current = scene.battle.current
         scene._input_gated = True
         scene._hold.reset()
-    if scene.battle.phase != Phase.PLAYER_MOVE or scene._menu_open:
+    if (scene.battle.phase != Phase.PLAYER_MOVE
+            or scene._menu_open
+            or scene._submenu is not None
+            or scene._menu_transition_t is not None):
         return
     u = scene.battle.current
     if not u.is_player:

@@ -75,6 +75,12 @@ class BattleScene(Scene):
     # 只 2 帧: row 4 col 0 (倒下中) + col 1 (躺平 corpse).
     # 一级菜单打开动画 (同步进行): 白方框收缩 + 4 icon 顺时针旋转放大入位.
     MENU_ANIM_TOTAL_MS = 360
+    # 一级 → 二级 过渡: A icons 再转 90° 消失 + 白点扩成白框移到所选 icon 位置;
+    # B 二级菜单 panel 缩放出现 (白框保持); C 白框移动 + 变形到二级菜单首行选项.
+    MENU_TRANSITION_A_MS = 220
+    MENU_TRANSITION_B_MS = 180
+    MENU_TRANSITION_C_MS = 180
+    MENU_TRANSITION_TOTAL_MS = MENU_TRANSITION_A_MS + MENU_TRANSITION_B_MS + MENU_TRANSITION_C_MS
 
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
@@ -123,6 +129,10 @@ class BattleScene(Scene):
         # 打开一级菜单的动画计时 (ms 累加; None = 已完成静态显示).
         # phase 1: 白方框收缩, phase 2: 4 icon 旋转放大入位. 见 scenes.battle.hud.
         self._menu_anim_t: int | None = None
+        # 一级 → 二级 过渡动画计时. None = 不在过渡中.
+        self._menu_transition_t: int | None = None
+        # 过渡选中的 icon (= 白框终点 / 二级菜单类型). 仅 SMENU_SKILL 实装.
+        self._menu_transition_target: int = 0
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None

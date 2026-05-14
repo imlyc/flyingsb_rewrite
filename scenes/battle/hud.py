@@ -33,11 +33,14 @@ def draw_floats(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
 
 
 def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
-    """十字 4 选项, 围在当前单位四周 — 用 SMENU.png 原版图标.
-    映射: 上=技能, 左=道具, 右=设置, 下=回合结束.
-    若 scene._submenu == 'skill': 额外画右侧二级菜单.
+    """十字 4 选项 + 二级菜单 + 全部过渡动画.
+    状态机:
+      _menu_anim_t != None       → 一级打开动画
+      _menu_transition_t != None → 一级→二级 过渡动画 (3 phase)
+      _menu_open + _submenu=None → 静态一级
+      _submenu='skill'           → 静态二级
     """
-    if not scene._menu_open:
+    if not scene._menu_open and scene._submenu is None:
         return
     from core.sprites.loaders import (
         SMENU_END, SMENU_ITEM, SMENU_SETTINGS, SMENU_SKILL, load_smenu_icon,
@@ -47,9 +50,8 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     ucx = u.x * TILE_W - cam_x + TILE_W // 2
     # ucy 落在当前 tile 顶边 (= 上一 tile 底边), 让九宫格跨这条边居中.
     ucy = u.y * TILE_H - cam_y
-    # 4 个 32×32 icon 紧挨成 3×3 九宫格 (中心格留给 unit, 透明黑边正好充当格子间隙).
     offset = 32
-    # icon 最终位置 + 极角 (用于动画). 极角约定: 0=右, π/2=下, π=左, -π/2=上.
+    # icon 最终位置 + 极角. 极角约定: 0=右, π/2=下, π=左, -π/2=上.
     placements = [
         (SMENU_SKILL,    ucx,          ucy - offset, -math.pi / 2),
         (SMENU_ITEM,     ucx - offset, ucy,           math.pi),
@@ -57,18 +59,101 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         (SMENU_END,      ucx,          ucy + offset,  math.pi / 2),
     ]
 
+    # 1. 一级打开动画
     if scene._menu_anim_t is not None:
         _draw_menu_open_anim(scene, ucx, ucy, placements, offset)
         return
 
-    # 静态状态: 4 个 icon 入位 + 中心白点
-    for icon_idx, x, y, _ in placements:
-        icon = load_smenu_icon(icon_idx)
-        scene.surface.blit(icon, icon.get_rect(center=(x, y)))
-    scene.surface.fill((255, 255, 255), pygame.Rect(ucx - 1, ucy - 1, 2, 2))
+    # 2. 一级 → 二级 过渡动画
+    if scene._menu_transition_t is not None:
+        _draw_menu_transition(scene, ucx, ucy, placements, offset)
+        return
 
+    # 3. 静态一级
+    if scene._menu_open:
+        for icon_idx, x, y, _ in placements:
+            icon = load_smenu_icon(icon_idx)
+            scene.surface.blit(icon, icon.get_rect(center=(x, y)))
+        scene.surface.fill((255, 255, 255), pygame.Rect(ucx - 1, ucy - 1, 2, 2))
+
+    # 4. 静态二级 (transition 完成后也走这里)
     if scene._submenu == 'skill':
-        _draw_skill_submenu(scene)
+        _draw_skill_submenu(scene, draw_highlight_row=True)
+
+
+def _draw_menu_transition(scene: "BattleScene", ucx: int, ucy: int,
+                          placements, offset: int) -> None:
+    """一级 → 二级 三段过渡:
+       A: 4 icon 再顺时针 90° + 淡出; 白点扩成白框, 中心移到选中 icon 的位置.
+       B: 二级菜单 panel 从中心缩放出现 (白框保持在选中 icon 位置).
+       C: 白框移动 + 变形, 包到二级菜单首行选项.
+    """
+    from core.sprites.loaders import load_smenu_icon
+    t = scene._menu_transition_t
+    A = scene.MENU_TRANSITION_A_MS
+    B = A + scene.MENU_TRANSITION_B_MS
+    sw, sh = scene.surface.get_size()
+
+    # 选中 icon 的一级 final 位置 (白框中转点)
+    sel_x, sel_y = ucx, ucy
+    for icon_idx, fx, fy, _ in placements:
+        if icon_idx == scene._menu_transition_target:
+            sel_x, sel_y = fx, fy
+            break
+
+    # 二级菜单首行选项 rect (白框最终落点; 跟 _draw_skill_submenu 保持一致)
+    panel_full = pygame.Rect(sw - 280, 80, 260, sh - 200)
+    target_row = pygame.Rect(panel_full.x + 12, panel_full.y + 42,
+                             panel_full.w - 24, 26)
+
+    # 白框 36×36 包住一格 icon (略大于 32 给视觉间隙)
+    SURROUND = 36
+
+    if t < A:
+        # Phase A: icons 旋转 + 淡出; 白点 (2px) → 白框 (36×36) 同时从中心移到 sel icon 位置
+        progress_a = t / A
+        for icon_idx, fx, fy, final_angle in placements:
+            # 顺时针再 90°: 角度从 final 向 final + π/2 (math angle), 屏幕上看 CW
+            angle = final_angle + progress_a * (math.pi / 2)
+            x = ucx + int(offset * math.cos(angle))
+            y = ucy + int(offset * math.sin(angle))
+            icon = load_smenu_icon(icon_idx).copy()
+            icon.set_alpha(int(255 * (1 - progress_a)))
+            scene.surface.blit(icon, icon.get_rect(center=(x, y)))
+        # 白框
+        fx_pos = int(ucx + (sel_x - ucx) * progress_a)
+        fy_pos = int(ucy + (sel_y - ucy) * progress_a)
+        size = int(2 + (SURROUND - 2) * progress_a)
+        rect = pygame.Rect(0, 0, size, size)
+        rect.center = (fx_pos, fy_pos)
+        if size <= 2:
+            scene.surface.fill((255, 255, 255), rect)
+        else:
+            pygame.draw.rect(scene.surface, (255, 255, 255), rect, 1)
+        return
+
+    if t < B:
+        # Phase B: 二级菜单 panel scale 0→1; 白框停在 sel icon 位置
+        progress_b = (t - A) / (B - A)
+        _draw_skill_submenu(scene, draw_highlight_row=False, scale=progress_b)
+        rect = pygame.Rect(0, 0, SURROUND, SURROUND)
+        rect.center = (sel_x, sel_y)
+        pygame.draw.rect(scene.surface, (255, 255, 255), rect, 1)
+        return
+
+    # Phase C: 二级菜单已完整; 白框从 (sel icon 位置, 36×36) → 首行选项 rect
+    progress_c = (t - B) / (scene.MENU_TRANSITION_TOTAL_MS - B)
+    _draw_skill_submenu(scene, draw_highlight_row=False)
+    # 起点 rect (36×36 围在 sel icon)
+    start = pygame.Rect(0, 0, SURROUND, SURROUND)
+    start.center = (sel_x, sel_y)
+    # 插值 → target_row
+    cur_x = int(start.x + (target_row.x - start.x) * progress_c)
+    cur_y = int(start.y + (target_row.y - start.y) * progress_c)
+    cur_w = int(start.w + (target_row.w - start.w) * progress_c)
+    cur_h = int(start.h + (target_row.h - start.h) * progress_c)
+    pygame.draw.rect(scene.surface, (255, 255, 255),
+                     pygame.Rect(cur_x, cur_y, cur_w, cur_h), 1)
 
 
 def _draw_menu_open_anim(scene: "BattleScene", ucx: int, ucy: int,
@@ -108,28 +193,44 @@ def _draw_menu_open_anim(scene: "BattleScene", ucx: int, ucy: int,
     scene.surface.fill((255, 255, 255), pygame.Rect(ucx - 1, ucy - 1, 2, 2))
 
 
-def _draw_skill_submenu(scene: "BattleScene") -> None:
-    """二级菜单: 标题「特殊能力」+ 技能列表 (当前为空, ESC 返回一级)."""
+def _draw_skill_submenu(scene: "BattleScene", *,
+                        draw_highlight_row: bool = True,
+                        scale: float = 1.0) -> None:
+    """二级菜单: 标题「特殊能力」+ 技能列表 (当前为空).
+    scale<1 时 panel 从中心缩放出现 (phase B 用);
+    draw_highlight_row=False 时不画黄色行框 (phase C 由动画白框替代).
+    """
     sw, sh = scene.surface.get_size()
-    # 右侧 panel 占 ~40% 宽, 顶到地图区域底
-    panel = pygame.Rect(sw - 280, 80, 260, sh - 200)
+    panel_full = pygame.Rect(sw - 280, 80, 260, sh - 200)
+    if scale < 0.05:
+        return
+
+    # 缩放后的 panel (保持 panel_full 中心)
+    cx, cy = panel_full.center
+    pw = max(2, int(panel_full.w * scale))
+    ph = max(2, int(panel_full.h * scale))
+    panel = pygame.Rect(0, 0, pw, ph)
+    panel.center = (cx, cy)
+
     bg = pygame.Surface(panel.size, pygame.SRCALPHA)
     bg.fill((20, 30, 40, 230))
     scene.surface.blit(bg, panel)
     pygame.draw.rect(scene.surface, scene.PANEL_BORDER, panel, 2)
 
+    if scale < 0.95:
+        return    # 缩放中不画文字 / 选项行
+
     # 标题
     title = scene.font.render("特殊能力", True, scene.HIGHLIGHT)
     scene.surface.blit(title, (panel.x + 14, panel.y + 10))
 
-    # 选中行高亮 (空列表 → 空横条占位, 跟原版 h070 一致)
+    # 选中行 (空列表 → 空横条占位, 跟原版 h070 一致)
     row = pygame.Rect(panel.x + 12, panel.y + 42, panel.w - 24, 26)
-    pygame.draw.rect(scene.surface, scene.HIGHLIGHT, row, 1)
-    # 空列表提示
+    if draw_highlight_row:
+        pygame.draw.rect(scene.surface, scene.HIGHLIGHT, row, 1)
     empty = scene.small.render("(暂无可用技能)", True, scene.DIM)
     scene.surface.blit(empty, empty.get_rect(midleft=(row.x + 8, row.centery)))
 
-    # 底部 ESC 返回提示
     hint = scene.tiny.render("ESC 返回", True, scene.DIM)
     scene.surface.blit(hint, hint.get_rect(bottomright=(panel.right - 8, panel.bottom - 6)))
 

@@ -44,13 +44,23 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
 
 
 def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
-    """打开一级菜单的两段动画 (phase 1 白方框收缩 + phase 2 icon 旋转放大).
-    跑完后置 None, draw 进入静态状态."""
-    if scene._menu_anim_t is None:
-        return
-    scene._menu_anim_t += dt_ms
-    if scene._menu_anim_t >= scene.MENU_ANIM_TOTAL_MS:
-        scene._menu_anim_t = None
+    """菜单动画推进:
+       - _menu_anim_t: 一级菜单打开 (白方框收缩 + 4 icon 旋转放大)
+       - _menu_transition_t: 一级 → 二级 过渡 (3 phase)
+    """
+    if scene._menu_anim_t is not None:
+        scene._menu_anim_t += dt_ms
+        if scene._menu_anim_t >= scene.MENU_ANIM_TOTAL_MS:
+            scene._menu_anim_t = None
+
+    if scene._menu_transition_t is not None:
+        scene._menu_transition_t += dt_ms
+        # phase B 开始: 提升 _submenu 状态让二级菜单 panel 开始 draw
+        if scene._menu_transition_t >= scene.MENU_TRANSITION_A_MS and scene._submenu is None:
+            scene._submenu = 'skill'
+        if scene._menu_transition_t >= scene.MENU_TRANSITION_TOTAL_MS:
+            scene._menu_transition_t = None
+            scene._menu_open = False    # 一级菜单收掉, 只剩二级
 
 
 def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:
