@@ -74,18 +74,18 @@ class BattleScene(Scene):
     # 死亡动画时长 (ms). exe FUN_004399c5/9b42 等 +0x124=0x14 = 20 ticks/帧 = 800ms.
     # 只 2 帧: row 4 col 0 (倒下中) + col 1 (躺平 corpse).
     # 一级菜单打开动画 (同步进行): 白方框收缩 + 4 icon 顺时针旋转放大入位.
-    MENU_ANIM_TOTAL_MS = 360
+    MENU_ANIM_TOTAL_MS = 200
     # 一级 → 二级 过渡: A icons 再转 90° 消失 + 白点扩成白框移到所选 icon 位置;
     # B 二级菜单 panel 缩放出现 (白框保持); C 白框移动 + 变形到二级菜单首行选项.
-    MENU_TRANSITION_A_MS = 220
-    MENU_TRANSITION_B_MS = 180
-    MENU_TRANSITION_C_MS = 180
+    MENU_TRANSITION_A_MS = 120
+    MENU_TRANSITION_B_MS = 100
+    MENU_TRANSITION_C_MS = 100
     MENU_TRANSITION_TOTAL_MS = MENU_TRANSITION_A_MS + MENU_TRANSITION_B_MS + MENU_TRANSITION_C_MS
     # 二级 → 一级 反向动画: 二级 panel 缩小消失. 完成后立即接 _menu_anim_t (= 一级打开动画).
-    MENU_CLOSE_MS = 200
+    MENU_CLOSE_MS = 120
     # 一级菜单关闭回战斗的动画 (跟 L1→L2 phase A 同形): icons 转 90° 淡出 + 选中 icon 的
     # 白框形成. ESC 路径不画白框; End/Item/Settings 走完白框成型后整体消失.
-    MENU_DISMISS_MS = 220
+    MENU_DISMISS_MS = 120
 
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
