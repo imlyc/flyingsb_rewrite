@@ -5,7 +5,7 @@
 (BattleQueries 实例, 见 core.battle.queries).
 本文件只管:
   - 摆阵 / 回合流转 (start_round, enter_current, end_unit_turn, post_enemy_turn)
-  - 玩家行动公开 API (player_step / player_attack_facing / player_use_skill / ...)
+  - 玩家行动公开 API (player_step / enter_attack_aim / confirm_attack_aim / player_use_skill / ...)
   - anim_engine glue (engine.on signal → 派发)
   - 胜负检测 + 升级分配
 """
@@ -63,6 +63,12 @@ class TacticsBattle:
         self._pending_enemy_attack: BattleUnit | None = None
         # 攻击 SIGNAL -110 END 触发后, 等所有动画跑完才切回合 (= advance_turn_when_ready 触发)
         self._pending_turn_end: bool = False
+        # AIM 阶段状态: cursor 位置 + 可游走的 pattern (= 该攻击/技能的合法 cursor 集合).
+        # 普攻 pattern = {facing 前一格}; 远程技能 pattern 多格. 方向键在 pattern 内移动 cursor;
+        # shift+方向键转 facing, 重新计算 pattern.
+        self.aim_cursor: tuple[int, int] | None = None
+        self.aim_pattern: set[tuple[int, int]] = set()
+        self.aim_skill_id: int | None = None
         # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
         # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
         from core.anim_engine.engine import Engine
@@ -255,18 +261,84 @@ class TacticsBattle:
         u.x, u.y = nx, ny
         return True
 
-    def player_attack_facing(self) -> bool:
-        """攻击当前面向格子上的敌人 (Enter 键). 启动 attack_seq, UI 推完才结束回合."""
+    def _compute_aim_pattern(self, u: BattleUnit, skill_id: int | None) -> set[tuple[int, int]]:
+        """给定 unit 和 (可选) 技能 ID, 返回 AIM 阶段 cursor 的合法位置集合.
+        普攻 (skill_id=None): 仅 facing 前一格. 远程技能: 该技能的 pattern (TBD).
+        所有 tile 必须在地图内.
+        """
+        if skill_id is None:
+            fx, fy = u.x + u.facing[0], u.y + u.facing[1]
+            if self.map.in_bounds(fx, fy):
+                return {(fx, fy)}
+            return set()
+        # TODO: 技能 pattern 表 (按 skill_id 查范围模板). 暂用普攻当 fallback.
+        fx, fy = u.x + u.facing[0], u.y + u.facing[1]
+        return {(fx, fy)} if self.map.in_bounds(fx, fy) else set()
+
+    def enter_attack_aim(self, skill_id: int | None = None) -> bool:
+        """从 PLAYER_MOVE 进入 PLAYER_AIM (= 选攻击目标阶段).
+        计算 pattern, cursor 初始 = facing 前一格 (若在 pattern 中) 或 pattern 第一格.
+        skill_id=None 普攻; 否则按技能算 pattern (远程多格).
+        """
         u = self.current
         if self.phase != Phase.PLAYER_MOVE or not u.is_player:
             return False
-        fx, fy = u.x + u.facing[0], u.y + u.facing[1]
-        target = self.q.occupant(fx, fy)
+        pattern = self._compute_aim_pattern(u, skill_id)
+        if not pattern:
+            return False
+        self.phase = Phase.PLAYER_AIM
+        self.aim_skill_id = skill_id
+        self.aim_pattern = pattern
+        facing_tile = (u.x + u.facing[0], u.y + u.facing[1])
+        self.aim_cursor = facing_tile if facing_tile in pattern else next(iter(pattern))
+        return True
+
+    def aim_move_cursor(self, dx: int, dy: int) -> bool:
+        """AIM 方向键: cursor 在 pattern 内移动一步. 越出 pattern → 不变."""
+        if self.phase != Phase.PLAYER_AIM or self.aim_cursor is None:
+            return False
+        nx, ny = self.aim_cursor[0] + dx, self.aim_cursor[1] + dy
+        if (nx, ny) in self.aim_pattern:
+            self.aim_cursor = (nx, ny)
+            return True
+        return False
+
+    def aim_turn_facing(self, dx: int, dy: int) -> bool:
+        """AIM shift+方向键: 转 unit facing, 重算 pattern + 把 cursor 重置到新 facing 前一格.
+        让远程攻击的 pattern 跟着朝向旋转, 普攻则单格 cursor 跳到新方向.
+        """
+        u = self.current
+        if self.phase != Phase.PLAYER_AIM or not u.is_player:
+            return False
+        u.facing = (dx, dy)
+        pattern = self._compute_aim_pattern(u, self.aim_skill_id)
+        if not pattern:
+            return False
+        self.aim_pattern = pattern
+        facing_tile = (u.x + u.facing[0], u.y + u.facing[1])
+        self.aim_cursor = facing_tile if facing_tile in pattern else next(iter(pattern))
+        return True
+
+    def confirm_attack_aim(self) -> bool:
+        """AIM 阶段 Enter: 攻击 cursor 上的敌人. 无敌人 → 返回 False (UI log)."""
+        u = self.current
+        if self.phase != Phase.PLAYER_AIM or self.aim_cursor is None:
+            return False
+        cx, cy = self.aim_cursor
+        target = self.q.occupant(cx, cy)
         if target is None or target.is_player == u.is_player:
             return False
-        if (fx, fy) not in self.q.attack_tiles(u, u.x, u.y):
-            return False
         combat.begin_attack(self, u, target)
+        return True
+
+    def cancel_attack_aim(self) -> bool:
+        """AIM 阶段 ESC: 取消, 退回 PLAYER_MOVE. 清 cursor / pattern."""
+        if self.phase != Phase.PLAYER_AIM:
+            return False
+        self.phase = Phase.PLAYER_MOVE
+        self.aim_cursor = None
+        self.aim_pattern = set()
+        self.aim_skill_id = None
         return True
 
     def post_attack_anim(self, attacker: BattleUnit) -> None:

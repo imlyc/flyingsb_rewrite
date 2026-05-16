@@ -90,13 +90,65 @@ def test_player_step_out_of_range():
     assert not b.player_step(1, 0)          # 第 2 步超 move=1
 
 
-def test_player_attack_facing_no_target():
-    """朝向无敌人 → 攻击失败 (不会启动 attack_seq)."""
+def test_enter_aim_then_confirm_no_target():
+    """PLAYER_MOVE 进 AIM, 朝向无敌人时 Enter 不发动攻击."""
     p = _player("p", 5, 5, agile=20)
     e = _enemy("e", 9, 9, agile=5)
     b = _battle(players=[p], enemies=[e])
+    assert b.enter_attack_aim()
+    assert b.phase == Phase.PLAYER_AIM
     p.facing = (0, 1)                       # 朝下, 没人
-    assert not b.player_attack_facing()
+    assert not b.confirm_attack_aim()
+    assert b.phase == Phase.PLAYER_AIM      # 仍在 aim, 继续选目标
+
+
+def test_cancel_attack_aim_returns_to_move():
+    """AIM 阶段 ESC 取消 → 回到 PLAYER_MOVE."""
+    p = _player("p", 5, 5, agile=20)
+    e = _enemy("e", 9, 9, agile=5)
+    b = _battle(players=[p], enemies=[e])
+    b.enter_attack_aim()
+    assert b.cancel_attack_aim()
+    assert b.phase == Phase.PLAYER_MOVE
+
+
+def test_aim_turn_facing_recomputes_pattern():
+    """AIM shift+方向键: 转 facing + 重算 pattern + cursor 跟到新 facing 格."""
+    p = _player("p", 5, 5, agile=20)
+    e = _enemy("e", 9, 9, agile=5)
+    b = _battle(players=[p], enemies=[e])
+    p.facing = (0, 1)                      # 朝下
+    b.enter_attack_aim()
+    assert b.aim_cursor == (5, 6)           # facing 前一格
+    assert b.aim_pattern == {(5, 6)}        # 普攻 pattern 单格
+    assert b.aim_turn_facing(1, 0)          # 转向右
+    assert p.facing == (1, 0)
+    assert b.aim_cursor == (6, 5)
+    assert b.aim_pattern == {(6, 5)}
+    assert (p.x, p.y) == (5, 5)             # unit 位置没动
+
+
+def test_aim_move_cursor_constrained_by_pattern():
+    """普攻 pattern 只有 1 格, 方向键移 cursor 应该不动 (无邻接合法位置)."""
+    p = _player("p", 5, 5, agile=20)
+    e = _enemy("e", 9, 9, agile=5)
+    b = _battle(players=[p], enemies=[e])
+    p.facing = (1, 0)
+    b.enter_attack_aim()
+    assert b.aim_cursor == (6, 5)
+    assert not b.aim_move_cursor(0, 1)      # 单格 pattern, 不能动
+    assert b.aim_cursor == (6, 5)
+
+
+def test_aim_confirm_attacks_cursor_target():
+    """confirm 攻击 cursor 上的敌人, 而非 facing 格 (= 远程时这两个可能不同)."""
+    p = _player("p", 5, 5, agile=20)
+    e = _enemy("e", 6, 5, agile=5)          # 邻接, 在普攻 pattern 内
+    b = _battle(players=[p], enemies=[e])
+    p.facing = (1, 0)
+    b.enter_attack_aim()
+    assert b.aim_cursor == (6, 5)
+    assert b.confirm_attack_aim()           # cursor 上有敌, 攻击成功
 
 
 def test_check_end_victory_when_all_enemies_dead():

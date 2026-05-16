@@ -203,24 +203,30 @@ class BattleScene(Scene):
 
     def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
         u = self.battle.current
-        if not u.is_player or self.battle.phase != Phase.PLAYER_MOVE:
+        phase = self.battle.phase
+        if not u.is_player or phase not in (Phase.PLAYER_MOVE, Phase.PLAYER_AIM):
             return
-        # Layer 1: 移动可达范围 (蓝基底)
+        # Layer 1: 移动可达范围 (蓝基底) — 两阶段都画, AIM 里也保留作为参考
         for (x, y) in self.battle.turn_move_range:
             self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
-        # 朝向格: 只在角色静止 (render 已到位) 时才显示
+        # cursor / pattern: 角色静止才显示
         if (abs(u.render_x - u.x) > self.ANIM_EPSILON
                 or abs(u.render_y - u.y) > self.ANIM_EPSILON):
             return
-        fx, fy = u.x + u.facing[0], u.y + u.facing[1]
-        if self.battle.map.in_bounds(fx, fy):
-            occ = self.battle.q.occupant(fx, fy)
-            rect = self._tile_rect(fx, fy, cam_x, cam_y)
-            # Layer 2: 攻击格 (深红基底) — 朝向有敌人时铺
-            if occ is not None and occ.is_player != u.is_player:
-                self.surface.blit(self._atk_tint, rect)
-            # Layer 3: 白色焦点 overlay — 跟下层叠加: 蓝+白=浅蓝, 红+白=浅红, 空+白=纯白
-            self.surface.blit(self._face_focus_tint, rect)
+        if phase == Phase.PLAYER_AIM:
+            # 全部 pattern tile 铺红基底; cursor 那格再加白焦点 = 浅红
+            for (px, py) in self.battle.aim_pattern:
+                self.surface.blit(self._atk_tint, self._tile_rect(px, py, cam_x, cam_y))
+            cur = self.battle.aim_cursor
+            if cur is not None:
+                self.surface.blit(self._face_focus_tint,
+                                  self._tile_rect(cur[0], cur[1], cam_x, cam_y))
+        else:
+            # MOVE 阶段: 普攻 preview cursor (= facing 前一格), 仅白焦点
+            fx, fy = u.x + u.facing[0], u.y + u.facing[1]
+            if self.battle.map.in_bounds(fx, fy):
+                self.surface.blit(self._face_focus_tint,
+                                  self._tile_rect(fx, fy, cam_x, cam_y))
 
     # ------- 几何工具 -------
     def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:

@@ -148,7 +148,7 @@ def default_battle_map(w: int = 15, h: int = 10, rng: random.Random | None = Non
 # ---------------- 阶段 ----------------
 class Phase(Enum):
     PLAYER_MOVE = auto()    # 等玩家选移动目标
-    PLAYER_ACT = auto()     # 移动后选攻击 / 跳过
+    PLAYER_AIM = auto()     # 选攻击目标 (cursor 在 facing 格, 红 tile, Enter 确认)
     ENEMY_TURN = auto()     # 敌方 AI (UI 演示后调 post_enemy_turn)
     VICTORY = auto()
     DEFEAT = auto()

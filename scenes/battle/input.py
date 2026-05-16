@@ -42,6 +42,11 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
         _handle_menu_key(scene, event.key)
         return True
 
+    # PLAYER_AIM: 方向键 cursor 在 pattern 内游走 / shift+方向 转 facing / Enter 确认 / ESC 取消.
+    if scene.battle.phase == Phase.PLAYER_AIM:
+        _handle_aim_key(scene, event.key, event.mod)
+        return True
+
     # 方向键不再走 KEYDOWN (改为 update 里轮询长按), 避免按一下就瞬移领先动画.
     # 但需要这一刻清掉输入门 — 否则战斗中换单位 / 返回地图时长按状态会被误读为"续按".
     if event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN,
@@ -51,13 +56,43 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
         return True
 
     if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-        scene.battle.player_attack_facing()
+        # PLAYER_MOVE Enter: 进入 AIM 阶段 (不立即攻击)
+        scene.battle.enter_attack_aim()
     elif event.key == pygame.K_ESCAPE:
         scene._menu_open = True
         scene._menu_anim_t = 0   # 打开动画起点 (update tick 会推进)
     elif event.key == pygame.K_x:
         scene.battle.cancel_to_move()
     return True
+
+
+def _handle_aim_key(scene: "BattleScene", key: int, mod: int) -> None:
+    """PLAYER_AIM 阶段:
+       方向键 = cursor 在 pattern 内移动 (单格普攻 pattern 只有 1 格 → 不动).
+       Shift+方向键 = 转 facing, pattern 跟着旋转 (= 远程攻击转向).
+       Enter = 确认攻击 cursor 上的敌人 / Esc-X = 取消.
+    """
+    DIR = {
+        pygame.K_LEFT: (-1, 0), pygame.K_a: (-1, 0),
+        pygame.K_RIGHT: (1, 0), pygame.K_d: (1, 0),
+        pygame.K_UP: (0, -1), pygame.K_w: (0, -1),
+        pygame.K_DOWN: (0, 1), pygame.K_s: (0, 1),
+    }
+    if key in DIR:
+        dx, dy = DIR[key]
+        if mod & pygame.KMOD_SHIFT:
+            scene.battle.aim_turn_facing(dx, dy)
+        else:
+            scene.battle.aim_move_cursor(dx, dy)
+        return
+    if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+        if not scene.battle.confirm_attack_aim():
+            scene.battle._log(f"{scene.battle.current.name} 目标格无敌人, 无法攻击")
+        return
+    if key in (pygame.K_ESCAPE, pygame.K_x):
+        scene.battle.cancel_attack_aim()
+        scene._input_gated = True
+        return
 
 
 def _handle_menu_key(scene: "BattleScene", key: int) -> None:
