@@ -114,6 +114,56 @@ def test_unknown_enemy_picks_starburst():
     assert specs[0].atlas_key == "et00"
 
 
+# ---- end-to-end: spec → bytecode → anim_engine entity ----
+
+def test_spec_to_bytecode_fm_then_exit():
+    """3 帧 FM (10B each) + EXIT (2B) = 32B."""
+    from core.hit_effect_seq import HitEffectSpec
+    spec = HitEffectSpec("ef010", [12, 13, 14], frame_ticks=2, jittered=False)
+    bc = spec.to_bytecode()
+    assert len(bc) == 3 * 10 + 2
+    assert bc[0] == 0x04 and bc[1] == 0x0a       # 1st op = FM size 10
+    assert bc[30] == 0x00 and bc[31] == 0x02     # 末尾 = EXIT size 2
+
+
+def test_spec_runs_through_engine():
+    """bytecode 挂到 engine, tick 累加, 帧推进, 最终 EXIT 落 playing flag."""
+    from core.anim_engine.engine import Engine
+    from core.hit_effect_seq import HitEffectSpec
+
+    eng = Engine()
+    e = eng.spawn()
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['atlas_key'] = 'ef010'
+    spec = HitEffectSpec("ef010", [12, 13, 14], frame_ticks=2, jittered=False)
+    eng.attach_seq(e, spec.to_bytecode())
+
+    # attach_seq 跑到第一个阻塞 FM op (frame 12, ticks=2)
+    assert e.is_playing()
+    assert e.atlas_slot == 216    # ef010 全局 idx
+    assert e.frame_idx == 12
+    assert e.ticks == 2
+
+    # 跑足够多 tick 让 3 帧依次显示 + EXIT 触发. tick 数因 dispatch-don't-decrement-same-tick
+    # 规则会比 (ticks * frames) 多一些, 不死磕精确数, 验证语义即可.
+    frames_seen = []
+    for _ in range(15):
+        eng.tick()
+        frames_seen.append(e.frame_idx if e.is_playing() else None)
+
+    assert 12 in frames_seen
+    assert 13 in frames_seen
+    assert 14 in frames_seen
+    # EXIT 后 playing flag 落下
+    assert frames_seen[-1] is None
+    # 帧顺序: 12 全在 13 前, 13 全在 14 前
+    last_12 = max(i for i, f in enumerate(frames_seen) if f == 12)
+    first_13 = min(i for i, f in enumerate(frames_seen) if f == 13)
+    last_13 = max(i for i, f in enumerate(frames_seen) if f == 13)
+    first_14 = min(i for i, f in enumerate(frames_seen) if f == 14)
+    assert last_12 < first_13 < last_13 < first_14
+
+
 def test_unknown_name_picks_starburst():
     specs = pick_hit_effects("不存在", None, (0, 1))
     assert specs[0].atlas_key == "et00"

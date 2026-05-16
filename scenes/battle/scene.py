@@ -35,7 +35,7 @@ from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
 from scenes.battle import update as update_mod
 from scenes.battle.float_text import FloatText
-from scenes.battle.hit_effect import HitEffect
+from scenes.battle.hit_effect import draw_hit_effects
 
 if TYPE_CHECKING:
     from scenes.world_map.scene import WorldMapScene
@@ -118,7 +118,6 @@ class BattleScene(Scene):
         self._enemy_turn_started_at: int | None = None
         self._battle_over_signaled = False
         self._floats: list[FloatText] = []
-        self._hit_effects: list[HitEffect] = []
         # anim_engine tick 累积器 (40ms/tick); update() 每帧累加 dt_ms
         self._eng_acc_ms: int = 0
         # FM op 触发时记录其总 ticks (用于 sub-frame 插值: cols > n 的 atlas)
@@ -193,10 +192,8 @@ class BattleScene(Scene):
         units_mod.draw_units(self, cam_x, cam_y)
         # 4) 行动菜单 (ESC 弹出)
         hud_mod.draw_action_menu(self, cam_x, cam_y)
-        # 5) 命中特效 (hit-spark, 单位之上, 飘字之下)
-        now_ms = pygame.time.get_ticks()
-        for fx in self._hit_effects:
-            fx.draw(self.surface, cam_x, cam_y, now_ms)
+        # 5) 命中特效 (hit-spark anim_engine entity, 单位之上, 飘字之下)
+        draw_hit_effects(self, cam_x, cam_y)
         # 6) 浮动伤害
         hud_mod.draw_floats(self, cam_x, cam_y)
         # 6) HUD (不滚动)

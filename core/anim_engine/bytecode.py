@@ -51,6 +51,9 @@ def tuple_to_bytecode(tuple_seq: list) -> bytes:
             out += encode_op(0x0e, t[1])
         elif kind == 'end':
             out += encode_op(0x0e, SIG_END)
+        elif kind == 'exit':
+            # 实测 EXIT op 是 2B (`00 02`), 不是 ANIM_ENGINE_SPEC 早期写的 4B
+            out += bytes([0x00, 0x02])
         elif kind == 'raw':
             # 10B raw op: [op_low, 0x0a, a, b, c, d] (4 × i16)
             _, op_hex, a, b, c, d = t
@@ -72,7 +75,8 @@ def encode_op(op_id: int, *fields, size: Optional[int] = None) -> bytes:
     size 留 None 用 op_id 默认 size; 否则覆盖.
     """
     DEFAULT_SIZE = {
-        0x00: 4, 0x01: 4, 0x02: 4, 0x03: 4,
+        0x00: 2,                        # EXIT (实测 2B)
+        0x01: 4, 0x02: 4, 0x03: 4,
         0x04: 10, 0x05: 10, 0x06: 10,
         0x07: 8, 0x08: 4, 0x09: 4, 0x0a: 4,
         0x0b: 10, 0x0c: 10,

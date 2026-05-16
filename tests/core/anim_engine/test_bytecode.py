@@ -41,9 +41,9 @@ def test_encode_signal():
 
 
 def test_encode_exit():
-    """EXIT 无 payload, 仍占 4 字节."""
+    """EXIT 实测 size=2 (字节流 `00 02`), 不是早期 spec 写的 4."""
     out = encode_op(0x00)
-    assert out == bytes([0x00, 4, 0, 0])
+    assert out == bytes([0x00, 2])
 
 
 def test_tuple_to_bytecode_mixed():

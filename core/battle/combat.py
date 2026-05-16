@@ -59,14 +59,17 @@ def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
 
 
 def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:
-    """命中分支专用 hit-spark 事件 (= 原版 DOIT_melee IMPACT 同时 spawn 2 个 entity).
+    """命中分支: 仿原版 DOIT_melee IMPACT 同时 spawn 2 个独立 anim_engine entity.
     miss/dodge 不放. ATK_C 1st spawn = 长椭圆, 否则 = 紫色 starburst; 2nd spawn = 小红刺爆.
     每个 spec 独立抖动 (jittered=True 时 RNG ±8px).
     """
     from core.hit_effect_seq import (
         HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX, pick_hit_effects,
     )
+    from core.sprites.base import TILE_W, TILE_H
     specs = pick_hit_effects(attacker.name, None, attacker.facing)
+    cx = defender.x * TILE_W + TILE_W // 2
+    cy = defender.y * TILE_H + TILE_H // 2
     for spec in specs:
         if spec.jittered:
             ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
@@ -74,11 +77,21 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
         else:
             ox = 0
             oy = -HIT_EFFECT_Y_BASELINE_PX
-        battle.hit_effect_events.append((
-            defender.x, defender.y,
-            spec.atlas_key, list(spec.frames), spec.frame_ticks,
-            ox, oy,
-        ))
+        _spawn_effect_entity(battle, cx + ox, cy + oy, spec)
+
+
+def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, spec) -> None:
+    """通用 effect entity spawn: 跟原版 FUN_004d0c90 blood_spawn 同套路.
+    spawn anim_engine entity → 设世界坐标 → attach_seq 跑 FM op 字节码.
+    EXIT op 自然结束后 playing flag 自动落下, render 端跳过该 entity.
+    """
+    e = battle.engine.spawn()
+    e.x = world_x << 16
+    e.y = world_y << 16
+    e.z = 0
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['atlas_key'] = spec.atlas_key
+    battle.engine.attach_seq(e, spec.to_bytecode())
 
 
 def strike_skill(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:

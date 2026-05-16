@@ -26,16 +26,17 @@ def _unit(name, x, y, *, hp=20, atk=10, defense=2, agile=10, is_player=True):
 
 
 class _FakeBattle:
-    """combat.* 只用 rng / damage_events / _log, 拼一个最小 stub."""
+    """combat.* 只用 rng / damage_events / _log / engine (hit-effect spawn), 拼一个最小 stub."""
     def __init__(self, seed=0):
+        from core.anim_engine.engine import Engine
         self.rng = random.Random(seed)
         self.damage_events: list[DamageEvent] = []
-        self.hit_effect_events: list = []
         self.messages: list[str] = []
         self.players: list[BattleUnit] = []
         self.enemies: list[BattleUnit] = []
         self.map = BattleMap(10, 10)
         self.q = BattleQueries(self.map, self.players, self.enemies)
+        self.engine = Engine()
 
     def _log(self, m): self.messages.append(m)
 

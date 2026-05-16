@@ -150,6 +150,16 @@ ATLAS_HIT_FX: dict[str, str] = {
 }
 
 
+# atlas_key (= resource 名, 不含 fm_ 前缀, 小写) → 全局 atlas_idx (= FM op mode 0 的 slot 值).
+# 用在 build_hit_effect_bytecode: bytecode 里 FM op slot 是 atlas idx, render 端再 lookup
+# 回 atlas_key (atlas_resource). 跟原版语义一致.
+ATLAS_KEY_TO_IDX: dict[str, int] = {
+    "et00":  215,
+    "ef010": 216,
+    "ef011": 217,
+}
+
+
 class HitEffectSpec:
     """1 个待 spawn 的 effect: atlas + frames + 每帧 ticks + 是否抖动."""
     __slots__ = ("atlas_key", "frames", "frame_ticks", "jittered")
@@ -158,6 +168,14 @@ class HitEffectSpec:
         self.frames = frames
         self.frame_ticks = frame_ticks
         self.jittered = jittered
+
+    def to_bytecode(self) -> bytes:
+        """组 anim_engine 字节码: 一串 FM op + EXIT. 模拟原版 blood_spawn 挂的 seq."""
+        from core.anim_engine.bytecode import tuple_to_bytecode
+        slot = ATLAS_KEY_TO_IDX[self.atlas_key]
+        steps: list = [('fm', slot, fi, self.frame_ticks) for fi in self.frames]
+        steps.append(('exit',))
+        return tuple_to_bytecode(steps)
 
 
 _STYLE_PRESETS: dict[str, tuple[str, dict[str, list[int]], int]] = {
