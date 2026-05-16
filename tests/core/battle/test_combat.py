@@ -30,6 +30,7 @@ class _FakeBattle:
     def __init__(self, seed=0):
         self.rng = random.Random(seed)
         self.damage_events: list[DamageEvent] = []
+        self.hit_effect_events: list = []
         self.messages: list[str] = []
         self.players: list[BattleUnit] = []
         self.enemies: list[BattleUnit] = []

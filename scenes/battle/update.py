@@ -20,6 +20,7 @@ from core.battle.data import Phase
 from core.sprites.base import TILE_W, TILE_H
 from scenes.battle import input as input_mod
 from scenes.battle.float_text import FloatText
+from scenes.battle.hit_effect import HitEffect
 
 if TYPE_CHECKING:
     from scenes.battle.scene import BattleScene
@@ -31,6 +32,7 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
     _tick_unit_positions(scene, dt_ms)
     input_mod.poll_player_hold(scene, dt_ms)
     _ingest_damage_events(scene, now)
+    _ingest_hit_effect_events(scene, now)
     _tick_reactions(scene, dt_ms)
     _tick_death_animations(scene, now, dt_ms)
     _tick_anim_engine(scene, dt_ms)
@@ -141,6 +143,20 @@ def _ingest_damage_events(scene: "BattleScene", now: int) -> None:
         scene._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss))
     scene.battle.damage_events.clear()
     scene._floats = [f for f in scene._floats if f.alive(now)]
+
+
+def _ingest_hit_effect_events(scene: "BattleScene", now: int) -> None:
+    """battle 命中事件 → spawn HitEffect (= 原版 DOIT_melee IMPACT 的 blood entity).
+    一次命中通常 push 2 项 (1st jitter spawn + 2nd defender 中心 spawn)."""
+    for tx, ty, atlas_key, frames, frame_ticks, ox, oy in scene.battle.hit_effect_events:
+        wx = tx * TILE_W + TILE_W // 2
+        wy = ty * TILE_H + TILE_H // 2
+        scene._hit_effects.append(HitEffect(
+            wx, wy, atlas_key, frames, frame_ticks, now,
+            offset_x=ox, offset_y=oy,
+        ))
+    scene.battle.hit_effect_events.clear()
+    scene._hit_effects = [h for h in scene._hit_effects if h.alive(now)]
 
 
 def _tick_reactions(scene: "BattleScene", dt_ms: int) -> None:

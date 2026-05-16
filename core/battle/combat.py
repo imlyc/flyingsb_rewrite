@@ -53,8 +53,32 @@ def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
     defender.hp = max(0, defender.hp - dmg)
     battle.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
     set_reaction(defender, "hit", attacker)
+    _emit_hit_effect(battle, attacker, defender)
     battle._log(f"{attacker.name} → {defender.name}: {dmg} {label}命中"
                 + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
+
+
+def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:
+    """命中分支专用 hit-spark 事件 (= 原版 DOIT_melee IMPACT 同时 spawn 2 个 entity).
+    miss/dodge 不放. ATK_C 1st spawn = 长椭圆, 否则 = 紫色 starburst; 2nd spawn = 小红刺爆.
+    每个 spec 独立抖动 (jittered=True 时 RNG ±8px).
+    """
+    from core.hit_effect_seq import (
+        HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX, pick_hit_effects,
+    )
+    specs = pick_hit_effects(attacker.name, None, attacker.facing)
+    for spec in specs:
+        if spec.jittered:
+            ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
+            oy = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX) - HIT_EFFECT_Y_BASELINE_PX
+        else:
+            ox = 0
+            oy = -HIT_EFFECT_Y_BASELINE_PX
+        battle.hit_effect_events.append((
+            defender.x, defender.y,
+            spec.atlas_key, list(spec.frames), spec.frame_ticks,
+            ox, oy,
+        ))
 
 
 def strike_skill(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:

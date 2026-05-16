@@ -58,6 +58,10 @@ class TacticsBattle:
         # 给 UI 的浮动伤害事件队列; UI 自己消费 + 计时
         from core.battle.data import DamageEvent  # 仅为类型, 实例由 combat 模块创建
         self.damage_events: list[DamageEvent] = []
+        # 命中特效事件 (combat.apply_damage 命中分支 push): (defender_tile_x, defender_tile_y,
+        # atlas_key, frame_indices, frame_ticks, offset_x, offset_y).
+        # UI 在 update 阶段消费, spawn HitEffect widget. 每次命中 push 2 项 (= 原版 spawn 2 个 entity).
+        self.hit_effect_events: list[tuple[int, int, str, list[int], int, int, int]] = []
         # 战斗胜利时填; UI 弹完才返回地图
         self.level_ups: list[LevelUpReport] = []
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)
