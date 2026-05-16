@@ -49,10 +49,10 @@ class BattleScene(Scene):
     HIGHLIGHT = (255, 240, 120)
     # 颜色从原版截图反向 + 分层假设: 基底 (蓝=移动范围 / 红=攻击范围) + 白色焦点 overlay.
     # target.png 那块"浅红"实际是 ATK 深红 + 白叠加, 不是单层 salmon. 改回深色饱和红.
-    MOVE_TINT = (65, 70, 220, 128)           # 蓝色基底 (移动可达范围)
-    ATK_TINT = (180, 55, 50, 200)            # 深红基底; 高 α 让红压住底层蓝, 不发紫
-    FACE_FOCUS_TINT = (255, 255, 255, 80)    # 白色焦点 overlay (= 略提亮, 不冲淡颜色).
-                                              # 跟 ATK/MOVE 叠加分别得到 浅红 / 浅蓝
+    MOVE_TINT = (65, 70, 220, 128)            # 蓝 = 移动范围
+    DAMAGE_TINT = (180, 55, 50, 200)          # 红 = 伤害范围
+    ATTACK_RANGE_TINT = (255, 255, 255, 128)  # 白 = 攻击范围 (= cursor 可游走范围)
+    FOCUS_TINT = (255, 255, 255, 80)          # 浅白 = cursor 焦点 overlay
     CURSOR_COLOR = (255, 240, 120)
     HP_NUM_COLOR = (140, 240, 140)         # 绿色, 健康
     HP_WEAKENED_COLOR = (255, 220, 80)     # 黄色, HP < 40% (虚弱)
@@ -160,8 +160,9 @@ class BattleScene(Scene):
 
         # 缓存
         self._move_tint = self._make_tint(self.MOVE_TINT)
-        self._atk_tint = self._make_tint(self.ATK_TINT)
-        self._face_focus_tint = self._make_tint(self.FACE_FOCUS_TINT)
+        self._damage_tint = self._make_tint(self.DAMAGE_TINT)
+        self._attack_range_tint = self._make_tint(self.ATTACK_RANGE_TINT)
+        self._focus_tint = self._make_tint(self.FOCUS_TINT)
         self._shadow_surf = self._make_shadow()
 
     # ------- 生命周期 -------
@@ -206,27 +207,39 @@ class BattleScene(Scene):
         phase = self.battle.phase
         if not u.is_player or phase not in (Phase.PLAYER_MOVE, Phase.PLAYER_AIM):
             return
-        # Layer 1: 移动可达范围 (蓝基底) — 两阶段都画, AIM 里也保留作为参考
-        for (x, y) in self.battle.turn_move_range:
-            self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
-        # cursor / pattern: 角色静止才显示
-        if (abs(u.render_x - u.x) > self.ANIM_EPSILON
-                or abs(u.render_y - u.y) > self.ANIM_EPSILON):
+        moving = (abs(u.render_x - u.x) > self.ANIM_EPSILON
+                  or abs(u.render_y - u.y) > self.ANIM_EPSILON)
+
+        if phase == Phase.PLAYER_MOVE:
+            # 蓝 = 移动范围 (move range, 含 lerp 中)
+            for (x, y) in self.battle.turn_move_range:
+                self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
+            # 白 = 攻击范围 preview (= AIM 阶段 cursor 可游走的格子集合).
+            # 孙悟空 1×3 / 蒙面人 3×2. lerp 中不画 (避免跟着角色漂).
+            if not moving:
+                for (px, py) in self.battle.attack_range():
+                    self.surface.blit(self._attack_range_tint,
+                                      self._tile_rect(px, py, cam_x, cam_y))
             return
-        if phase == Phase.PLAYER_AIM:
-            # 全部 pattern tile 铺红基底; cursor 那格再加白焦点 = 浅红
-            for (px, py) in self.battle.aim_pattern:
-                self.surface.blit(self._atk_tint, self._tile_rect(px, py, cam_x, cam_y))
-            cur = self.battle.aim_cursor
-            if cur is not None:
-                self.surface.blit(self._face_focus_tint,
-                                  self._tile_rect(cur[0], cur[1], cam_x, cam_y))
-        else:
-            # MOVE 阶段: 普攻 preview cursor (= facing 前一格), 仅白焦点
-            fx, fy = u.x + u.facing[0], u.y + u.facing[1]
-            if self.battle.map.in_bounds(fx, fy):
-                self.surface.blit(self._face_focus_tint,
-                                  self._tile_rect(fx, fy, cam_x, cam_y))
+
+        # PLAYER_AIM: lerp 中不画 (AIM 阶段角色应已静止, 但保险一下)
+        if moving:
+            return
+
+        # PLAYER_AIM: 隐藏移动范围. 三层叠加:
+        #   Layer 1 (白): 攻击范围 = cursor 可游走的格子
+        #   Layer 2 (红): 伤害范围 = 当前 cursor 对应的命中格 (跟着 cursor 变)
+        #   Layer 3 (白焦点): cursor 自身 → 跟红叠加 = 浅红高亮
+        for (px, py) in self.battle.aim_attack_range:
+            self.surface.blit(self._attack_range_tint,
+                              self._tile_rect(px, py, cam_x, cam_y))
+        cur = self.battle.aim_cursor
+        if cur is None:
+            return
+        for (sx, sy) in self.battle.damage_range(cur):
+            self.surface.blit(self._damage_tint, self._tile_rect(sx, sy, cam_x, cam_y))
+        self.surface.blit(self._focus_tint,
+                          self._tile_rect(cur[0], cur[1], cam_x, cam_y))
 
     # ------- 几何工具 -------
     def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:

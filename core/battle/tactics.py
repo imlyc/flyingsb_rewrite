@@ -17,6 +17,7 @@ import random
 from core.anim_engine.entity import Entity
 from core.character import UNSET
 from core.battle import ai, combat
+from core.battle.aim_profiles import get_aim_funcs
 from core.battle.queries import BattleQueries
 from core.battle.data import (
     BattleMap,
@@ -63,12 +64,18 @@ class TacticsBattle:
         self._pending_enemy_attack: BattleUnit | None = None
         # 攻击 SIGNAL -110 END 触发后, 等所有动画跑完才切回合 (= advance_turn_when_ready 触发)
         self._pending_turn_end: bool = False
-        # AIM 阶段状态: cursor 位置 + 可游走的 pattern (= 该攻击/技能的合法 cursor 集合).
-        # 普攻 pattern = {facing 前一格}; 远程技能 pattern 多格. 方向键在 pattern 内移动 cursor;
-        # shift+方向键转 facing, 重新计算 pattern.
+        # AIM 阶段状态:
+        #   aim_cursor:       当前 cursor 位置 (单格坐标)
+        #   aim_attack_range: 攻击范围 (= cursor 可游走的格子集合, 见 attack_range())
+        #   aim_skill_id:     当前 aim 的技能 ID, None = 普攻
+        # 方向键在攻击范围内移动 cursor; shift+方向键转 facing 重算攻击范围.
+        # 真伤害集合 = damage_range(cursor), 跟着 cursor 变.
         self.aim_cursor: tuple[int, int] | None = None
-        self.aim_pattern: set[tuple[int, int]] = set()
+        self.aim_attack_range: set[tuple[int, int]] = set()
         self.aim_skill_id: int | None = None
+        # AoE 攻击 (孙悟空横扫等) 确认时存的伤害范围. IMPACT 时一次性对其内所有敌人造伤.
+        # None = 单点攻击, IMPACT 走 combat.apply_pending_attack 的默认 pending_attack_target 路径.
+        self._pending_damage_range: set[tuple[int, int]] | None = None
         # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
         # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
         from core.anim_engine.engine import Engine
@@ -261,83 +268,104 @@ class TacticsBattle:
         u.x, u.y = nx, ny
         return True
 
-    def _compute_aim_pattern(self, u: BattleUnit, skill_id: int | None) -> set[tuple[int, int]]:
-        """给定 unit 和 (可选) 技能 ID, 返回 AIM 阶段 cursor 的合法位置集合.
-        普攻 (skill_id=None): 仅 facing 前一格. 远程技能: 该技能的 pattern (TBD).
-        所有 tile 必须在地图内.
-        """
-        if skill_id is None:
-            fx, fy = u.x + u.facing[0], u.y + u.facing[1]
-            if self.map.in_bounds(fx, fy):
-                return {(fx, fy)}
+    def attack_range(self, u: BattleUnit | None = None,
+                     skill_id: int | None = None) -> set[tuple[int, int]]:
+        """攻击范围: cursor 在 AIM 阶段可游走的格子集合. 不改 phase, 可在 MOVE 阶段
+        做 preview 用. 普攻按角色 profile (孙悟空 1×3 / 蒙面人 3×2), 技能 TBD."""
+        u = u or self.current
+        if skill_id is not None:
+            # TODO: 技能 pattern 表
             return set()
-        # TODO: 技能 pattern 表 (按 skill_id 查范围模板). 暂用普攻当 fallback.
-        fx, fy = u.x + u.facing[0], u.y + u.facing[1]
-        return {(fx, fy)} if self.map.in_bounds(fx, fy) else set()
+        pattern_fn, _ = get_aim_funcs(u.name)
+        return pattern_fn(u, self.map)
+
+    def damage_range(self, cursor: tuple[int, int],
+                     u: BattleUnit | None = None) -> set[tuple[int, int]]:
+        """伤害范围: cursor 上按下确认后实际命中的 tile 集合. 跟着 cursor 移动而变.
+        孙悟空 → 3 格垂直线; 蒙面人 / 默认 → 单格.
+        """
+        u = u or self.current
+        _, strike_fn = get_aim_funcs(u.name)
+        return {(x, y) for (x, y) in strike_fn(u, cursor) if self.map.in_bounds(x, y)}
 
     def enter_attack_aim(self, skill_id: int | None = None) -> bool:
         """从 PLAYER_MOVE 进入 PLAYER_AIM (= 选攻击目标阶段).
-        计算 pattern, cursor 初始 = facing 前一格 (若在 pattern 中) 或 pattern 第一格.
-        skill_id=None 普攻; 否则按技能算 pattern (远程多格).
+        计算攻击范围, cursor 初始 = facing 前一格 (若在范围中) 或范围第一格.
+        skill_id=None 普攻; 否则按技能算 (远程多格).
         """
         u = self.current
         if self.phase != Phase.PLAYER_MOVE or not u.is_player:
             return False
-        pattern = self._compute_aim_pattern(u, skill_id)
-        if not pattern:
+        rng = self.attack_range(u, skill_id)
+        if not rng:
             return False
         self.phase = Phase.PLAYER_AIM
         self.aim_skill_id = skill_id
-        self.aim_pattern = pattern
+        self.aim_attack_range = rng
         facing_tile = (u.x + u.facing[0], u.y + u.facing[1])
-        self.aim_cursor = facing_tile if facing_tile in pattern else next(iter(pattern))
+        self.aim_cursor = facing_tile if facing_tile in rng else next(iter(rng))
         return True
 
     def aim_move_cursor(self, dx: int, dy: int) -> bool:
-        """AIM 方向键: cursor 在 pattern 内移动一步. 越出 pattern → 不变."""
+        """AIM 方向键: cursor 在攻击范围内移动一步. 越出 → 不变."""
         if self.phase != Phase.PLAYER_AIM or self.aim_cursor is None:
             return False
         nx, ny = self.aim_cursor[0] + dx, self.aim_cursor[1] + dy
-        if (nx, ny) in self.aim_pattern:
+        if (nx, ny) in self.aim_attack_range:
             self.aim_cursor = (nx, ny)
             return True
         return False
 
     def aim_turn_facing(self, dx: int, dy: int) -> bool:
-        """AIM shift+方向键: 转 unit facing, 重算 pattern + 把 cursor 重置到新 facing 前一格.
-        让远程攻击的 pattern 跟着朝向旋转, 普攻则单格 cursor 跳到新方向.
+        """AIM shift+方向键: 转 facing, 重算攻击范围 + cursor 重置到新 facing 前一格.
+        让远程攻击的攻击范围跟着朝向旋转, 普攻则单格 cursor 跳到新方向.
         """
         u = self.current
         if self.phase != Phase.PLAYER_AIM or not u.is_player:
             return False
         u.facing = (dx, dy)
-        pattern = self._compute_aim_pattern(u, self.aim_skill_id)
-        if not pattern:
+        rng = self.attack_range(u, self.aim_skill_id)
+        if not rng:
             return False
-        self.aim_pattern = pattern
+        self.aim_attack_range = rng
         facing_tile = (u.x + u.facing[0], u.y + u.facing[1])
-        self.aim_cursor = facing_tile if facing_tile in pattern else next(iter(pattern))
+        self.aim_cursor = facing_tile if facing_tile in rng else next(iter(rng))
         return True
 
     def confirm_attack_aim(self) -> bool:
-        """AIM 阶段 Enter: 攻击 cursor 上的敌人. 无敌人 → 返回 False (UI log)."""
-        u = self.current
+        """AIM 阶段 Enter: 攻击 cursor 对应伤害范围上所有敌人.
+        统一走 combat.begin_attack 拿 attack_seq 动画.
+        primary = cursor 上的敌人 (优先) 或伤害范围内任一. IMPACT 时若 _pending_damage_range
+        非 None, 一次性损伤所有伤害格的敌人 (AoE); 否则只伤 primary (单点).
+        命中 0 个敌人 → 返回 False, 让 UI log 提示.
+        """
         if self.phase != Phase.PLAYER_AIM or self.aim_cursor is None:
             return False
-        cx, cy = self.aim_cursor
-        target = self.q.occupant(cx, cy)
-        if target is None or target.is_player == u.is_player:
+        u = self.current
+        dmg_tiles = self.damage_range(self.aim_cursor)
+        enemies = []
+        for (x, y) in dmg_tiles:
+            occ = self.q.occupant(x, y)
+            if occ is not None and occ.alive and occ.is_player != u.is_player:
+                enemies.append(occ)
+        if not enemies:
             return False
-        combat.begin_attack(self, u, target)
+        # primary target: cursor 上的优先 (= 动画落点最合理)
+        cx, cy = self.aim_cursor
+        cur_occ = self.q.occupant(cx, cy)
+        primary = cur_occ if cur_occ in enemies else enemies[0]
+        # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
+        self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
+        combat.begin_attack(self, u, primary)
         return True
 
     def cancel_attack_aim(self) -> bool:
-        """AIM 阶段 ESC: 取消, 退回 PLAYER_MOVE. 清 cursor / pattern."""
+        """AIM 阶段 ESC: 取消, 退回 PLAYER_MOVE. 清 cursor / 攻击范围."""
         if self.phase != Phase.PLAYER_AIM:
             return False
         self.phase = Phase.PLAYER_MOVE
         self.aim_cursor = None
-        self.aim_pattern = set()
+        self.aim_attack_range = set()
         self.aim_skill_id = None
         return True
 
@@ -345,6 +373,7 @@ class TacticsBattle:
         """UI 在 attack_seq END 时调: 清攻击状态. *不立即* 切回合 — 标记 pending,
         scene 等所有动画 (伤害数字 + 死亡动画) 跑完才调 advance_turn_when_ready()."""
         combat.clear_pending_attack(attacker)
+        self._pending_damage_range = None
         self._pending_turn_end = True
 
     def advance_turn_when_ready(self) -> None:

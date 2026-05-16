@@ -120,11 +120,11 @@ def test_aim_turn_facing_recomputes_pattern():
     p.facing = (0, 1)                      # 朝下
     b.enter_attack_aim()
     assert b.aim_cursor == (5, 6)           # facing 前一格
-    assert b.aim_pattern == {(5, 6)}        # 普攻 pattern 单格
+    assert b.aim_attack_range == {(5, 6)}   # 默认攻击范围单格
     assert b.aim_turn_facing(1, 0)          # 转向右
     assert p.facing == (1, 0)
     assert b.aim_cursor == (6, 5)
-    assert b.aim_pattern == {(6, 5)}
+    assert b.aim_attack_range == {(6, 5)}
     assert (p.x, p.y) == (5, 5)             # unit 位置没动
 
 

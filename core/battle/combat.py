@@ -96,10 +96,25 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
 def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     """attack_seq 跑到 'impact' 步骤时由 UI 调. 实际扣血 + 触发受击/闪避动画.
     每次 impact 独立 roll (支持多段攻击; 目标死亡后续 impact 自动跳过).
+    AoE: 若 battle._pending_damage_range 非 None, 一次性扫伤害范围里所有敌人,
+    每个独立 miss roll. 否则走单点 pending_attack_target.
     """
+    dmg_tiles = getattr(battle, '_pending_damage_range', None)
+    if dmg_tiles:
+        for (x, y) in dmg_tiles:
+            t = battle.q.occupant(x, y)
+            if t is None or not t.alive or t.is_player == attacker.is_player:
+                continue
+            _roll_damage_one(battle, attacker, t)
+        return
     target = attacker.pending_attack_target
     if target is None or not target.alive:
         return
+    _roll_damage_one(battle, attacker, target)
+
+
+def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit) -> None:
+    """对单个 target roll miss/hit + 损伤 + 反应动画. 抽出来给 AoE 多目标循环用."""
     if battle.rng.random() < miss_chance(attacker, target):
         battle.damage_events.append(DamageEvent(0, target.hp, target.x, target.y, miss=True))
         set_reaction(target, "dodge", attacker)
