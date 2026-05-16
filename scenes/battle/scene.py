@@ -47,10 +47,12 @@ class BattleScene(Scene):
     TEXT = (240, 240, 240)
     DIM = (160, 160, 160)
     HIGHLIGHT = (255, 240, 120)
-    MOVE_TINT = (130, 100, 220, 110)   # 紫色, 对照原版 d055/d080
-    ATK_TINT = (220, 60, 60, 110)
-    FACE_EMPTY_TINT = (255, 255, 255, 110)   # 朝向空格 = 浅白
-    FACE_ENEMY_TINT = (255, 120, 120, 140)   # 朝向敌人 = 浅红
+    # 颜色从原版截图反向 + 分层假设: 基底 (蓝=移动范围 / 红=攻击范围) + 白色焦点 overlay.
+    # target.png 那块"浅红"实际是 ATK 深红 + 白叠加, 不是单层 salmon. 改回深色饱和红.
+    MOVE_TINT = (65, 70, 220, 128)           # 蓝色基底 (移动可达范围)
+    ATK_TINT = (180, 55, 50, 200)            # 深红基底; 高 α 让红压住底层蓝, 不发紫
+    FACE_FOCUS_TINT = (255, 255, 255, 80)    # 白色焦点 overlay (= 略提亮, 不冲淡颜色).
+                                              # 跟 ATK/MOVE 叠加分别得到 浅红 / 浅蓝
     CURSOR_COLOR = (255, 240, 120)
     HP_NUM_COLOR = (140, 240, 140)         # 绿色, 健康
     HP_WEAKENED_COLOR = (255, 220, 80)     # 黄色, HP < 40% (虚弱)
@@ -159,8 +161,7 @@ class BattleScene(Scene):
         # 缓存
         self._move_tint = self._make_tint(self.MOVE_TINT)
         self._atk_tint = self._make_tint(self.ATK_TINT)
-        self._face_empty_tint = self._make_tint(self.FACE_EMPTY_TINT)
-        self._face_enemy_tint = self._make_tint(self.FACE_ENEMY_TINT)
+        self._face_focus_tint = self._make_tint(self.FACE_FOCUS_TINT)
         self._shadow_surf = self._make_shadow()
 
     # ------- 生命周期 -------
@@ -204,7 +205,7 @@ class BattleScene(Scene):
         u = self.battle.current
         if not u.is_player or self.battle.phase != Phase.PLAYER_MOVE:
             return
-        # 蓝紫色: 本回合可达范围
+        # Layer 1: 移动可达范围 (蓝基底)
         for (x, y) in self.battle.turn_move_range:
             self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
         # 朝向格: 只在角色静止 (render 已到位) 时才显示
@@ -214,10 +215,12 @@ class BattleScene(Scene):
         fx, fy = u.x + u.facing[0], u.y + u.facing[1]
         if self.battle.map.in_bounds(fx, fy):
             occ = self.battle.q.occupant(fx, fy)
-            tint = (self._face_enemy_tint
-                    if (occ is not None and occ.is_player != u.is_player)
-                    else self._face_empty_tint)
-            self.surface.blit(tint, self._tile_rect(fx, fy, cam_x, cam_y))
+            rect = self._tile_rect(fx, fy, cam_x, cam_y)
+            # Layer 2: 攻击格 (深红基底) — 朝向有敌人时铺
+            if occ is not None and occ.is_player != u.is_player:
+                self.surface.blit(self._atk_tint, rect)
+            # Layer 3: 白色焦点 overlay — 跟下层叠加: 蓝+白=浅蓝, 红+白=浅红, 空+白=纯白
+            self.surface.blit(self._face_focus_tint, rect)
 
     # ------- 几何工具 -------
     def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:
