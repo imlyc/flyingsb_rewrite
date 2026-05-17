@@ -44,6 +44,8 @@ ENEMY_TEMPLATES: dict[str, dict] = {
                   color=(220, 220, 220), sprite="CSKEL00"),
     "黄色怪": dict(level=5, max_hp=50, attack=15, defence=8,  agile=6,  move=2, exp_reward=80,  money_reward=30,
                   color=(220, 200,  60), sprite="CGHOU00"),
+    "贼":     dict(level=4, max_hp=35, attack=12, defence=5,  agile=14, move=4, exp_reward=50,  money_reward=20,
+                  color=(180, 140, 100), sprite="CTHI00"),
     "乌鸦怪": dict(level=2, max_hp=20, attack=8,  defence=3,  agile=12, move=4, exp_reward=30,  money_reward=10,
                   color=( 80,  60,  90), sprite="CCROW00"),
 }

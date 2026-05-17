@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from core.raw_attack_seqs import (
     ATK_A, ATK_B, ATK_C,
-    ENEMY_CCROW_G0, ENEMY_CCROW_G1, ENEMY_CSKEL_G0, ENEMY_CGHOU_G0,
+    ENEMY_CCROW_G0, ENEMY_CCROW_G1, ENEMY_CSKEL_G0, ENEMY_CGHOU_G0, ENEMY_CTHI_G0,
     ATK_UNKNOWN,
 )
 
@@ -67,6 +67,8 @@ def attack_seq_for(char_name: str, facing: tuple[int, int]) -> list[tuple]:
         "ENEMY_CCROW": ENEMY_CCROW_G1,   # 双啄 (atlas 193); G0 是单啄 (atlas 192) 备选
         "ENEMY_CSKEL": ENEMY_CSKEL_G0,
         "ENEMY_CGHOU": ENEMY_CGHOU_G0,
+        "ENEMY_CTHI":  ENEMY_CTHI_G0,    # exe dump from PTR_DAT_006699c0; hit-fx LANCE
+
     }.get(style, ATK_UNKNOWN)
     return table[facing_to_atk_index(facing)]
 

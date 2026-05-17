@@ -98,6 +98,25 @@ def test_ghou_picks_starburst():
     assert specs[0].atlas_key == "et00"
 
 
+def test_lance_4_dirs_distinct():
+    from core.hit_effect_seq import LANCE_BY_DIR
+    # LANCE 4 方向独立 frames, 跟 OVAL/CLAW 复用模式不同
+    assert LANCE_BY_DIR["UP"] == [0, 1, 2]
+    assert LANCE_BY_DIR["DN"] == [3, 4, 5]
+    assert LANCE_BY_DIR["LF"] == [6, 7, 8]
+    assert LANCE_BY_DIR["RT"] == [9, 10, 11]
+
+
+def test_cthi_picks_lance():
+    # 贼 (cthi) 攻击 → ATLAS_HIT_FX[cthi_g0] = LANCE → fm_EF011
+    from core.hit_effect_seq import ATLAS_HIT_FX, LANCE_BY_DIR
+    assert ATLAS_HIT_FX["cthi_g0"] == "LANCE"
+    assert ATLAS_HIT_FX["cbl_g1"] == "LANCE"
+    specs = pick_hit_effects("贼", None, (1, 0))
+    assert specs[0].atlas_key == "ef011"
+    assert specs[0].frames == LANCE_BY_DIR["RT"]
+
+
 def test_atlas_table_some_entries():
     # 确保关键 exe-derived 映射不被回归改掉
     from core.hit_effect_seq import ATLAS_HIT_FX

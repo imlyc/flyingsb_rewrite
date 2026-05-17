@@ -56,11 +56,11 @@ def maybe_trigger_battle(scene: "WorldMapScene") -> None:
         if pos == (5, 18):
             start_battle(scene, [make_enemy("乌鸦怪"), make_enemy("乌鸦怪")])
         else:  # (15, 8)
-            start_battle(scene, [make_enemy("黄色怪"), make_enemy("骷髅")])
+            start_battle(scene, [make_enemy("黄色怪"), make_enemy("骷髅"), make_enemy("贼")])
         return
     # 每 N 步骰: 随机战斗
     if scene.steps % RANDOM_BATTLE_EVERY == 0 and scene.rng.random() < RANDOM_BATTLE_CHANCE:
-        template = scene.rng.choice(["骷髅", "乌鸦怪"])
+        template = scene.rng.choice(["骷髅", "乌鸦怪", "贼"])
         count = scene.rng.randint(1, 2)
         enemies = [make_enemy(template) for _ in range(count)]
         start_battle(scene, enemies)

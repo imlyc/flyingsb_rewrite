@@ -71,6 +71,20 @@ ATK_C_OVAL_ATLAS = "ef010"
 ATK_C_OVAL_FRAME_TICKS = 2
 
 
+# ---------------- LANCE 长枪穿透 (cthi/cbl 等敌人用) ----------------
+# PTR_DAT_00655dc0 @ 0x655dc0, 4 ptrs → seq @0x655d40 / 60 / 80, 0x655da0
+# 同结构: 3 FM ops + EXIT, atlas=217=ef011, ticks=2.
+# 4 方向独立 frames (跟 OVAL/CLAW 复用模式不同).
+LANCE_BY_DIR: dict[str, list[int]] = {
+    "UP": [0, 1, 2],
+    "DN": [3, 4, 5],
+    "LF": [6, 7, 8],
+    "RT": [9, 10, 11],
+}
+LANCE_ATLAS = "ef011"
+LANCE_FRAME_TICKS = 2
+
+
 # ---------------- 抓痕 (CCROW 等 custom-wrapper 敌人用) ----------------
 # PTR_DAT_00655d30 @ 0x655d30, 4 ptrs → seq @0x655cb0 / d0 / f0, 0x655d10
 # 27 个 inner fn 引用此表 (含 enemy slot 45 简单 wrapper + 多个 custom enemy wrapper +
@@ -141,9 +155,10 @@ ATLAS_HIT_FX: dict[str, str] = {
     "cyeti_g1": "CLAW",
     "ccrow_g1": "CLAW",   # 乌鸦 G1 双啄 (用户实测) — 我们 rewrite 默认就是这个
 
-    # ---- LANCE (table 0x655dc0, fm_EF011) — 暂未实现 LANCE 风格 ----
-    # "cthi_g0":  "LANCE",
-    # "cbl_g1":   "LANCE",
+    # ---- LANCE (table 0x655dc0, fm_EF011) ----
+    "cthi_g0":  "LANCE",
+    "cbl_g1":   "LANCE",
+    # 另有 3 个 LANCE-引用 inner fn (0x4dcd1b/43/6b) 没追到具体 atlas, 暂略
 
     # ---- STARBURST (默认; 不必显式列, 但显式覆盖更清楚) ----
     # cwu/csama/cnine/czig/ccomb/cghou_g0/cghou_g2/csdog/cbri1/cmus*/cpri0_g0 等等
@@ -184,6 +199,7 @@ _STYLE_PRESETS: dict[str, tuple[str, dict[str, list[int]], int]] = {
                   UNIVERSAL_STARBURST_FRAME_TICKS),
     "OVAL":      (ATK_C_OVAL_ATLAS, ATK_C_OVAL_BY_DIR, ATK_C_OVAL_FRAME_TICKS),
     "CLAW":      (CLAW_ATLAS, CLAW_BY_DIR, CLAW_FRAME_TICKS),
+    "LANCE":     (LANCE_ATLAS, LANCE_BY_DIR, LANCE_FRAME_TICKS),
 }
 
 

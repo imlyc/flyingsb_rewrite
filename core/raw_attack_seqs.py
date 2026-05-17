@@ -1690,6 +1690,57 @@ ENEMY_CGHOU_G0 = [
 ]
 
 
+# 贼 (cthi) — atlas 173 = cthi_g0, 5 frames/dir.
+# 从 PTR_DAT_006699c0 (UP seq @0x6697b0) dump. Hit-fx LANCE (= 0x655dc0).
+# 另一变种 0x669e50 (custom wrapper inner fn 0x4e51fa) 未实现.
+ENEMY_CTHI_G0 = [
+    # UP
+    [
+        ('sound', 189, 0x0413), ('move', 0, -12, 0),
+        ('fm', 173, 0, 3), ('fm', 173, 1, 12),
+        ('move', 0, -6, 0), ('sound', 198, 0x0411),
+        ('fm', 173, 2, 3), ('move', 0, -6, 0),
+        ('impact',), ('jump', -105),
+        ('fm', 173, 3, 3), ('move', 0, -6, 0),
+        ('fm', 173, 4, 3),
+        ('move', 0, 30, 0), ('fm', 173, 0, 0), ('end',),
+    ],
+    # DN
+    [
+        ('sound', 189, 0x0413), ('move', 0, 12, 0),
+        ('fm', 173, 5, 3), ('fm', 173, 6, 12),
+        ('move', 0, 6, 0), ('sound', 198, 0x0411),
+        ('fm', 173, 7, 3), ('move', 0, 6, 0),
+        ('impact',), ('jump', -105),
+        ('fm', 173, 8, 3), ('move', 0, 6, 0),
+        ('fm', 173, 9, 3),
+        ('move', 0, -30, 0), ('fm', 173, 5, 0), ('end',),
+    ],
+    # LF
+    [
+        ('sound', 189, 0x0413), ('move', -16, 0, 0),
+        ('fm', 173, 10, 3), ('fm', 173, 11, 12),
+        ('move', -8, 0, 0), ('sound', 198, 0x0411),
+        ('fm', 173, 12, 3), ('move', -8, 0, 0),
+        ('impact',), ('jump', -105),
+        ('fm', 173, 13, 3), ('move', -8, 0, 0),
+        ('fm', 173, 14, 3),
+        ('move', 40, 0, 0), ('fm', 173, 10, 0), ('end',),
+    ],
+    # RT
+    [
+        ('sound', 189, 0x0413), ('move', 16, 0, 0),
+        ('fm', 173, 15, 3), ('fm', 173, 16, 12),
+        ('move', 8, 0, 0), ('sound', 198, 0x0411),
+        ('fm', 173, 17, 3), ('move', 8, 0, 0),
+        ('impact',), ('jump', -105),
+        ('fm', 173, 18, 3), ('move', 8, 0, 0),
+        ('fm', 173, 19, 3),
+        ('move', -40, 0, 0), ('fm', 173, 15, 0), ('end',),
+    ],
+]
+
+
 # === atlas_idx → fm atlas resource name (从 0x005bf8a8 元数据表导出) ===
 # seq 里 ('fm', atlas_slot, frame_idx, ticks) 的 atlas_slot 是这个全局 idx.
 # 解释器用此表 resolve atlas_slot → fm_<NAME>_<G/M/E><N>.pcx 资源名.
