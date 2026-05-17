@@ -189,9 +189,23 @@ def _tick_camera(scene: "BattleScene") -> None:
 
 
 def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:
-    """ENEMY_TURN: 等动画走完 + 短暂停顿 → post_enemy_turn.
-    VICTORY/DEFEAT: 死亡动画跑完后切 BGM (banner 由 draw 处理)."""
+    """ENEMY_TURN 时序:
+       (a) AI 待执行 (_enemy_ai_pending=True): 暂停 ENEMY_PRE_MOVE_PAUSE_MS 显示移动范围,
+           然后调 run_pending_enemy_ai 触发 AI (= 移动开始).
+       (b) AI 执行后, 单位移动 + 等动画走完 + ENEMY_TURN_DELAY_MS 显示攻击/伤害范围,
+           最后 post_enemy_turn 触发攻击.
+       VICTORY/DEFEAT: 死亡动画跑完后切 BGM (banner 由 draw 处理).
+    """
     if scene.battle.phase == Phase.ENEMY_TURN:
+        # (a) Pre-move 暂停: AI 还没跑, 给玩家看移动范围
+        if scene.battle._enemy_ai_pending:
+            if scene._enemy_pre_move_started_at is None:
+                scene._enemy_pre_move_started_at = now
+            if now - scene._enemy_pre_move_started_at >= scene.ENEMY_PRE_MOVE_PAUSE_MS:
+                scene._enemy_pre_move_started_at = None
+                scene.battle.run_pending_enemy_ai()
+            return
+        # (b) Pre-attack 暂停 (= 原有逻辑)
         if units_animating(scene):
             scene._enemy_turn_started_at = None  # 还在走, 重置计时
         else:

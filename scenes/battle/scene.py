@@ -63,7 +63,8 @@ class BattleScene(Scene):
     SHADOW = (0, 0, 0, 110)
 
     # ---- 时序常量 ----
-    ENEMY_TURN_DELAY_MS = 350     # 走完 + 攻击命中后再停顿这么久
+    ENEMY_TURN_DELAY_MS = 350     # 走完 + 攻击前停顿 (显示攻击/伤害范围)
+    ENEMY_PRE_MOVE_PAUSE_MS = 450  # ENEMY_TURN 进入后先停这么久显示移动范围, 然后才 AI 移动
     CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
     UNIT_TILES_PER_SEC = 8.0      # 单位走动速度 (格/秒, 与世界地图节奏一致)
     WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
@@ -116,6 +117,7 @@ class BattleScene(Scene):
         self.big = load_chinese_font(36)
 
         self._enemy_turn_started_at: int | None = None
+        self._enemy_pre_move_started_at: int | None = None
         self._battle_over_signaled = False
         self._floats: list[FloatText] = []
         # anim_engine tick 累积器 (40ms/tick); update() 每帧累加 dt_ms
@@ -208,10 +210,32 @@ class BattleScene(Scene):
     def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
         u = self.battle.current
         phase = self.battle.phase
-        if not u.is_player or phase not in (Phase.PLAYER_MOVE, Phase.PLAYER_AIM):
+        if phase not in (Phase.PLAYER_MOVE, Phase.PLAYER_AIM, Phase.ENEMY_TURN):
             return
         moving = (abs(u.render_x - u.x) > self.ANIM_EPSILON
                   or abs(u.render_y - u.y) > self.ANIM_EPSILON)
+
+        # ---- 敌方回合 (镜像玩家显示, 没有交互) ----
+        # 流程: ENEMY_TURN 进入 → pre-move pause (450ms 显移动范围) → AI 移动 lerp →
+        #   pre-attack pause (350ms 显攻击/伤害范围) → 攻击动画
+        if phase == Phase.ENEMY_TURN and not u.is_player:
+            # pre-move pause OR 正在 lerp 移动: 显移动范围
+            if self.battle._enemy_ai_pending or moving or u.move_path:
+                for (x, y) in self.battle.turn_move_range:
+                    self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
+                return
+            # pre-attack pause: 攻击未启动 (entity 未 attacking), 仍有 pending target
+            pending = self.battle._pending_enemy_attack
+            if pending is not None and not u.is_attacking:
+                for (px, py) in self.battle.attack_range(u):
+                    self.surface.blit(self._attack_range_tint,
+                                      self._tile_rect(px, py, cam_x, cam_y))
+                cursor = (pending.x, pending.y)
+                for (sx, sy) in self.battle.damage_range(cursor, u):
+                    self.surface.blit(self._damage_tint, self._tile_rect(sx, sy, cam_x, cam_y))
+                self.surface.blit(self._focus_tint,
+                                  self._tile_rect(cursor[0], cursor[1], cam_x, cam_y))
+            return
 
         if phase == Phase.PLAYER_MOVE:
             # 蓝 = 移动范围 (move range, 含 lerp 中)

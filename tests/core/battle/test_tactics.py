@@ -54,12 +54,21 @@ def test_initial_phase_player_move_for_player_first():
 
 
 def test_initial_phase_enemy_turn_for_enemy_first():
-    """敌人 agile 更高 → 第一回合是 ENEMY_TURN (AI 已设 pending_enemy_attack)."""
+    """敌人 agile 更高 → 第一回合是 ENEMY_TURN. AI 延后执行 (pending), 等 scene 触发."""
     p = _player("p", 1, 1, agile=5)
     e = _enemy("e", 2, 1, agile=20)  # 邻接, AI 应直接 face + plan attack
     b = _battle(players=[p], enemies=[e])
     assert b.phase == Phase.ENEMY_TURN
     assert b.current is e
+    # 移动范围预先算好 (= scene 显示用)
+    assert (e.x, e.y) in b.turn_move_range
+    # AI 尚未执行: pending=True, 没 pending_enemy_attack
+    assert b._enemy_ai_pending is True
+    assert b._pending_enemy_attack is None
+    # scene 触发后 AI 执行 → 邻接 player → 设 pending_enemy_attack
+    b.run_pending_enemy_ai()
+    assert b._enemy_ai_pending is False
+    assert b._pending_enemy_attack is p
 
 
 def test_player_step_in_move_range():

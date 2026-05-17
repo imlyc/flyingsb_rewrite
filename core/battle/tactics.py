@@ -62,6 +62,9 @@ class TacticsBattle:
         self.level_ups: list[LevelUpReport] = []
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)
         self._pending_enemy_attack: BattleUnit | None = None
+        # 敌方 AI 延迟执行标志: ENEMY_TURN 进入时为 True (= 先显示移动范围),
+        # scene pre-move 暂停结束后 UI 调 run_pending_enemy_ai 触发实际移动.
+        self._enemy_ai_pending: bool = False
         # 攻击 SIGNAL -110 END 触发后, 等所有动画跑完才切回合 (= advance_turn_when_ready 触发)
         self._pending_turn_end: bool = False
         # AIM 阶段状态:
@@ -177,10 +180,12 @@ class TacticsBattle:
                     return
                 else:
                     self.phase = Phase.ENEMY_TURN
-                    ai.take_turn(self, u)
-                    if self._check_end():
-                        return
-                    return  # 等 UI 调 post_enemy_turn
+                    # 进入敌方回合前先算移动范围 (= AI 即将走的可达格集合).
+                    # AI take_turn 会立即把 unit.x/y 改到 dest, 所以必须现在算.
+                    self.turn_move_range = self.q.movement_range(u)
+                    # AI 延后执行: scene 显示移动范围一会儿后调 run_pending_enemy_ai.
+                    self._enemy_ai_pending = True
+                    return  # 等 UI 调 run_pending_enemy_ai → 再调 post_enemy_turn
             self._turn_idx += 1
         self._start_round()
 
@@ -195,6 +200,14 @@ class TacticsBattle:
             self._start_round()
         else:
             self._enter_current()
+
+    def run_pending_enemy_ai(self) -> None:
+        """scene 在 pre-move 暂停结束后调: 实际执行 AI 移动/攻击计划."""
+        if not self._enemy_ai_pending or self.phase != Phase.ENEMY_TURN:
+            return
+        self._enemy_ai_pending = False
+        ai.take_turn(self, self.current)
+        self._check_end()
 
     def post_enemy_turn(self) -> None:
         """UI 在 ENEMY_TURN 走动动画结束后调用: 启动攻击动画 (走 attack_seq), UI 推完才结束回合.
