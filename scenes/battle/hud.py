@@ -25,6 +25,43 @@ HUD_W_CUR = 280
 HUD_W_NEXT = 220
 LOG_H = 100
 
+# 技能二级菜单尺寸 (跨 _draw_skill_submenu + 过渡动画白框落点 + desc 栏共享)
+SKILL_PANEL_W = 312
+SKILL_PANEL_TOP = 20
+SKILL_ROW_H = 28                       # 每行高度 (= desc 栏高度, 字体 16pt + 边距)
+# 描述长条: 横跨屏幕底部, 左右等距留白 32px, 高度 = 字体 + 小边距.
+SKILL_DESC_BAR_H = 28
+SKILL_DESC_BAR_SIDE_MARGIN = 32        # 距屏幕左/右的留白
+SKILL_DESC_BAR_MARGIN = 8              # 距屏幕底的留白
+# 技能 panel 底部预留: 等于 desc 栏总占用 + panel 顶 + panel/desc 之间的 8px 间距,
+# 保证 panel.bottom + 8 = desc_bar.top (rect h = sh - bottom_margin, panel.bottom = top + h).
+SKILL_PANEL_BOTTOM_MARGIN = SKILL_PANEL_TOP + 8 + SKILL_DESC_BAR_H + SKILL_DESC_BAR_MARGIN
+
+# Win95 风格立体凸起面板配色 (原版战斗菜单 UI):
+# - 填充: 暗橄榄绿 (用户实测原版 skill_menu.png 采样 (93,90,55))
+# - 上+左边缘: 白色 (光源在左上方的高光)
+# - 下+右边缘: 黑色 (右下方的阴影)
+PANEL_FILL = (93, 90, 55)
+PANEL_LIGHT = (255, 255, 255)
+PANEL_SHADOW = (0, 0, 0)
+
+
+def draw_beveled_panel(surface: pygame.Surface, rect: pygame.Rect,
+                       fill: tuple[int, int, int] = PANEL_FILL,
+                       light: tuple[int, int, int] = PANEL_LIGHT,
+                       shadow: tuple[int, int, int] = PANEL_SHADOW,
+                       border_w: int = 1) -> None:
+    """Win95 风格立体凸起面板: 纯色填充 + 左/上白边 + 右/下黑边.
+    原版战斗菜单 UI 都是这套样式; 颜色可以替换 (玩家可改色, 默认暗橄榄绿)."""
+    surface.fill(fill, rect)
+    x, y, w, h = rect
+    # 左 + 上 = 高光
+    pygame.draw.line(surface, light, (x, y), (x + w - 1, y), border_w)
+    pygame.draw.line(surface, light, (x, y), (x, y + h - 1), border_w)
+    # 右 + 下 = 阴影
+    pygame.draw.line(surface, shadow, (x, y + h - 1), (x + w - 1, y + h - 1), border_w)
+    pygame.draw.line(surface, shadow, (x + w - 1, y), (x + w - 1, y + h - 1), border_w)
+
 
 def draw_floats(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     now = pygame.time.get_ticks()
@@ -165,9 +202,11 @@ def _draw_menu_transition(scene: "BattleScene", ucx: int, ucy: int,
             break
 
     # 二级菜单首行选项 rect (白框最终落点; 跟 _draw_skill_submenu 保持一致)
-    panel_full = pygame.Rect(sw - 280, 80, 260, sh - 200)
+    panel_full = pygame.Rect(sw - SKILL_PANEL_W - SKILL_DESC_BAR_SIDE_MARGIN,
+                             SKILL_PANEL_TOP,
+                             SKILL_PANEL_W, sh - SKILL_PANEL_BOTTOM_MARGIN)
     target_row = pygame.Rect(panel_full.x + 12, panel_full.y + 42,
-                             panel_full.w - 24, 26)
+                             panel_full.w - 24, SKILL_ROW_H)
 
     if t < A:
         # Phase A: 跟 dismiss 同形 — 直接复用 _draw_icons_rotate_out
@@ -237,12 +276,15 @@ def _draw_menu_open_anim(scene: "BattleScene", ucx: int, ucy: int,
 def _draw_skill_submenu(scene: "BattleScene", *,
                         draw_highlight_row: bool = True,
                         scale: float = 1.0) -> None:
-    """二级菜单: 标题「特殊能力」+ 技能列表 (当前为空).
+    """二级菜单: 标题「特殊能力」+ 当前角色已学技能列表 (BattleUnit.known_skills).
     scale<1 时 panel 从中心缩放出现 (phase B 用);
     draw_highlight_row=False 时不画黄色行框 (phase C 由动画白框替代).
+    布局参考原版 h070: 屏幕右半的高条 + 屏幕底部的水平描述长条 (= 选中技能的描述).
     """
     sw, sh = scene.surface.get_size()
-    panel_full = pygame.Rect(sw - 280, 80, 260, sh - 200)
+    panel_full = pygame.Rect(sw - SKILL_PANEL_W - SKILL_DESC_BAR_SIDE_MARGIN,
+                             SKILL_PANEL_TOP,
+                             SKILL_PANEL_W, sh - SKILL_PANEL_BOTTOM_MARGIN)
     if scale < 0.05:
         return
 
@@ -253,27 +295,58 @@ def _draw_skill_submenu(scene: "BattleScene", *,
     panel = pygame.Rect(0, 0, pw, ph)
     panel.center = (cx, cy)
 
-    bg = pygame.Surface(panel.size, pygame.SRCALPHA)
-    bg.fill((20, 30, 40, 230))
-    scene.surface.blit(bg, panel)
-    pygame.draw.rect(scene.surface, scene.PANEL_BORDER, panel, 2)
+    draw_beveled_panel(scene.surface, panel)
 
     if scale < 0.95:
         return    # 缩放中不画文字 / 选项行
 
     # 标题
-    title = scene.font.render("特殊能力", True, scene.HIGHLIGHT)
+    title = scene.font.render("特殊能力", True, PANEL_LIGHT)
     scene.surface.blit(title, (panel.x + 14, panel.y + 10))
 
-    # 选中行 (空列表 → 空横条占位, 跟原版 h070 一致)
-    row = pygame.Rect(panel.x + 12, panel.y + 42, panel.w - 24, 26)
-    if draw_highlight_row:
-        pygame.draw.rect(scene.surface, scene.HIGHLIGHT, row, 1)
-    empty = scene.small.render("(暂无可用技能)", True, scene.DIM)
-    scene.surface.blit(empty, empty.get_rect(midleft=(row.x + 8, row.centery)))
+    from core.skills import get_skill_name
+    skills = scene.battle.current.known_skills
+    cursor = scene._skill_cursor if skills else 0
+    list_top = panel.y + 42
 
-    hint = scene.tiny.render("ESC 返回", True, scene.DIM)
-    scene.surface.blit(hint, hint.get_rect(bottomright=(panel.right - 8, panel.bottom - 6)))
+    if not skills:
+        row = pygame.Rect(panel.x + 12, list_top, panel.w - 24, SKILL_ROW_H + 2)
+        if draw_highlight_row:
+            pygame.draw.rect(scene.surface, scene.HIGHLIGHT, row, 1)
+        empty = scene._menu_font.render("(无)", True, scene.DIM)
+        scene.surface.blit(empty, empty.get_rect(midleft=(row.x + 8, row.centery)))
+    else:
+        for i, sid in enumerate(skills):
+            row = pygame.Rect(panel.x + 12, list_top + i * SKILL_ROW_H,
+                              panel.w - 24, SKILL_ROW_H - 2)
+            if draw_highlight_row and i == cursor:
+                pygame.draw.rect(scene.surface, PANEL_LIGHT, row, 1)
+            text_color = PANEL_LIGHT if i == cursor else (220, 220, 220)
+            name = scene._menu_font.render(get_skill_name(sid), True, text_color)
+            scene.surface.blit(name, name.get_rect(midleft=(row.x + 8, row.centery)))
+
+
+def draw_skill_desc_bar(scene: "BattleScene") -> None:
+    """L2 二级菜单底部的水平描述长条 — 显示当前选中技能的描述.
+    布局: 横跨屏幕底部, 左右等距留白, 单行高 (= 字体 + 几像素边距).
+    """
+    sw, sh = scene.surface.get_size()
+    sx = SKILL_DESC_BAR_SIDE_MARGIN
+    rect = pygame.Rect(sx, sh - SKILL_DESC_BAR_H - SKILL_DESC_BAR_MARGIN,
+                       sw - 2 * sx, SKILL_DESC_BAR_H)
+    draw_beveled_panel(scene.surface, rect)
+
+    skills = scene.battle.current.known_skills
+    if not skills:
+        return
+    from core.skills import get_skill_desc
+    sid = skills[min(scene._skill_cursor, len(skills) - 1)]
+    desc = get_skill_desc(sid)
+    if not desc:
+        return
+    # 单行渲染. 长 desc 也强制单行 (整段在一栏长条里); 实际原版 desc 都很短不会越界.
+    t = scene._menu_font.render(desc, True, PANEL_LIGHT)
+    scene.surface.blit(t, t.get_rect(midleft=(rect.x + 10, rect.centery)))
 
 
 def draw_hud(scene: "BattleScene") -> None:

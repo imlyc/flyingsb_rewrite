@@ -37,15 +37,18 @@ def build_party(scene: "WorldMapScene") -> list[BattleUnit]:
         if chars:
             return chars
     # 无存档时的默认队伍
+    from core.skills import default_skills_for
     return [
         BattleUnit(name="孙悟空", level=1, max_hp=30, hp=30, max_mp=10, mp=10, sg=20,
                    attack=22, defence=12, agile=50, move=4, is_player=True,
                    color=(120, 200, 230),
-                   sprite_key=sprite_resource("孙悟空")),
+                   sprite_key=sprite_resource("孙悟空"),
+                   known_skills=default_skills_for("孙悟空")),
         BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30, max_mp=15, mp=15, sg=18,
                    attack=24, defence=11, agile=40, move=4, is_player=True,
                    color=(160, 160, 200),
-                   sprite_key=sprite_resource("蒙面人")),
+                   sprite_key=sprite_resource("蒙面人"),
+                   known_skills=default_skills_for("蒙面人")),
     ]
 
 

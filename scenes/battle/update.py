@@ -58,6 +58,7 @@ def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
         # phase B 开始: 提升 _submenu 状态让二级菜单 panel 开始 draw
         if scene._menu_transition_t >= scene.MENU_TRANSITION_A_MS and scene._submenu is None:
             scene._submenu = 'skill'
+            scene._skill_cursor = 0    # 进 L2 总从首项起
         if scene._menu_transition_t >= scene.MENU_TRANSITION_TOTAL_MS:
             scene._menu_transition_t = None
             scene._menu_open = False    # 一级菜单收掉, 只剩二级

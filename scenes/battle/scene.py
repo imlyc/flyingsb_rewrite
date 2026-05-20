@@ -136,6 +136,8 @@ class BattleScene(Scene):
         self._menu_font = load_chinese_font(16)
         # 二级菜单: None / 'skill' (上→技能列表). 在二级菜单按 ESC 回退到一级.
         self._submenu: str | None = None
+        # 技能二级菜单的选中 idx (0..len(current.known_skills)-1). 每次打开二级菜单从 0 起.
+        self._skill_cursor: int = 0
         # 打开一级菜单的动画计时 (ms 累加; None = 已完成静态显示).
         # phase 1: 白方框收缩, phase 2: 4 icon 旋转放大入位. 见 scenes.battle.hud.
         self._menu_anim_t: int | None = None
@@ -200,8 +202,12 @@ class BattleScene(Scene):
         hud_mod.draw_floats(self, cam_x, cam_y)
         # 6) HUD (不滚动)
         hud_mod.draw_hud(self)
-        # 7) 日志
-        hud_mod.draw_log(self)
+        # 7) 日志 (L2 静态时让位给技能描述长条)
+        if self._submenu == 'skill' and self._menu_transition_t is None \
+                and self._menu_close_t is None:
+            hud_mod.draw_skill_desc_bar(self)
+        else:
+            hud_mod.draw_log(self)
         # 8) 胜负 (等死亡动画跑完再出 banner, 否则技能秒杀最后一个敌人会跳过死亡演出)
         if (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
                 and not update_mod.death_animations_pending(self)):

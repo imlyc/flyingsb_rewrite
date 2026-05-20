@@ -110,10 +110,23 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
             or scene._menu_dismiss_t is not None):
         return
 
-    # 二级菜单: 只处理 ESC 回退 → 触发反向动画 (二级缩小 → 一级 open anim)
+    # 二级菜单 (技能列表): ↑↓ 移 cursor / Enter 用技能 / ESC 回退
     if scene._submenu is not None:
         if key in (pygame.K_ESCAPE, pygame.K_x):
             scene._menu_close_t = 0
+            return
+        skills = scene.battle.current.known_skills
+        if not skills:
+            return
+        if key in (pygame.K_UP, pygame.K_w):
+            scene._skill_cursor = (scene._skill_cursor - 1) % len(skills)
+        elif key in (pygame.K_DOWN, pygame.K_s):
+            scene._skill_cursor = (scene._skill_cursor + 1) % len(skills)
+        elif key in (pygame.K_RETURN, pygame.K_SPACE):
+            # 技能使用: 占位, 留给"接入 AIM + 技能 pattern"那一步
+            from core.skills import get_skill_name
+            scene.battle._log(f"(TODO) {scene.battle.current.name} 使用 "
+                              f"{get_skill_name(skills[scene._skill_cursor])}")
         return
 
     # 一级菜单 — 全部通过 dismiss 动画收掉

@@ -34,7 +34,14 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
         is_player=True,
         color=(120, 200, 230),
         sprite_key=_try_sprite_key(name),
+        known_skills=_default_known_skills(name),
     )
+
+
+def _default_known_skills(name: str) -> list[int]:
+    """默认技能 = 该角色潜在技能池全集 (= 模拟满级解锁). 等接 level-up 解锁系统再改."""
+    from core.skills import default_skills_for
+    return default_skills_for(name)
 
 
 # ---------------- 敌人模板 ----------------
