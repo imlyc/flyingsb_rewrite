@@ -266,6 +266,10 @@ def units_animating(scene: "BattleScene") -> bool:
             return True
         if u.is_attacking or u.reaction_seq is not None:
             return True
+    # 投射物 entity (= 技能 B 类的飞行物) 还在 → 还在动
+    for e in scene.battle.engine.entities:
+        if e.user_data.get('projectile') and e.state_code != 20:    # 20 = PROJ_STATE_DONE
+            return True
     return False
 
 

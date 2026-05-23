@@ -82,16 +82,36 @@ class TacticsBattle:
         # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
         # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
         from core.anim_engine.engine import Engine
-        from core.anim_engine.entity import SIG_IMPACT, SIG_END
+        from core.anim_engine.entity import SIG_IMPACT, SIG_END, SIG_IMPACT_2
         self.engine = Engine()
         self._SIG_IMPACT = SIG_IMPACT
+        self._SIG_IMPACT_2 = SIG_IMPACT_2
         self._SIG_END = SIG_END
         self.engine.on('signal', self._on_anim_signal)
         self._place_units(player_positions, enemy_positions)
         self._start_round()
 
     def _on_anim_signal(self, source_entity: Entity, sig: int) -> None:
-        """anim_engine SIGNAL 路由: -100 IMPACT → 结算伤害, -110 END → 结束攻击回合."""
+        """anim_engine SIGNAL 路由:
+          -100 IMPACT  (caster seq): 结算伤害 / B 类技能 spawn 投射物
+          -250 IMPACT_2 (投射物落地): 投射物 think_fn 发, 强制走伤害结算流程
+          -110 END     (caster seq): 结束攻击回合 (清 pending, 等死亡动画跑完切回合)
+        """
+        if sig == self._SIG_IMPACT_2:
+            # 投射物落地 → 强制走完整伤害流程 (绕过 multi-impact dedup). 信号来源是投射物
+            # entity (没 'unit' user_data), 但当前 pending attacker 还是 caster.
+            caster = self._find_pending_attacker()
+            if caster is not None:
+                # 让 apply_pending_attack 走最终结算分支: 把 count 提到 total 之上, 强制 last
+                caster.pending_impact_count = caster.pending_impact_total - 1
+                # 临时清 skill_id 让 has_impact_spawn 检查失败 (= 不再 spawn 第 2 个投射物)
+                saved_sid = caster.pending_skill_id
+                caster.pending_skill_id = None
+                combat.apply_pending_attack(self, caster)
+                caster.pending_skill_id = saved_sid
+                # B 类 cast seq 没 SIG_END, post_attack_anim 不会自动触发 — 这里手动收尾
+                self.post_attack_anim(caster)
+            return
         unit = source_entity.user_data.get('unit')
         if unit is None:
             return
@@ -99,6 +119,13 @@ class TacticsBattle:
             combat.apply_pending_attack(self, unit)
         elif sig == self._SIG_END:
             self.post_attack_anim(unit)
+
+    def _find_pending_attacker(self) -> BattleUnit | None:
+        """找当前还有 pending_attack_target 的玩家/敌方单位 (= 正在攻击中的 caster)."""
+        for u in self.all_units:
+            if u.pending_attack_target is not None:
+                return u
+        return None
 
     # ---- 摆阵 ----
     def _place_units(

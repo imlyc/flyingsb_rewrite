@@ -170,6 +170,15 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     if not is_last:
         _replay_impact_visuals(battle, attacker)
         return
+    # B 类技能: IMPACT 不直接结算伤害, 而是 spawn 投射物 (think_fn 物理 → 落地后发 SIG_IMPACT_2 才结算)
+    sid = attacker.pending_skill_id
+    if sid is not None:
+        from core.skill_seq import has_impact_spawn, skill_impact_spawn
+        if has_impact_spawn(sid):
+            target = attacker.pending_attack_target
+            if target is not None and target.alive:
+                skill_impact_spawn(sid)(battle, attacker, target)
+            return    # 不走默认伤害结算
     dmg_tiles = getattr(battle, '_pending_damage_range', None)
     if dmg_tiles:
         for (x, y) in dmg_tiles:

@@ -62,6 +62,11 @@ class Entity:
     ticks: int = 0                         # +0x154
     offset: int = 0                        # +0x158
 
+    # 速度 (16.16 fixed/tick) — 给 think_fn 物理用 (e.g. 抛物线投射物). 普通 entity 默认 0.
+    vx: int = 0
+    vy: int = 0
+    vz: int = 0
+
     # signal context (op 0x0e 临时设)
     signal_target: Optional['Entity'] = None  # +0x1a8
 

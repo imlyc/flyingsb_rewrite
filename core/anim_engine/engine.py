@@ -121,7 +121,20 @@ class Engine:
     # --- per-frame advancer ---
 
     def tick(self):
-        """对应 FUN_00438e00. 每帧调一次, 推所有活实体."""
+        """对应 FUN_00438e00. 每帧调一次:
+        (1) think_fn 实体每帧调 think_fn (= 投射物物理 / 自定义状态机驱动)
+        (2) seq 实体推进 seq 字节码 (FM/MOVE/SIGNAL/...)
+        """
+        # (1) think_fn 实体: 不靠 seq, think_fn 自己驱动状态. 用 list() 避免迭代时 spawn 改 list 出问题.
+        # bit 16 = has think_fn; bit 11 = 仍在 pool 内.
+        for e in list(self.entities):
+            if e.think_fn is None:
+                continue
+            if (e.flags & 0x800) == 0:
+                continue   # 已 destroy
+            e.think_fn(e, self)
+
+        # (2) seq 实体: 标准字节码推进 (原版 FUN_00438e00)
         for e in self.entities:
             if not e.is_playing():
                 continue

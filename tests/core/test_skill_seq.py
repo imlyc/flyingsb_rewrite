@@ -29,10 +29,12 @@ def test_vertical_slash_has_init_impact_end_signals():
 
 
 def test_skill_seqs_lookup():
-    """skill_id 0x20 → 垂直斬; 未实现 skill_id → has_skill_seq False."""
+    """skill_id 0x20 / 0x21 / 0x24 都已实现; 0x22/0x23 暂未."""
     assert has_skill_seq(0x20) is True
-    assert has_skill_seq(0x21) is False    # 赤雲波 暂未 dump
-    assert 0x20 in SKILL_SEQS
+    assert has_skill_seq(0x21) is True     # 赤雲波 (B 类, cast seq + impact spawn)
+    assert has_skill_seq(0x24) is True
+    assert has_skill_seq(0x22) is False
+    assert has_skill_seq(0x23) is False
 
 
 def test_skill_seq_for_facing():
@@ -53,7 +55,7 @@ def test_attack_seq_for_routes_to_skill_when_skill_id_given():
 
 def test_unimplemented_skill_falls_back_to_normal_attack():
     """未 dump 的 skill_id 回落到角色普攻 seq (= 不崩, 视觉先 work)."""
-    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x21)   # 赤雲波 没 dump
+    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x22)   # 火龍斬 没 dump
     seq_atk = attack_seq_for("蒙面人", (0, -1), skill_id=None)
     assert seq_skill == seq_atk
 
@@ -83,7 +85,75 @@ def test_infinite_blade_5_impacts_mid_atlas_switch():
         assert atlases == {19, 20}, f"dir {dir_idx} expected atlas 19+20, got {atlases}"
 
 
-def test_vertical_slash_impact_extra():
+def test_cloudwave_projectile_physics_lands_and_damages():
+    """赤雲波 (B 类): IMPACT 时 spawn 投射物, 投射物按重力下落, 落地 → SIG_IMPACT_2 → 结算伤害."""
+    import random
+    from core.anim_engine.engine import Engine
+    from core.battle.combat import begin_attack, apply_pending_attack
+    from core.battle.data import BattleUnit, DamageEvent
+    from core.battle.queries import BattleQueries
+    from core.battle.data import BattleMap
+    from core.anim_engine.entity import SIG_IMPACT_2
+
+    class _B:
+        def __init__(self):
+            self.rng = random.Random(0)
+            self.damage_events: list = []
+            self.messages: list = []
+            self.players: list = []
+            self.enemies: list = []
+            self.map = BattleMap(10, 10)
+            self.q = BattleQueries(self.map, self.players, self.enemies)
+            self.engine = Engine()
+            self._pending_damage_range = None
+            self._SIG_IMPACT_2 = SIG_IMPACT_2
+            self.all_units = []
+        def _log(self, m): self.messages.append(m)
+
+    b = _B()
+    caster = BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30,
+                        max_mp=15, mp=15, sg=0, attack=20, defence=5, agile=100, move=3, is_player=True)
+    caster.x, caster.y = 2, 2
+    defender = BattleUnit(name="d", level=1, max_hp=50, hp=50,
+                          max_mp=0, mp=0, sg=0, attack=10, defence=0, agile=0, move=3, is_player=False)
+    defender.x, defender.y = 5, 2
+    b.players.append(caster); b.enemies.append(defender)
+    b.all_units = [caster, defender]
+
+    # 模拟"赤雲波 cast seq 跑到 IMPACT": 设 pending, 直接调 apply_pending_attack
+    caster.pending_attack_target = defender
+    caster.pending_skill_id = 0x21
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+    # 接 IMPACT_2 路由
+    def on_signal(src, sig):
+        if sig == SIG_IMPACT_2:
+            caster.pending_impact_count = 0     # 强制走最终结算
+            saved = caster.pending_skill_id
+            caster.pending_skill_id = None
+            from core.battle import combat
+            combat.apply_pending_attack(b, caster)
+            caster.pending_skill_id = saved
+    b.engine.on('signal', on_signal)
+
+    apply_pending_attack(b, caster)
+
+    # 投射物 entity 应已 spawn (think_fn=cloudwave_think_fn)
+    proj = [e for e in b.engine.entities if e.user_data.get('projectile')]
+    assert len(proj) == 1
+    p = proj[0]
+    assert p.state_code == 0   # FLYING
+
+    # 跑 tick 直到 z 落地 (max 100 tick 防死循环)
+    initial_hp = defender.hp
+    for _ in range(100):
+        b.engine.tick()
+        if p.state_code != 0:
+            break
+    # 落地后 state 切换 + 伤害结算
+    assert p.state_code != 0, "投射物没落地"
+    assert defender.hp < initial_hp, "落地后没扣血"
+    assert len(b.damage_events) == 1
     """垂直斬 IMPACT 时 dispatcher 额外 spawn 12 帧放电特效 (ds_mag28 + ds_mag13)."""
     from core.skill_seq import (
         SKILL_IMPACT_EXTRA, has_skill_impact_extra, skill_impact_extra_seq,

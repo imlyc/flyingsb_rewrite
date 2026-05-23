@@ -226,9 +226,28 @@ SKILL_INFINITE_BLADE = [
 ]
 
 
+# 0x21 赤雲波 + 0x22 火龍斬 共享 cast seq @0x676d28 — 4 帧施法姿 (cdit1_m1 atlas 22) + IMPACT + EXIT.
+# IMPACT 时 dispatcher 不直接结算伤害, 而是 spawn 投射物 (SKILL_IMPACT_SPAWN).
+SKILL_CAST_CDIT1_M1 = [
+    # UP
+    [('fm', 22, 0, 3), ('fm', 22, 1, 3), ('fm', 22, 2, 3), ('fm', 22, 3, 5),
+     ('impact',), ('exit',)],
+    # DN
+    [('fm', 22, 4, 3), ('fm', 22, 5, 3), ('fm', 22, 6, 3), ('fm', 22, 7, 5),
+     ('impact',), ('exit',)],
+    # LF
+    [('fm', 22, 8, 3), ('fm', 22, 9, 3), ('fm', 22, 10, 3), ('fm', 22, 11, 5),
+     ('impact',), ('exit',)],
+    # RT
+    [('fm', 22, 12, 3), ('fm', 22, 13, 3), ('fm', 22, 14, 3), ('fm', 22, 15, 5),
+     ('impact',), ('exit',)],
+]
+
+
 # skill_id → 4-direction seq table
 SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x20: SKILL_VERTICAL_SLASH,   # 垂直斬
+    0x21: SKILL_CAST_CDIT1_M1,    # 赤雲波 (B 类, IMPACT 时 spawn projectile, 不直接掉血)
     0x24: SKILL_INFINITE_BLADE,   # 無限刀 (5 IMPACT, 切 atlas 终结)
 }
 
@@ -263,6 +282,28 @@ SKILL_IMPACT_EXTRA: dict[int, list[tuple]] = {
         ('exit',),
     ],
 }
+
+
+# B-class skills: 技能 IMPACT (-100) 不直接结算伤害, 而是 spawn 投射物.
+# 投射物 think_fn 落地时发 SIG_IMPACT_2 (-250), battle signal handler 那时才结算伤害.
+# 表里的 spawn fn 签名: (battle, attacker, defender) -> Entity
+def _spawn_cloudwave(battle, attacker, defender):
+    from core.projectile import spawn_cloudwave_projectile
+    return spawn_cloudwave_projectile(battle, attacker, defender)
+
+
+SKILL_IMPACT_SPAWN: dict[int, "callable"] = {
+    0x21: _spawn_cloudwave,
+    # 0x22 火龙斩 / 0x23 破天舞 后续接
+}
+
+
+def has_impact_spawn(skill_id: int | None) -> bool:
+    return skill_id is not None and skill_id in SKILL_IMPACT_SPAWN
+
+
+def skill_impact_spawn(skill_id: int):
+    return SKILL_IMPACT_SPAWN[skill_id]
 
 
 def has_skill_seq(skill_id: int) -> bool:
