@@ -72,6 +72,17 @@ def test_skill_cost():
     assert skill_cost(0xFF) == 0
 
 
+def test_infinite_blade_5_impacts_mid_atlas_switch():
+    """無限刀 0x24: 4 方向各 5 段 IMPACT, atlas 20 (cdit1_g1) 主体 + 终结切 atlas 19 (cdit1_g0)."""
+    from core.skill_seq import SKILL_INFINITE_BLADE
+    assert len(SKILL_INFINITE_BLADE) == 4
+    for dir_idx, seq in enumerate(SKILL_INFINITE_BLADE):
+        impacts = [t for t in seq if t[0] == 'impact']
+        assert len(impacts) == 5, f"dir {dir_idx} expected 5 IMPACTs, got {len(impacts)}"
+        atlases = {t[1] for t in seq if t[0] == 'fm'}
+        assert atlases == {19, 20}, f"dir {dir_idx} expected atlas 19+20, got {atlases}"
+
+
 def test_vertical_slash_impact_extra():
     """垂直斬 IMPACT 时 dispatcher 额外 spawn 12 帧放电特效 (ds_mag28 + ds_mag13)."""
     from core.skill_seq import (

@@ -93,6 +93,42 @@ def test_apply_damage_lethal_clamps_hp():
     assert not d.alive
 
 
+def test_multi_impact_damages_only_on_last():
+    """多段攻击 (无限刀 5 IMPACT): 只 *最后* 一段结算伤害, 之前的仅触发视觉反馈."""
+    b = _FakeBattle(seed=0)
+    a = _unit("a", 0, 0, atk=20, agile=100)
+    d = _unit("d", 1, 0, hp=100, defense=0, agile=0)
+    a.pending_attack_target = d
+    a.pending_impact_count = 0
+    a.pending_impact_total = 5             # 5 段
+
+    initial_hp = 100
+    # 前 4 次 IMPACT — 不出伤害
+    for i in range(4):
+        combat.apply_pending_attack(b, a)
+        assert len(b.damage_events) == 0, f"impact #{i+1} 不该出伤害事件"
+        assert d.hp == initial_hp, f"impact #{i+1} 不该掉血"
+    # 第 5 次 (最后) — 出伤害
+    combat.apply_pending_attack(b, a)
+    assert len(b.damage_events) == 1
+    assert d.hp < initial_hp
+    # 反应动画在每次 IMPACT 都触发
+    assert d.reaction_seq is not None
+
+
+def test_single_impact_skill_damages_on_first_call():
+    """单段攻击 (total=1) 第 1 次 = 最后一次, 直接结算."""
+    b = _FakeBattle(seed=0)
+    a = _unit("a", 0, 0)
+    d = _unit("d", 1, 0, hp=20)
+    a.pending_attack_target = d
+    a.pending_impact_count = 0
+    a.pending_impact_total = 1
+    combat.apply_pending_attack(b, a)
+    assert len(b.damage_events) == 1
+    assert d.hp < 20
+
+
 def test_set_reaction_turns_defender_toward_attacker():
     """defender 在 (5,5), attacker 在 (8,5) (右侧) → defender 朝右."""
     a = _unit("a", 8, 5)

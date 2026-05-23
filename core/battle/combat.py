@@ -142,6 +142,10 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     attacker.pending_skill_id = skill_id
     attacker.pending_attack_kind = ""
     attacker.pending_attack_dmg = 0
+    attacker.pending_impact_count = 0
+    # 数 seq 里 IMPACT 总数, 给 apply_pending_attack 判断"是否最后一段"
+    seq_tuples = attack_seq_for(attacker.name, attacker.facing, skill_id)
+    attacker.pending_impact_total = max(1, sum(1 for t in seq_tuples if t[0] == 'impact'))
     # 创建/复用 entity, 关联回 BattleUnit (signal handler 用)
     if attacker.entity is None:
         attacker.entity = battle.engine.spawn()
@@ -152,16 +156,20 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
     attacker.entity.user_data = {'unit': attacker}
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
-    seq_bc = tuple_to_bytecode(attack_seq_for(attacker.name, attacker.facing, skill_id))
+    seq_bc = tuple_to_bytecode(seq_tuples)
     battle.engine.attach_seq(attacker.entity, seq_bc)
 
 
 def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
-    """attack_seq 跑到 'impact' 步骤时由 UI 调. 实际扣血 + 触发受击/闪避动画.
-    每次 impact 独立 roll (支持多段攻击; 目标死亡后续 impact 自动跳过).
-    AoE: 若 battle._pending_damage_range 非 None, 一次性扫伤害范围里所有敌人,
-    每个独立 miss roll. 否则走单点 pending_attack_target.
+    """attack_seq 跑到 'impact' 步骤时由 UI 调.
+    多段攻击 (e.g. 無限刀 5 段) 只有 *最后* 一段结算伤害 + 飘字, 之前的 IMPACT 仅
+    触发 reaction + hit-fx 给视觉反馈. 单段攻击 (= total=1) 则首段即末段, 直接结算.
     """
+    attacker.pending_impact_count += 1
+    is_last = attacker.pending_impact_count >= attacker.pending_impact_total
+    if not is_last:
+        _replay_impact_visuals(battle, attacker)
+        return
     dmg_tiles = getattr(battle, '_pending_damage_range', None)
     if dmg_tiles:
         for (x, y) in dmg_tiles:
@@ -174,6 +182,25 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     if target is None or not target.alive:
         return
     _roll_damage_one(battle, attacker, target)
+
+
+def _replay_impact_visuals(battle: "TacticsBattle", attacker: BattleUnit) -> None:
+    """多段攻击的非末段 IMPACT: 视觉重放 (反应动画 + hit-fx), 不扣血/不飘字.
+    沿用 pending_attack_target / pending_damage_range 拿目标列表."""
+    targets: list[BattleUnit] = []
+    dmg_tiles = getattr(battle, '_pending_damage_range', None)
+    if dmg_tiles:
+        for (x, y) in dmg_tiles:
+            t = battle.q.occupant(x, y)
+            if t is not None and t.alive and t.is_player != attacker.is_player:
+                targets.append(t)
+    else:
+        t = attacker.pending_attack_target
+        if t is not None and t.alive:
+            targets.append(t)
+    for t in targets:
+        set_reaction(t, "hit", attacker)
+        _emit_hit_effect(battle, attacker, t)
 
 
 def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit) -> None:
@@ -193,6 +220,8 @@ def clear_pending_attack(attacker: BattleUnit) -> None:
     attacker.pending_attack_kind = ""
     attacker.pending_attack_dmg = 0
     attacker.pending_skill_id = None
+    attacker.pending_impact_count = 0
+    attacker.pending_impact_total = 1
     # 强制清掉 entity 的 playing flag, 防止后续 tick 还在跑 (即使 seq 没显式 EXIT)
     if attacker.entity is not None:
         attacker.entity.flags &= ~0x20000
