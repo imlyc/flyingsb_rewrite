@@ -284,11 +284,13 @@ class TacticsBattle:
     def attack_range(self, u: BattleUnit | None = None,
                      skill_id: int | None = None) -> set[tuple[int, int]]:
         """攻击范围: cursor 在 AIM 阶段可游走的格子集合. 不改 phase, 可在 MOVE 阶段
-        做 preview 用. 普攻按角色 profile (孙悟空 1×3 / 蒙面人 3×2), 技能 TBD."""
+        做 preview 用. 普攻按角色 profile (孙悟空 1×3 / 蒙面人 3×2), 技能按 skill pattern."""
         u = u or self.current
         if skill_id is not None:
-            # TODO: 技能 pattern 表
-            return set()
+            # 技能 pattern (暂只覆盖已实现技能, 其他走默认前 1 格)
+            # 0x20 垂直斬 = 前方 1 格 (= default), 跟普攻一致.
+            pattern_fn, _ = get_aim_funcs(u.name)
+            return pattern_fn(u, self.map)
         pattern_fn, _ = get_aim_funcs(u.name)
         return pattern_fn(u, self.map)
 
@@ -369,7 +371,7 @@ class TacticsBattle:
         primary = cur_occ if cur_occ in enemies else enemies[0]
         # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
         self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
-        combat.begin_attack(self, u, primary)
+        combat.begin_attack(self, u, primary, skill_id=self.aim_skill_id)
         return True
 
     def cancel_attack_aim(self) -> bool:

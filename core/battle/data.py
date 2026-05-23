@@ -96,7 +96,8 @@ class BattleUnit:
     pending_attack_target: "BattleUnit | None" = None
     pending_attack_kind: str = ""             # "hit" / "dodge"
     pending_attack_dmg: int = 0
-    pending_attack_skill: bool = False        # 是否必杀
+    pending_attack_skill: bool = False        # 是否必杀 (旧字段, 留作兼容)
+    pending_skill_id: int | None = None       # 技能 ID (普攻 None); IMPACT 时给 hit-effect 看决定 extra fx
     # 死亡动画计时 (HP=0 + reaction 结束 + 数字进 flash 阶段后开始累计 ms; -1 = 未启动).
     # 时序源 exe FUN_004399c5 / 00439b42 等: 切 ps_*04 row 4 (frames 12/13/14), 每帧 hold 0x14=20 ticks=800ms.
     # 玩家: 走完 fall 永久 hold (尸体, 可复活); 敌人: hold 一段后闪烁消失.

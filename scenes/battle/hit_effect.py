@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pygame
 
 from core.fm_frames import FM_FRAMES
+from core.raw_attack_seqs import atlas_resource
 from core.sprites.loaders import get_fm_surface
 
 if TYPE_CHECKING:
@@ -19,15 +20,17 @@ if TYPE_CHECKING:
 
 
 def draw_hit_effects(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
-    """扫 engine.entities 找 kind='hit_effect' 的实体, 按 atlas_key + frame_idx 画."""
+    """扫 engine.entities 找 kind='hit_effect' 的实体, 按当前 atlas_slot + frame_idx 画.
+    支持 mid-seq atlas 切换 (= 技能 extra fx 中段从一个 atlas 换到另一个), 每帧从
+    entity.atlas_slot 反查 atlas_key, 不缓存."""
     for ent in scene.battle.engine.entities:
         if ent.user_data.get('kind') != 'hit_effect':
             continue
-        # EXIT op 触发后 playing flag 落下; 该 entity 不再画 (= 自然消失)
         if not ent.is_playing():
             continue
-        atlas_key = ent.user_data.get('atlas_key')
-        if not atlas_key:
+        slot_lo = ent.atlas_slot & 0xffff
+        atlas_key = atlas_resource(slot_lo)
+        if atlas_key is None:
             continue
         frames = FM_FRAMES.get(atlas_key)
         if frames is None or not (0 <= ent.frame_idx < len(frames)):

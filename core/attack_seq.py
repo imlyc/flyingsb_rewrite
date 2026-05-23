@@ -56,7 +56,13 @@ def facing_to_atk_index(facing: tuple[int, int]) -> int:
 # Player style ATK_A/B/C 用 per-character atlas remap (atlas_slot 0/1/5 抽象槽);
 # Enemy style ENEMY_<NAME> 用 mode 0 全局 atlas_slot (直接全局 atlas_idx).
 # Fallback: ATK_UNKNOWN (16B 微 seq, wait+impact, 不画动画), 用于配置缺失的任意角色.
-def attack_seq_for(char_name: str, facing: tuple[int, int]) -> list[tuple]:
+def attack_seq_for(char_name: str, facing: tuple[int, int],
+                   skill_id: int | None = None) -> list[tuple]:
+    # 技能 → 走专属 seq (优先级最高); 没 dump 的 skill 回落普攻
+    if skill_id is not None:
+        from core.skill_seq import has_skill_seq, skill_seq_for
+        if has_skill_seq(skill_id):
+            return skill_seq_for(skill_id, facing)
     from core.character_sprites import attack_style
     style = attack_style(char_name)
     table = {

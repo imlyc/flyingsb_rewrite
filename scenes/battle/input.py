@@ -123,10 +123,18 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
         elif key in (pygame.K_DOWN, pygame.K_s):
             scene._skill_cursor = (scene._skill_cursor + 1) % len(skills)
         elif key in (pygame.K_RETURN, pygame.K_SPACE):
-            # 技能使用: 占位, 留给"接入 AIM + 技能 pattern"那一步
+            # 技能选定: 关 L2, 进 AIM 阶段 (with skill_id). 没 dump 真 seq 的技能
+            # 会回落普攻 seq (= 暂时占位), 暂不强制阻止.
             from core.skills import get_skill_name
-            scene.battle._log(f"(TODO) {scene.battle.current.name} 使用 "
-                              f"{get_skill_name(skills[scene._skill_cursor])}")
+            sid = skills[scene._skill_cursor]
+            # 关 L2 (无动画, 直接收掉) — 进 AIM 后是新阶段, 不需要原 L1/L2 状态
+            scene._submenu = None
+            scene._menu_open = False
+            scene._input_gated = False
+            if not scene.battle.enter_attack_aim(sid):
+                scene.battle._log(f"{scene.battle.current.name} 无法使用"
+                                  f" {get_skill_name(sid)} (范围内无目标)")
+            return
         return
 
     # 一级菜单 — 全部通过 dismiss 动画收掉

@@ -62,10 +62,13 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
     """命中分支: 仿原版 DOIT_melee IMPACT 同时 spawn 2 个独立 anim_engine entity.
     miss/dodge 不放. ATK_C 1st spawn = 长椭圆, 否则 = 紫色 starburst; 2nd spawn = 小红刺爆.
     每个 spec 独立抖动 (jittered=True 时 RNG ±8px).
+    技能攻击 (pending_skill_id != None) 额外 spawn 1 个特效 (= 技能 dispatcher 在 IMPACT
+    时主动调 FUN_004d0c90 加挂的, 见 SKILL_IMPACT_EXTRA).
     """
     from core.hit_effect_seq import (
         HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX, pick_hit_effects,
     )
+    from core.skill_seq import has_skill_impact_extra, skill_impact_extra_seq
     from core.sprites.base import TILE_W, TILE_H
     specs = pick_hit_effects(attacker.name, None, attacker.facing)
     cx = defender.x * TILE_W + TILE_W // 2
@@ -78,6 +81,26 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
             ox = 0
             oy = -HIT_EFFECT_Y_BASELINE_PX
         _spawn_effect_entity(battle, cx + ox, cy + oy, spec)
+
+    # 技能专属额外特效 (= 原版 dispatcher IMPACT 分支调 blood_spawn 的 3rd entity)
+    sid = attacker.pending_skill_id
+    if has_skill_impact_extra(sid):
+        _spawn_skill_extra_effect(battle, cx, cy - HIT_EFFECT_Y_BASELINE_PX,
+                                  skill_impact_extra_seq(sid))
+
+
+def _spawn_skill_extra_effect(battle: "TacticsBattle", world_x: int, world_y: int,
+                              seq_tuples: list[tuple]) -> None:
+    """技能 IMPACT 时 spawn 的额外特效: seq 含多帧 + 可能 mid-seq atlas 切换.
+    跟 _spawn_effect_entity 套路一样, 但直接接受 tuple seq (不是 HitEffectSpec)."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    e = battle.engine.spawn()
+    e.x = world_x << 16
+    e.y = world_y << 16
+    e.z = 0
+    e.user_data['kind'] = 'hit_effect'
+    # 不设 atlas_key — render 端每帧从 entity.atlas_slot 反查 (支持 atlas 切换)
+    battle.engine.attach_seq(e, tuple_to_bytecode(seq_tuples))
 
 
 def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, spec) -> None:
@@ -106,14 +129,17 @@ def strike_skill(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
 
 
 # ---- 普攻 (走 anim_engine 字节码) ----
-def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:
+def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit,
+                 skill_id: int | None = None) -> None:
     """启动攻击 seq; anim_engine 跑字节码, SIGNAL -100 时 apply_pending_attack 独立 roll 命中/伤害.
     多段攻击: seq 含多个 SIGNAL -100, 每次独立判定 (= 原版多次 jump -100).
+    skill_id != None 时跑技能专属 seq (= core.skill_seq.SKILL_SEQS), 否则普攻.
     """
     from core.attack_seq import attack_seq_for
     from core.anim_engine.bytecode import tuple_to_bytecode
     attacker.pending_attack_target = defender
-    attacker.pending_attack_skill = False
+    attacker.pending_attack_skill = skill_id is not None
+    attacker.pending_skill_id = skill_id
     attacker.pending_attack_kind = ""
     attacker.pending_attack_dmg = 0
     # 创建/复用 entity, 关联回 BattleUnit (signal handler 用)
@@ -126,7 +152,7 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
     attacker.entity.user_data = {'unit': attacker}
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
-    seq_bc = tuple_to_bytecode(attack_seq_for(attacker.name, attacker.facing))
+    seq_bc = tuple_to_bytecode(attack_seq_for(attacker.name, attacker.facing, skill_id))
     battle.engine.attach_seq(attacker.entity, seq_bc)
 
 
@@ -166,6 +192,7 @@ def clear_pending_attack(attacker: BattleUnit) -> None:
     attacker.pending_attack_target = None
     attacker.pending_attack_kind = ""
     attacker.pending_attack_dmg = 0
+    attacker.pending_skill_id = None
     # 强制清掉 entity 的 playing flag, 防止后续 tick 还在跑 (即使 seq 没显式 EXIT)
     if attacker.entity is not None:
         attacker.entity.flags &= ~0x20000
