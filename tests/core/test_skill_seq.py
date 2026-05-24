@@ -29,12 +29,11 @@ def test_vertical_slash_has_init_impact_end_signals():
 
 
 def test_skill_seqs_lookup():
-    """skill_id 0x20 / 0x21 / 0x24 都已实现; 0x22/0x23 暂未."""
-    assert has_skill_seq(0x20) is True
-    assert has_skill_seq(0x21) is True     # 赤雲波 (B 类, cast seq + impact spawn)
-    assert has_skill_seq(0x24) is True
-    assert has_skill_seq(0x22) is False
-    assert has_skill_seq(0x23) is False
+    """蒙面人 5 技能 (0x20..0x24) 全部已实现."""
+    for sid in (0x20, 0x21, 0x22, 0x23, 0x24):
+        assert has_skill_seq(sid) is True
+    # 未注册的 skill 仍回落
+    assert has_skill_seq(0x05) is False
 
 
 def test_skill_seq_for_facing():
@@ -54,8 +53,9 @@ def test_attack_seq_for_routes_to_skill_when_skill_id_given():
 
 
 def test_unimplemented_skill_falls_back_to_normal_attack():
-    """未 dump 的 skill_id 回落到角色普攻 seq (= 不崩, 视觉先 work)."""
-    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x22)   # 火龍斬 没 dump
+    """未 dump 的 skill_id 回落到角色普攻 seq (= 不崩, 视觉先 work).
+    蒙面人 0x20..0x24 全 dump; 其他角色技能尚未 → 用 0x00 等其他 ID 验证 fallback."""
+    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x00)
     seq_atk = attack_seq_for("蒙面人", (0, -1), skill_id=None)
     assert seq_skill == seq_atk
 
@@ -154,6 +154,172 @@ def test_cloudwave_projectile_physics_lands_and_damages():
     assert p.state_code != 0, "投射物没落地"
     assert defender.hp < initial_hp, "落地后没扣血"
     assert len(b.damage_events) == 1
+
+
+def _b_class_battle_fixture(caster_pos, defender_pos):
+    """复用赤雲波 fixture 的简版 battle, 给火龍/破天 用."""
+    import random
+    from core.anim_engine.engine import Engine
+    from core.battle.data import BattleMap, BattleUnit
+    from core.battle.queries import BattleQueries
+    from core.anim_engine.entity import SIG_IMPACT_2
+
+    class _B:
+        def __init__(self):
+            self.rng = random.Random(0)
+            self.damage_events: list = []
+            self.messages: list = []
+            self.players: list = []
+            self.enemies: list = []
+            self.map = BattleMap(15, 10)
+            self.q = BattleQueries(self.map, self.players, self.enemies)
+            self.engine = Engine()
+            self._pending_damage_range = None
+            self.all_units = []
+        def _log(self, m): self.messages.append(m)
+
+    b = _B()
+    caster = BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30,
+                        max_mp=15, mp=15, sg=0, attack=20, defence=5,
+                        agile=100, move=3, is_player=True)
+    caster.x, caster.y = caster_pos
+    defender = BattleUnit(name="d", level=1, max_hp=50, hp=50,
+                          max_mp=0, mp=0, sg=0, attack=10, defence=0,
+                          agile=0, move=3, is_player=False)
+    defender.x, defender.y = defender_pos
+    b.players.append(caster); b.enemies.append(defender)
+    b.all_units = [caster, defender]
+
+    def on_signal(src, sig):
+        if sig == SIG_IMPACT_2:
+            caster.pending_impact_count = 0
+            saved = caster.pending_skill_id
+            caster.pending_skill_id = None
+            from core.battle import combat
+            combat.apply_pending_attack(b, caster)
+            caster.pending_skill_id = saved
+    b.engine.on('signal', on_signal)
+    return b, caster, defender
+
+
+def test_huolong_effect_signals_impact_and_damages():
+    """火龍斬 (0x22, B 类无物理): spawn effect 在 cursor → 播 16 帧 seq → 信号 IMPACT_2 → 结算伤害."""
+    from core.battle.combat import apply_pending_attack
+    b, caster, defender = _b_class_battle_fixture((2, 2), (5, 2))
+    # cursor 落 defender 上, damage tile 是 3x3 包含 defender
+    caster.pending_attack_target = defender
+    caster.pending_attack_cursor = (defender.x, defender.y)
+    caster.pending_skill_id = 0x22
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+
+    apply_pending_attack(b, caster)
+    proj = [e for e in b.engine.entities if e.user_data.get('projectile')]
+    assert len(proj) == 1
+    p = proj[0]
+    assert p.atlas_slot == 278   # 火龍 atlas
+
+    initial_hp = defender.hp
+    for _ in range(200):
+        b.engine.tick()
+        if defender.hp < initial_hp:
+            break
+    assert defender.hp < initial_hp, "火龍 seq 完没扣血"
+    assert len(b.damage_events) == 1
+
+
+def test_potian_full_choreography():
+    """破天舞 (0x23) 严格还原: 3 阶段编排.
+    Phase SECONDARY: per victim spawn 1 atlas-279 effect (POTIAN_SECONDARY_SEQ 9 帧).
+    Phase SCATTER:   per victim spawn 2 atlas-279 scatter (frames 9/10, spring 物理收敛) + 1 atlas-292 trajectory.
+    Phase DAMAGE:    coordinator 发 SIG_IMPACT_2 → 走 _pending_damage_range 路径结算.
+    """
+    from core.battle.combat import apply_pending_attack
+    b, caster, defender = _b_class_battle_fixture((2, 2), (5, 2))
+    caster.pending_attack_target = defender
+    caster.pending_attack_cursor = (defender.x, defender.y)
+    caster.pending_skill_id = 0x23
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+
+    apply_pending_attack(b, caster)
+
+    # SECONDARY phase: 1 victim → 1 secondary effect + 1 coordinator
+    secondaries = [e for e in b.engine.entities
+                   if e.user_data.get('projectile') and e.atlas_slot == 279]
+    coords = [e for e in b.engine.entities
+              if e.user_data.get('kind') == 'potian_coordinator']
+    assert len(secondaries) == 1, f"期望 1 个 secondary effect, 实际 {len(secondaries)}"
+    assert len(coords) == 1
+    assert coords[0].atlas_slot == 0   # coordinator 不渲染
+
+    # 跑到 SCATTER phase: 应 spawn 2 scatter (atlas 279) + 1 trajectory (atlas 292)
+    initial_hp = defender.hp
+    saw_trajectory = False
+    for _ in range(300):
+        b.engine.tick()
+        traj = [e for e in b.engine.entities
+                if e.user_data.get('projectile') and e.atlas_slot == 292]
+        if traj:
+            saw_trajectory = True
+        if defender.hp < initial_hp:
+            break
+
+    assert saw_trajectory, "SCATTER 阶段没 spawn trajectory (atlas 292)"
+    assert defender.hp < initial_hp, "coordinator 没发 SIG_IMPACT_2 / 没扣血"
+    assert len(b.damage_events) == 1
+
+
+def test_potian_per_victim_spawns():
+    """破天舞 3x3 范围 N 个 victim → N 个 secondary, scatter 阶段 N×2 scatter + N trajectory."""
+    from core.battle.data import BattleUnit
+    from core.battle.combat import apply_pending_attack
+    b, caster, defender = _b_class_battle_fixture((2, 2), (5, 2))
+    # 再加 2 个 enemy 在 3x3 内 (cursor=(5,2), 范围 x∈[4,6] y∈[1,3])
+    d2 = BattleUnit(name="d2", level=1, max_hp=50, hp=50, max_mp=0, mp=0, sg=0,
+                    attack=10, defence=0, agile=0, move=3, is_player=False)
+    d2.x, d2.y = 4, 1
+    d3 = BattleUnit(name="d3", level=1, max_hp=50, hp=50, max_mp=0, mp=0, sg=0,
+                    attack=10, defence=0, agile=0, move=3, is_player=False)
+    d3.x, d3.y = 6, 3
+    b.enemies.extend([d2, d3])
+    b.all_units.extend([d2, d3])
+
+    caster.pending_attack_target = defender
+    caster.pending_attack_cursor = (defender.x, defender.y)
+    caster.pending_skill_id = 0x23
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+    apply_pending_attack(b, caster)
+
+    secondaries = [e for e in b.engine.entities
+                   if e.user_data.get('projectile') and e.atlas_slot == 279]
+    assert len(secondaries) == 3, f"3 victims → 3 secondaries, 实际 {len(secondaries)}"
+
+    # 跑到 SCATTER 完整 spawn
+    for _ in range(40):
+        b.engine.tick()
+        traj = [e for e in b.engine.entities
+                if e.user_data.get('projectile') and e.atlas_slot == 292]
+        if len(traj) == 3:
+            break
+    traj = [e for e in b.engine.entities
+            if e.user_data.get('projectile') and e.atlas_slot == 292]
+    assert len(traj) == 3, f"3 victims → 3 trajectories, 实际 {len(traj)}"
+
+
+def test_huolong_potian_impact_spawn_registered():
+    """0x21/0x22/0x23 三个 B 类 skill 都注册到 SKILL_IMPACT_SPAWN."""
+    from core.skill_seq import has_impact_spawn
+    assert has_impact_spawn(0x21) is True
+    assert has_impact_spawn(0x22) is True
+    assert has_impact_spawn(0x23) is True
+    assert has_impact_spawn(0x20) is False   # A 类直接 damage
+    assert has_impact_spawn(0x24) is False   # A 类多段
+    assert has_impact_spawn(None) is False
+
+
+def test_skill_impact_extra_vertical_slash():
     """垂直斬 IMPACT 时 dispatcher 额外 spawn 12 帧放电特效 (ds_mag28 + ds_mag13)."""
     from core.skill_seq import (
         SKILL_IMPACT_EXTRA, has_skill_impact_extra, skill_impact_extra_seq,

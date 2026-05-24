@@ -248,6 +248,8 @@ SKILL_CAST_CDIT1_M1 = [
 SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x20: SKILL_VERTICAL_SLASH,   # 垂直斬
     0x21: SKILL_CAST_CDIT1_M1,    # 赤雲波 (B 类, IMPACT 时 spawn projectile, 不直接掉血)
+    0x22: SKILL_CAST_CDIT1_M1,    # 火龍斬 (B 类, 共享 cast seq, IMPACT 时 spawn effect)
+    0x23: SKILL_CAST_CDIT1_M1,    # 破天舞 (B 类, 共享 cast seq, IMPACT 时 spawn 多 effect)
     0x24: SKILL_INFINITE_BLADE,   # 無限刀 (5 IMPACT, 切 atlas 终结)
 }
 
@@ -294,9 +296,20 @@ def _spawn_cloudwave(battle, attacker, target_tile):
     return spawn_cloudwave_projectile(battle, attacker, target_tile)
 
 
+def _spawn_huolong(battle, attacker, target_tile):
+    from core.projectile import spawn_huolong_effect
+    return spawn_huolong_effect(battle, attacker, target_tile)
+
+
+def _spawn_potian(battle, attacker, target_tile):
+    from core.projectile import spawn_potian_effects
+    return spawn_potian_effects(battle, attacker, target_tile)
+
+
 SKILL_IMPACT_SPAWN: dict[int, "callable"] = {
     0x21: _spawn_cloudwave,
-    # 0x22 火龙斩 / 0x23 破天舞 后续接
+    0x22: _spawn_huolong,
+    0x23: _spawn_potian,
 }
 
 
