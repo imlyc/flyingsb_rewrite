@@ -130,7 +130,8 @@ def strike_skill(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
 
 # ---- 普攻 (走 anim_engine 字节码) ----
 def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit,
-                 skill_id: int | None = None) -> None:
+                 skill_id: int | None = None,
+                 cursor: tuple[int, int] | None = None) -> None:
     """启动攻击 seq; anim_engine 跑字节码, SIGNAL -100 时 apply_pending_attack 独立 roll 命中/伤害.
     多段攻击: seq 含多个 SIGNAL -100, 每次独立判定 (= 原版多次 jump -100).
     skill_id != None 时跑技能专属 seq (= core.skill_seq.SKILL_SEQS), 否则普攻.
@@ -140,6 +141,7 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     attacker.pending_attack_target = defender
     attacker.pending_attack_skill = skill_id is not None
     attacker.pending_skill_id = skill_id
+    attacker.pending_attack_cursor = cursor if cursor is not None else (defender.x, defender.y)
     attacker.pending_attack_kind = ""
     attacker.pending_attack_dmg = 0
     attacker.pending_impact_count = 0
@@ -175,9 +177,13 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     if sid is not None:
         from core.skill_seq import has_impact_spawn, skill_impact_spawn
         if has_impact_spawn(sid):
-            target = attacker.pending_attack_target
-            if target is not None and target.alive:
-                skill_impact_spawn(sid)(battle, attacker, target)
+            tile = attacker.pending_attack_cursor
+            if tile is None:
+                t = attacker.pending_attack_target
+                if t is not None:
+                    tile = (t.x, t.y)
+            if tile is not None:
+                skill_impact_spawn(sid)(battle, attacker, tile)
             return    # 不走默认伤害结算
     dmg_tiles = getattr(battle, '_pending_damage_range', None)
     if dmg_tiles:

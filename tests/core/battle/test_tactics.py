@@ -160,6 +160,56 @@ def test_aim_confirm_attacks_cursor_target():
     assert b.confirm_attack_aim()           # cursor 上有敌, 攻击成功
 
 
+def test_skill_aim_initial_cursor_on_axis_when_not_adjacent():
+    """赤雲波 (skill 0x21) 范围是 forward 2-3 锥, 前 1 不在范围内. cursor 必须落在
+    facing 中轴的最近格 (= forward 2), 不能用 next(iter(rng)) 随机."""
+    p = _player("p", 10, 10, agile=20, move=0)
+    e = _enemy("e", 0, 0, agile=5)
+    b = _battle(players=[p], enemies=[e], w=20, h=20)
+    p.facing = (0, -1)
+    assert b.enter_attack_aim(skill_id=0x21)
+    # set1 p20 中轴: forward 2 (=(10,8)) 和 forward 3 (=(10,7)) 都在范围内, 选最近的
+    assert b.aim_cursor == (10, 8)
+
+
+def test_skill_aim_initial_cursor_deterministic_no_axis_match():
+    """假设 hypothetical 技能, 范围全不在 facing 中轴上 (mock 用 0x14 转 facing 后边界
+    出界); 兜底必须确定性, 不依赖 set 遍历顺序."""
+    p = _player("p", 10, 10, agile=20, move=0)
+    e = _enemy("e", 0, 0, agile=5)
+    b = _battle(players=[p], enemies=[e], w=20, h=20)
+    p.facing = (0, -1)
+    # 多次调用应得到一致 cursor (验确定性)
+    b.enter_attack_aim(skill_id=0x21)
+    first = b.aim_cursor
+    b.cancel_attack_aim()
+    for _ in range(5):
+        b.enter_attack_aim(skill_id=0x21)
+        assert b.aim_cursor == first
+        b.cancel_attack_aim()
+
+
+def test_skill_aim_self_cast_cursor_on_unit():
+    """超亂舞 (0x08) 范围 = self only; cursor 应该锁在 unit 自己."""
+    p = _player("p", 10, 10, agile=20, move=0)
+    e = _enemy("e", 0, 0, agile=5)
+    b = _battle(players=[p], enemies=[e], w=20, h=20)
+    assert b.enter_attack_aim(skill_id=0x08)
+    assert b.aim_cursor == (10, 10)
+
+
+def test_skill_confirm_records_cursor_as_attack_center():
+    """confirm 时 cursor 应记到 attacker.pending_attack_cursor (= 投射物落点)."""
+    p = _player("p", 10, 10, agile=20, move=0)
+    e = _enemy("e", 10, 8, agile=5)         # cursor 上有敌, 确保 confirm 通过
+    b = _battle(players=[p], enemies=[e], w=20, h=20)
+    p.facing = (0, -1)
+    b.enter_attack_aim(skill_id=0x21)
+    assert b.aim_cursor == (10, 8)
+    assert b.confirm_attack_aim()
+    assert p.pending_attack_cursor == (10, 8)
+
+
 def test_check_end_victory_when_all_enemies_dead():
     """所有敌人 hp=0 → 进 VICTORY phase + 累计奖励."""
     p = _player("p", 1, 1, agile=20)

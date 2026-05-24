@@ -99,15 +99,16 @@ def _compute_initial_vz(height_px: int, ticks: int, gravity: int) -> int:
     return (total - gravity * ticks * (ticks + 1) // 2) // ticks
 
 
-def spawn_cloudwave_projectile(battle, attacker, defender) -> "Entity":
-    """spawn 赤雲波 投射物 — 从屏幕顶外正上方坠落到 defender (= "天降红云").
+def spawn_cloudwave_projectile(battle, attacker, target_tile: tuple[int, int]) -> "Entity":
+    """spawn 赤雲波 投射物 — 从屏幕顶外正上方坠落到 target_tile (= AIM cursor 格).
     无水平运动, 仿原版 spawn_fn 只启 Z 轴 (mode flag bit 6).
     """
     from core.sprites.base import TILE_W, TILE_H
     eng = battle.engine
 
-    spawn_x_px = defender.x * TILE_W + TILE_W // 2
-    spawn_y_px = defender.y * TILE_H + TILE_H // 2
+    tx, ty = target_tile
+    spawn_x_px = tx * TILE_W + TILE_W // 2
+    spawn_y_px = ty * TILE_H + TILE_H // 2
 
     e = eng.spawn(think_fn=cloudwave_think_fn)
     e.x = spawn_x_px * FP_ONE

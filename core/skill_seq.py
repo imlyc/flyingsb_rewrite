@@ -286,10 +286,12 @@ SKILL_IMPACT_EXTRA: dict[int, list[tuple]] = {
 
 # B-class skills: 技能 IMPACT (-100) 不直接结算伤害, 而是 spawn 投射物.
 # 投射物 think_fn 落地时发 SIG_IMPACT_2 (-250), battle signal handler 那时才结算伤害.
-# 表里的 spawn fn 签名: (battle, attacker, defender) -> Entity
-def _spawn_cloudwave(battle, attacker, defender):
+# 表里的 spawn fn 签名: (battle, attacker, target_tile) -> Entity
+# target_tile = AIM 选的 cursor 格 (= 投射物落点 / 伤害中心), 不是 defender.x/y —
+# AOE 技能 cursor 可能不在敌人身上 (e.g. 赤雲波 cursor 落空格 → 十字 5 格扫边).
+def _spawn_cloudwave(battle, attacker, target_tile):
     from core.projectile import spawn_cloudwave_projectile
-    return spawn_cloudwave_projectile(battle, attacker, defender)
+    return spawn_cloudwave_projectile(battle, attacker, target_tile)
 
 
 SKILL_IMPACT_SPAWN: dict[int, "callable"] = {

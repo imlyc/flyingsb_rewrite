@@ -18,6 +18,7 @@ from core.anim_engine.entity import Entity
 from core.character import UNSET
 from core.battle import ai, combat
 from core.battle.aim_profiles import get_aim_funcs
+from core.skill_patterns import compute_skill_pattern, compute_skill_strike
 from core.battle.queries import BattleQueries
 from core.battle.data import (
     BattleMap,
@@ -314,21 +315,46 @@ class TacticsBattle:
         做 preview 用. 普攻按角色 profile (孙悟空 1×3 / 蒙面人 3×2), 技能按 skill pattern."""
         u = u or self.current
         if skill_id is not None:
-            # 技能 pattern (暂只覆盖已实现技能, 其他走默认前 1 格)
-            # 0x20 垂直斬 = 前方 1 格 (= default), 跟普攻一致.
-            pattern_fn, _ = get_aim_funcs(u.name)
-            return pattern_fn(u, self.map)
+            return compute_skill_pattern(u, self.map, skill_id)
         pattern_fn, _ = get_aim_funcs(u.name)
         return pattern_fn(u, self.map)
 
     def damage_range(self, cursor: tuple[int, int],
-                     u: BattleUnit | None = None) -> set[tuple[int, int]]:
+                     u: BattleUnit | None = None,
+                     skill_id: int | None = None) -> set[tuple[int, int]]:
         """伤害范围: cursor 上按下确认后实际命中的 tile 集合. 跟着 cursor 移动而变.
-        孙悟空 → 3 格垂直线; 蒙面人 / 默认 → 单格.
-        """
+        普攻按角色 profile (孙悟空 3 格垂直线 / 蒙面人 / 默认 单格);
+        技能按 exe pattern. skill_id=None 时若处于 PLAYER_AIM 自动取 aim_skill_id."""
         u = u or self.current
+        if skill_id is None and self.phase == Phase.PLAYER_AIM:
+            skill_id = self.aim_skill_id
+        if skill_id is not None:
+            return {(x, y) for (x, y) in compute_skill_strike(u, cursor, skill_id)
+                    if self.map.in_bounds(x, y)}
         _, strike_fn = get_aim_funcs(u.name)
         return {(x, y) for (x, y) in strike_fn(u, cursor) if self.map.in_bounds(x, y)}
+
+    def _pick_initial_cursor(self, u: BattleUnit,
+                             rng: set[tuple[int, int]]) -> tuple[int, int] | None:
+        """AIM 初始 cursor: 1) self-cast (unit 自己在范围内) → unit;
+        2) 沿 facing 中轴 d=1..11 找第一格在范围内 → 该格;
+        3) 兜底: 按 (forward 投影最大, |side| 最小, 字典序) 确定性挑.
+        ⚠ 不能用 next(iter(rng)) — set 顺序不稳定, cursor 会跳."""
+        if not rng:
+            return None
+        if (u.x, u.y) in rng:
+            return (u.x, u.y)
+        fx, fy = u.facing
+        for d in range(1, 12):
+            cand = (u.x + fx * d, u.y + fy * d)
+            if cand in rng:
+                return cand
+        def key(t):
+            dx, dy = t[0] - u.x, t[1] - u.y
+            forward = dx * fx + dy * fy
+            side = abs(dx * (-fy) + dy * fx)
+            return (-forward, side, t)
+        return min(rng, key=key)
 
     def enter_attack_aim(self, skill_id: int | None = None) -> bool:
         """从 PLAYER_MOVE 进入 PLAYER_AIM (= 选攻击目标阶段).
@@ -344,8 +370,7 @@ class TacticsBattle:
         self.phase = Phase.PLAYER_AIM
         self.aim_skill_id = skill_id
         self.aim_attack_range = rng
-        facing_tile = (u.x + u.facing[0], u.y + u.facing[1])
-        self.aim_cursor = facing_tile if facing_tile in rng else next(iter(rng))
+        self.aim_cursor = self._pick_initial_cursor(u, rng)
         return True
 
     def aim_move_cursor(self, dx: int, dy: int) -> bool:
@@ -370,8 +395,7 @@ class TacticsBattle:
         if not rng:
             return False
         self.aim_attack_range = rng
-        facing_tile = (u.x + u.facing[0], u.y + u.facing[1])
-        self.aim_cursor = facing_tile if facing_tile in rng else next(iter(rng))
+        self.aim_cursor = self._pick_initial_cursor(u, rng)
         return True
 
     def confirm_attack_aim(self) -> bool:
@@ -398,7 +422,8 @@ class TacticsBattle:
         primary = cur_occ if cur_occ in enemies else enemies[0]
         # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
         self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
-        combat.begin_attack(self, u, primary, skill_id=self.aim_skill_id)
+        combat.begin_attack(self, u, primary, skill_id=self.aim_skill_id,
+                            cursor=self.aim_cursor)
         return True
 
     def cancel_attack_aim(self) -> bool:
