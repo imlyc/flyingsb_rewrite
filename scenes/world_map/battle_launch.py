@@ -44,11 +44,11 @@ def build_party(scene: "WorldMapScene") -> list[BattleUnit]:
                    color=(120, 200, 230),
                    sprite_key=sprite_resource("孙悟空"),
                    known_skills=default_skills_for("孙悟空")),
-        BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30, max_mp=15, mp=15, sg=18,
+        BattleUnit(name="三藏法师", level=1, max_hp=30, hp=30, max_mp=15, mp=15, sg=18,
                    attack=24, defence=11, agile=40, move=4, is_player=True,
-                   color=(160, 160, 200),
-                   sprite_key=sprite_resource("蒙面人"),
-                   known_skills=default_skills_for("蒙面人")),
+                   color=(220, 200, 120),
+                   sprite_key=sprite_resource("三藏法师"),
+                   known_skills=default_skills_for("三藏法师")),
     ]
 
 

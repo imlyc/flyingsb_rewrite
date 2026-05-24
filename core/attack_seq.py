@@ -18,7 +18,7 @@ ATK_B_MULTI 是我们的合成版 (双 IMPACT, 原版玩家普攻没有), 留给
 from __future__ import annotations
 
 from core.raw_attack_seqs import (
-    ATK_A, ATK_B, ATK_C,
+    ATK_A, ATK_B, ATK_C, SAM_ATK_B,
     ENEMY_CCROW_G0, ENEMY_CCROW_G1, ENEMY_CSKEL_G0, ENEMY_CGHOU_G0, ENEMY_CTHI_G0,
     ATK_UNKNOWN,
 )
@@ -68,6 +68,7 @@ def attack_seq_for(char_name: str, facing: tuple[int, int],
     table = {
         "A":       ATK_A,
         "B":       ATK_B,
+        "B_SAM":   SAM_ATK_B,
         "C":       ATK_C,
         "B_MULTI": ATK_B_MULTI,
         "ENEMY_CCROW": ENEMY_CCROW_G1,   # 双啄 (atlas 193); G0 是单啄 (atlas 192) 备选
@@ -80,6 +81,7 @@ def attack_seq_for(char_name: str, facing: tuple[int, int],
 
 
 def frames_per_dir(char_name: str) -> int:
-    """fm atlas 每方向用前 N 列 (ATK_A=4, 其它都是 6)."""
+    """fm atlas 每方向用前 N 列 (ATK_A=4, B_SAM=10, 其它=6)."""
     from core.character_sprites import attack_style
-    return 4 if attack_style(char_name) == "A" else 6
+    s = attack_style(char_name)
+    return {"A": 4, "B_SAM": 10}.get(s, 6)

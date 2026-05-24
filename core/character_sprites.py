@@ -80,7 +80,9 @@ CHARACTER_FORMS: list[FormInfo] = [
 
     # --- ATK_B 风格 (atlas_slot=1 局部映射到角色自己的 fm; 6 帧/dir) ---
     FormInfo(3,  "美娜",     None, "CMIRO", "fm_CMIRO_G0", "B", "美娜",       ""),
-    FormInfo(4,  "三藏法师", None, "CSAM",  "fm_CSAM_G0",  "B", "三藏法师",   "另有 G1..G6 = 7 个 fm 用于多技能"),
+    FormInfo(4,  "三藏法师", None, "CSAM",  "fm_CSAM_G2",  "B_SAM", "三藏法师",
+             "普攻走 SAM_ATK_B = exe @0x672608 (csam_g2 atlas 全局 slot 9, 2 IMPACT). "
+             "原 exe slot 4 wrapper 调 ATK_B 单 impact, 但 0x672608 双击 seq 才是用户原版视觉记忆."),
     FormInfo(5,  "猪八戒",   None, "CJUPA", "fm_CJUPA_G0", "B", "猪八戒",     ""),
     FormInfo(6,  "沙悟净",   None, "CSAO",  "fm_CSAO_G0",  "B", "沙悟净",     "wrapper dword5=0x42 (特殊标记)"),
     FormInfo(7,  "蒙面人",   0, "CDIT0", None,            "B", "真容",       "无攻击 atlas (只 E0 特效), 剧情专用"),
