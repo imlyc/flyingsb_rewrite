@@ -201,6 +201,89 @@ POTIAN_SECONDARY_SEQ: list[tuple] = [
     ('fm', 279, 8, 3),
     ('exit',),
 ]
+
+# cdit1_g0 dash + strike seq (exe @0x6767d0, 4 方向). dispatcher case -150 第一次时
+# attach 这个到 caster.entity. 包含 7 帧前突 + 12 tick 蓄力 + 3 帧斩 + IMPACT + 3 帧弹回 + END.
+# 'jump' / 'impact' / 'end' 各自路由到 anim_engine SIG, coord 拦截 IMPACT 切 PHASE_SCATTER.
+CDIT1_G0_TABLE: list[list[tuple]] = [
+    # UP
+    [
+        ('move', 0, -1, 0), ('fm', 19, 0, 3),
+        ('move', 0, -1, 0), ('fm', 19, 1, 3),
+        ('move', 0, -1, 0), ('fm', 19, 2, 3),
+        ('move', 0, -1, 0), ('fm', 19, 3, 3),
+        ('move', 0, -1, 0), ('fm', 19, 4, 3),
+        ('move', 0, -1, 0), ('fm', 19, 5, 3),
+        ('move', 0, -1, 0), ('fm', 19, 6, 12),
+        ('move', 0, -6, 0),
+        ('fm', 19, 7, 2), ('move', 0, -6, 0),
+        ('fm', 19, 8, 3), ('move', 0, -6, 0),
+        ('impact',),
+        ('fm', 19, 9, 3),
+        ('fm', 19, 10, 3),
+        ('fm', 19, 11, 15), ('move', 0, 25, 0),
+        ('fm', 19, 0, 0),
+        ('end',),
+    ],
+    # DN
+    [
+        ('move', 0, 1, 0), ('fm', 19, 12, 3),
+        ('move', 0, 1, 0), ('fm', 19, 13, 3),
+        ('move', 0, 1, 0), ('fm', 19, 14, 3),
+        ('move', 0, 1, 0), ('fm', 19, 15, 3),
+        ('move', 0, 1, 0), ('fm', 19, 16, 3),
+        ('move', 0, 1, 0), ('fm', 19, 17, 3),
+        ('move', 0, 1, 0), ('fm', 19, 18, 12),
+        ('move', 0, 6, 0),
+        ('fm', 19, 19, 2), ('move', 0, 6, 0),
+        ('fm', 19, 20, 3), ('move', 0, 6, 0),
+        ('impact',),
+        ('fm', 19, 21, 3),
+        ('fm', 19, 22, 3),
+        ('fm', 19, 23, 15), ('move', 0, -25, 0),
+        ('fm', 19, 12, 0),
+        ('end',),
+    ],
+    # LF
+    [
+        ('move', -2, 0, 0), ('fm', 19, 24, 3),
+        ('move', -2, 0, 0), ('fm', 19, 25, 3),
+        ('move', -2, 0, 0), ('fm', 19, 26, 3),
+        ('move', -2, 0, 0), ('fm', 19, 27, 3),
+        ('move', -2, 0, 0), ('fm', 19, 28, 3),
+        ('move', -2, 0, 0), ('fm', 19, 29, 3),
+        ('move', -2, 0, 0), ('fm', 19, 30, 12),
+        ('move', -8, 0, 0),
+        ('fm', 19, 31, 2), ('move', -8, 0, 0),
+        ('fm', 19, 32, 3), ('move', -8, 0, 0),
+        ('impact',),
+        ('fm', 19, 33, 3),
+        ('fm', 19, 34, 3),
+        ('fm', 19, 35, 15), ('move', 38, 0, 0),
+        ('fm', 19, 24, 0),
+        ('end',),
+    ],
+    # RT
+    [
+        ('move', 2, 0, 0), ('fm', 19, 36, 3),
+        ('move', 2, 0, 0), ('fm', 19, 37, 3),
+        ('move', 2, 0, 0), ('fm', 19, 38, 3),
+        ('move', 2, 0, 0), ('fm', 19, 39, 3),
+        ('move', 2, 0, 0), ('fm', 19, 40, 3),
+        ('move', 2, 0, 0), ('fm', 19, 41, 3),
+        ('move', 2, 0, 0), ('fm', 19, 42, 12),
+        ('move', 8, 0, 0),
+        ('fm', 19, 43, 2), ('move', 8, 0, 0),
+        ('fm', 19, 44, 3), ('move', 8, 0, 0),
+        ('impact',),
+        ('fm', 19, 45, 3),
+        ('fm', 19, 46, 3),
+        ('fm', 19, 47, 15), ('move', -38, 0, 0),
+        ('fm', 19, 36, 0),
+        ('end',),
+    ],
+]
+
 POTIAN_TRAJ_SEQ: list[tuple] = [
     ('fm', 292, 0, 1), ('fm', 292, 1, 1), ('fm', 292, 2, 2), ('fm', 292, 3, 2),
     ('fm', 292, 4, 2), ('fm', 292, 3, 2), ('fm', 292, 5, 3), ('fm', 292, 6, 4),
@@ -213,9 +296,10 @@ SCATTER_INITIAL_OFFSET_PX = 600     # exe 0x2580000 = 600 << 16
 SCATTER_TOWARD_STEP_PX = 1          # spring step size (per-tick velocity delta)
 
 # Coordinator state codes (复用 PROJ_STATE_* 命名空间)
-_POTIAN_PHASE_SECONDARY = 30
-_POTIAN_PHASE_SCATTER = 31
-_POTIAN_PHASE_DAMAGE = 32
+_POTIAN_PHASE_SECONDARY = 30        # spawn N secondaries, 等 29 ticks
+_POTIAN_PHASE_CASTER_DASH = 31      # caster 跑 cdit1_g0 (前突+蓄力+斩), 等 IMPACT 信号
+_POTIAN_PHASE_SCATTER = 32          # spawn 2 scatter + 1 trajectory per victim, 等 38 ticks
+_POTIAN_PHASE_DAMAGE = 33           # 发 SIG_IMPACT_2 → 默认伤害路径
 
 
 def potian_passive_effect_think(e: "Entity", eng: "Engine") -> None:
@@ -245,21 +329,59 @@ def potian_scatter_think(e: "Entity", eng: "Engine") -> None:
 
 
 def potian_coordinator_think(e: "Entity", eng: "Engine") -> None:
-    """编排 3 阶段: secondary → scatter+trajectory → SIG_IMPACT_2.
-    user_data 存 victim 坐标列表 (BattleMap tile 坐标) + battle 引用."""
+    """编排 4 阶段: secondary → caster_dash (cdit1_g0) → scatter+trajectory → SIG_IMPACT_2.
+    user_data 存 victim 坐标列表 + battle 引用 + caster 引用."""
     if e.state_code == _POTIAN_PHASE_SECONDARY:
         e.user_data['phase_ticks'] = e.user_data.get('phase_ticks', 0) + 1
         if e.user_data['phase_ticks'] >= SECONDARY_PHASE_TICKS:
-            _potian_spawn_scatter_phase(e, eng)
-            e.user_data['phase_ticks'] = 0
-            e.state_code = _POTIAN_PHASE_SCATTER
+            # _potian_enter_caster_dash 内部自己设 state (CASTER_DASH 或 fallback 直 SCATTER)
+            _potian_enter_caster_dash(e, eng)
+    elif e.state_code == _POTIAN_PHASE_CASTER_DASH:
+        # PHASE_CASTER_DASH: 等 caster cdit1_g0 跑到 'impact' op. impact 信号
+        # 经 tactics._on_anim_signal 拦截 → 调 coord.user_data['on_caster_impact'].
+        # 这里 think_fn 啥都不干, 只是不让 coord 死.
+        pass
     elif e.state_code == _POTIAN_PHASE_SCATTER:
         e.user_data['phase_ticks'] = e.user_data.get('phase_ticks', 0) + 1
         if e.user_data['phase_ticks'] >= SCATTER_PHASE_TICKS:
+            # 撤销 caster 标记 → 让 tactics 之后正常处理.
+            caster = e.user_data.get('caster')
+            if caster is not None and caster.pending_caster_coord is e:
+                caster.pending_caster_coord = None
             eng._signal(e, SIG_IMPACT_2)
             eng._signal(e, SIG_END)
             eng.destroy(e)
             e.state_code = _POTIAN_PHASE_DAMAGE
+
+
+def _potian_enter_caster_dash(coord: "Entity", eng: "Engine") -> None:
+    """SECONDARY 完 → 进 CASTER_DASH. attach cdit1_g0[caster_facing] 到 caster.entity,
+    标记 coord 给 tactics 拦截 IMPACT/END 信号."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    from core.reaction_seq import facing_to_seq_index
+    caster = coord.user_data.get('caster')
+    if caster is None or caster.entity is None:
+        # caster 没了 (测试 stub?) → 直接跳到 SCATTER
+        _potian_spawn_scatter_phase(coord, eng)
+        coord.user_data['phase_ticks'] = 0
+        coord.state_code = _POTIAN_PHASE_SCATTER
+        return
+    # 标 coord, 让 tactics._on_anim_signal 知道 caster 在 potian dash 期间, 把 IMPACT/END 转发到 coord
+    caster.pending_caster_coord = coord
+    coord.user_data['on_caster_impact'] = _on_caster_impact
+    coord.state_code = _POTIAN_PHASE_CASTER_DASH
+
+    dir_idx = facing_to_seq_index(caster.facing)
+    eng.attach_seq(caster.entity, tuple_to_bytecode(CDIT1_G0_TABLE[dir_idx]))
+
+
+def _on_caster_impact(coord: "Entity", eng: "Engine") -> None:
+    """caster cdit1_g0 跑到 'impact' op → tactics 调这里. spawn scatter+trajectory + 切 PHASE_SCATTER."""
+    if coord.state_code != _POTIAN_PHASE_CASTER_DASH:
+        return
+    _potian_spawn_scatter_phase(coord, eng)
+    coord.user_data['phase_ticks'] = 0
+    coord.state_code = _POTIAN_PHASE_SCATTER
 
 
 def _spawn_potian_secondary(battle, tile_xy: tuple[int, int]) -> "Entity":
@@ -392,6 +514,7 @@ def spawn_potian_effects(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     coord.user_data['kind'] = 'potian_coordinator'
     coord.user_data['projectile'] = True   # 让 units_animating 看到, 防回合提前结束
     coord.user_data['battle'] = battle
+    coord.user_data['caster'] = attacker
     coord.user_data['victim_tiles'] = victims
     coord.user_data['phase_ticks'] = 0
     coord.state_code = _POTIAN_PHASE_SECONDARY

@@ -270,6 +270,35 @@ def test_potian_full_choreography():
     assert len(b.damage_events) == 1
 
 
+def test_potian_caster_dash_phase_attaches_cdit1_g0():
+    """破天舞: caster.entity 存在时, SECONDARY 完应 attach CDIT1_G0_TABLE 到 caster + 标 pending_caster_coord."""
+    from core.battle.combat import apply_pending_attack
+    from core.projectile import CDIT1_G0_TABLE, _POTIAN_PHASE_CASTER_DASH
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    b, caster, defender = _b_class_battle_fixture((2, 2), (5, 2))
+    # 给 caster 真分配 entity (模拟 begin_attack)
+    caster.entity = b.engine.spawn()
+    caster.entity.user_data['unit'] = caster
+    caster.facing = (1, 0)  # RT
+    caster.pending_attack_target = defender
+    caster.pending_attack_cursor = (defender.x, defender.y)
+    caster.pending_skill_id = 0x23
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+    apply_pending_attack(b, caster)
+    coord = [e for e in b.engine.entities
+             if e.user_data.get('kind') == 'potian_coordinator'][0]
+
+    # 跑过 SECONDARY 阶段 (29 ticks)
+    for _ in range(30):
+        b.engine.tick()
+    assert coord.state_code == _POTIAN_PHASE_CASTER_DASH
+    assert caster.pending_caster_coord is coord
+    # caster.entity 上挂的 seq 应该是 RT 方向的 cdit1_g0 (= 含 atlas 19)
+    rt_seq = tuple_to_bytecode(CDIT1_G0_TABLE[3])
+    assert caster.entity.seq == rt_seq
+
+
 def test_potian_per_victim_spawns():
     """破天舞 3x3 范围 N 个 victim → N 个 secondary, scatter 阶段 N×2 scatter + N trajectory."""
     from core.battle.data import BattleUnit

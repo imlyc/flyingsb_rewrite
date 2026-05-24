@@ -116,6 +116,16 @@ class TacticsBattle:
         unit = source_entity.user_data.get('unit')
         if unit is None:
             return
+        # 破天舞 PHASE_CASTER_DASH 期间, caster.entity 跑 cdit1_g0 的 'impact'/'end' 不走
+        # 常规结算流程, 而是转发给 coord (coord 控制何时真正 SIG_IMPACT_2 + damage + END).
+        coord = unit.pending_caster_coord
+        if coord is not None:
+            if sig == self._SIG_IMPACT:
+                cb = coord.user_data.get('on_caster_impact')
+                if cb is not None:
+                    cb(coord, self.engine)
+            # SIG_END / 其他: 都吞掉, coord 完成时自己收尾
+            return
         if sig == self._SIG_IMPACT:
             combat.apply_pending_attack(self, unit)
         elif sig == self._SIG_END:

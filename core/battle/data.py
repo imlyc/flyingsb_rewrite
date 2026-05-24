@@ -99,6 +99,9 @@ class BattleUnit:
     pending_attack_skill: bool = False        # 是否必杀 (旧字段, 留作兼容)
     pending_skill_id: int | None = None       # 技能 ID (普攻 None); IMPACT 时给 hit-effect 看决定 extra fx
     pending_attack_cursor: tuple[int, int] | None = None  # AIM cursor 选中的格 (= 投射物落点 / 伤害中心)
+    pending_caster_coord: object | None = None             # 多阶段 B 类技能 coordinator entity (e.g. 破天舞)
+                                                            # 非空 → tactics 拦截 caster.entity 的 IMPACT/END,
+                                                            # 转发给 coord, 跳过常规结算/post_attack_anim
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
