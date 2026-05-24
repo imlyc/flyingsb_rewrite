@@ -86,14 +86,25 @@ def test_tmpl22_pattern_self_only():
     assert compute_skill_pattern(u, _map(), 0x08) == {(10, 10)}
 
 
-def test_tmpl22_strike_full_11x11():
+def test_tmpl22_strike_full_11x11_without_map():
     u = _unit(facing=(0, -1), x=10, y=10)
     hit = compute_skill_strike(u, (10, 10), 0x08)
-    # 全 121 格
+    # 不传 map: 退化为 11x11 grid (121 格)
     assert len(hit) == 121
     assert (10, 10) in hit
     assert (5, 5) in hit
     assert (15, 15) in hit
+
+
+def test_tmpl22_strike_fullscreen_covers_entire_map():
+    """超亂舞 set2 p16 = 全 4 → 传 map 时应覆盖整张地图 (不受 11x11 grid 限制)."""
+    u = _unit(facing=(0, -1), x=0, y=0)
+    m = _map(15, 10)
+    hit = compute_skill_strike(u, (0, 0), 0x08, m)
+    # 整张 map 全格
+    assert len(hit) == 15 * 10
+    assert (0, 0) in hit
+    assert (14, 9) in hit
 
 
 # ---- tmpl 83 (赤雲波): cursor T-shape forward 4 格, damage 十字 5 格 ----

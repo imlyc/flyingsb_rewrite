@@ -66,15 +66,26 @@ def compute_skill_pattern(u: BattleUnit, m: BattleMap, skill_id: int) -> set[tup
     return out
 
 
+def _is_fullscreen_pattern(grid: tuple[tuple[int, ...], ...]) -> bool:
+    """11x11 全 4 = "全屏"语义 (e.g. 超亂舞 set2 p16). 11x11 不够覆盖 ≥12 宽的 map,
+    所以这种 pattern 真实含义不是 "cursor 半径 5", 而是 "整个 battle map".
+    """
+    return all((grid[r][c] & 4) for r in range(GRID_SIZE) for c in range(GRID_SIZE))
+
+
 def compute_skill_strike(
-    u: BattleUnit, cursor: tuple[int, int], skill_id: int
+    u: BattleUnit, cursor: tuple[int, int], skill_id: int,
+    m: BattleMap | None = None,
 ) -> set[tuple[int, int]]:
-    """确认 cursor 后实际命中的 tile 集合 (相对 cursor, 按 facing 旋转)."""
+    """确认 cursor 后实际命中的 tile 集合 (相对 cursor, 按 facing 旋转).
+    m 给出时, "全屏"型 pattern (set2 全 4) 退化为整张 map."""
     tmpl_idx = SKILL_TEMPLATE.get(skill_id)
     if tmpl_idx is None or tmpl_idx >= len(ACTION_TEMPLATES):
         return {cursor}
     p2 = ACTION_TEMPLATES[tmpl_idx][1]
     grid = PATTERN_SET2[p2]
+    if m is not None and _is_fullscreen_pattern(grid):
+        return {(x, y) for x in range(m.w) for y in range(m.h)}
     cx, cy = cursor
     out: set[tuple[int, int]] = set()
     for dx, dy in _grid_cells(grid, 4):

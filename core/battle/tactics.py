@@ -329,7 +329,7 @@ class TacticsBattle:
         if skill_id is None and self.phase == Phase.PLAYER_AIM:
             skill_id = self.aim_skill_id
         if skill_id is not None:
-            return {(x, y) for (x, y) in compute_skill_strike(u, cursor, skill_id)
+            return {(x, y) for (x, y) in compute_skill_strike(u, cursor, skill_id, self.map)
                     if self.map.in_bounds(x, y)}
         _, strike_fn = get_aim_funcs(u.name)
         return {(x, y) for (x, y) in strike_fn(u, cursor) if self.map.in_bounds(x, y)}
