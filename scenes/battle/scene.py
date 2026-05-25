@@ -66,9 +66,9 @@ class BattleScene(Scene):
     ENEMY_TURN_DELAY_MS = 350     # 走完 + 攻击前停顿 (显示攻击/伤害范围)
     ENEMY_PRE_MOVE_PAUSE_MS = 450  # ENEMY_TURN 进入后先停这么久显示移动范围, 然后才 AI 移动
     CAMERA_LERP = 0.18            # 镜头平滑系数 (0=不移, 1=瞬移)
-    UNIT_TILES_PER_SEC = 8.0      # 单位走动速度 (格/秒, 与世界地图节奏一致)
-    WALK_FRAME_PERIOD_MS = 80     # 行走帧切换间隔
-    IDLE_FRAME_PERIOD_MS = 400    # 待机呼吸帧切换间隔
+    UNIT_TILES_PER_SEC = 11.0     # 单位走动速度 (格/秒, 与世界地图节奏一致). 8 → 11 全局加速 4/3x
+    WALK_FRAME_PERIOD_MS = 60     # 行走帧切换间隔 (80 → 60)
+    IDLE_FRAME_PERIOD_MS = 300    # 待机呼吸帧切换间隔 (400 → 300)
     WALK_HOLD_DELAY_MS = 80       # 按住方向键超过此时长才自动连走
     # 受击表现: 原版是硬切, 不做位移/混合插值. 加位移插值反而违和.
     ANIM_EPSILON = 0.05           # render 与逻辑差小于此值视为已到位

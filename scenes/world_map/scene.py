@@ -30,8 +30,8 @@ from scenes.world_map.terrain import (
 )
 
 
-WALK_SPEED_TILES_PER_SEC = 10.0   # 10 tile/秒, 各轴像素速度 = 该轴 tile 尺寸 * 这里
-WALK_FRAME_PERIOD_MS = 80        # 行走动画切换间隔
+WALK_SPEED_TILES_PER_SEC = 13.0   # 大地图 tile/秒, 各轴像素速度 = 该轴 tile 尺寸 * 这里. 10 → 13 全局加速
+WALK_FRAME_PERIOD_MS = 60        # 行走动画切换间隔 (80 → 60)
 WALK_HOLD_DELAY_MS = 80          # 按住方向键超过这时间后才自动连走 (tap 只转向)
 
 

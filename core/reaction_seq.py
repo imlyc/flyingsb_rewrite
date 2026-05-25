@@ -18,8 +18,8 @@ opcode 解码:
 from __future__ import annotations
 
 # 每步: ('frame', idx) | ('move', dx_px, dy_px, ticks)
-# tick 长度由 REACTION_TICK_MS 决定; 原版 DOS 时代约 30Hz, 我们用 40ms/tick 接近视频观感.
-REACTION_TICK_MS = 40
+# tick 长度由 REACTION_TICK_MS 决定; 原版 DOS ~30Hz = 33ms; 我们用 30ms 略快, 跟实测节奏对得上.
+REACTION_TICK_MS = 30
 
 HIT_SEQ: list[list[tuple]] = [
     # 0: defender 朝 UP (攻击者在上), 被推下

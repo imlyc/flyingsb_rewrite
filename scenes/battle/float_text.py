@@ -23,7 +23,7 @@ class FloatText:
       done:  消失
     每位用 fm_SBTLFONT atlas frames 13..22 (= digit 0..9), MISS 用 frames 23/24/25/25.
     """
-    TICK_MS = 40
+    TICK_MS = 30
     DRIP_PERIOD_TICKS = 2          # 1 位 / 2 ticks (= 80ms/digit)
     RISE_TICKS = 10                 # 400ms 完整跳跃 (起跳 → 峰 → 落回原点)
     HOLD_TICKS = 32                 # 1280ms 静止 (落回原点后)

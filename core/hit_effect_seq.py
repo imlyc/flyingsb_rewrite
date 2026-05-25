@@ -109,7 +109,7 @@ UNIVERSAL_STARBURST_FRAME_TICKS = 4
 
 
 # ---------- IMPACT 时序常量 ----------
-HIT_EFFECT_TICK_MS = 40                  # 跟 attack_seq 同时基
+HIT_EFFECT_TICK_MS = 30                  # 跟 attack_seq 同时基
 
 # 1st spawn 位置抖动 (= 原版 FUN_005336c7() & 15 - 8 → ±8px)
 HIT_EFFECT_JITTER_PX = 8

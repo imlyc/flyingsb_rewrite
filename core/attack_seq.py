@@ -23,7 +23,7 @@ from core.raw_attack_seqs import (
     ATK_UNKNOWN,
 )
 
-ATTACK_TICK_MS = 40   # 与 REACTION_TICK_MS 一致
+ATTACK_TICK_MS = 30   # 与 REACTION_TICK_MS 一致. 原版 DOS ~30Hz = 33ms; 我们用 30ms 略快, 跟实测对得上
 
 
 # ATK_B_MULTI: 我们派生的二段攻击 (exe 玩家普攻没有, 来自敌方 seq 启发).
