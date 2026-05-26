@@ -127,6 +127,99 @@ def spawn_cloudwave_projectile(battle, attacker, target_tile: tuple[int, int]) -
 
 
 # =========================================================================
+# 凤凰掌 0x17 三藏 — exe @0x4fe964 spawn + @0x4fe717 think_fn + @0x67312c traj
+# =========================================================================
+# Exe flow:
+#   spawn 在 caster + 小偏移, mode 0x31 (toward-target spring), atlas 269-272 per facing.
+#   state 0: attach 出现 seq (atlas N frames 0-4 @ 4 ticks each, exe @0x67312c[facing])
+#   state 10: physics tick spring-toward-target. 当 entity 经过 target tile (e.g. UP: entity.y <=
+#             target.y) → 翻转速度 step. 进 state 20.
+#   state 20: 继续 physics (= 现在远离 target 飞出去). 当 entity 跑出屏幕 (-100/+540 边界) →
+#             SIG -200 + -205 + destroy.
+#
+# 我们简化: 用 4 phase 状态机.
+#   FLYING_OUT: 从 caster 朝 target 飞, linear velocity. 抵 target 时 → SIG_IMPACT_2 + 切 FLYING_BACK
+#   FLYING_BACK: 沿原速度反向, 飞 30 tick → destroy
+PHOENIX_ATLAS_BY_FACING = (269, 270, 271, 272)  # UP/DN/LF/RT, exe esam03a/b/c/d
+PHOENIX_SPEED_PX_PER_TICK = 12      # 飞行速度 (px/tick @ 30ms = 400 px/s)
+PHOENIX_BACK_TICKS = 30             # IMPACT 后飞 30 tick 退场
+
+_PHOENIX_STATE_OUT = 0
+_PHOENIX_STATE_BACK = 1
+_PHOENIX_STATE_DONE = 2
+
+
+def phoenix_think_fn(e: "Entity", eng: "Engine") -> None:
+    if e.state_code == _PHOENIX_STATE_OUT:
+        e.x += e.vx
+        e.y += e.vy
+        # 检测是否经过 target (= 速度方向跨过 target 坐标)
+        tx = e.user_data['target_x']
+        ty = e.user_data['target_y']
+        passed = False
+        if e.vx > 0 and e.x >= tx: passed = True
+        elif e.vx < 0 and e.x <= tx: passed = True
+        elif e.vy > 0 and e.y >= ty: passed = True
+        elif e.vy < 0 and e.y <= ty: passed = True
+        if passed:
+            eng._signal(e, SIG_IMPACT_2)
+            e.user_data['back_ticks'] = 0
+            e.state_code = _PHOENIX_STATE_BACK
+    elif e.state_code == _PHOENIX_STATE_BACK:
+        # 继续匀速冲过 target, 直到 BACK_TICKS 收尾
+        e.x += e.vx
+        e.y += e.vy
+        e.user_data['back_ticks'] += 1
+        if e.user_data['back_ticks'] >= PHOENIX_BACK_TICKS:
+            eng._signal(e, SIG_END)
+            eng.destroy(e)
+            e.state_code = _PHOENIX_STATE_DONE
+
+
+def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Entity":
+    """spawn 凤凰掌 — phoenix 从 caster 朝 cursor 飞, 抵达时 SIG_IMPACT_2 触发伤害, 继续飞过去退场.
+    atlas 按 caster facing 选 (UP=269/DN=270/LF=271/RT=272 = esam03a/b/c/d).
+    """
+    from core.sprites.base import TILE_W, TILE_H
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    from core.reaction_seq import facing_to_seq_index
+    eng = battle.engine
+
+    facing_idx = facing_to_seq_index(attacker.facing)
+    atlas = PHOENIX_ATLAS_BY_FACING[facing_idx]
+    fx, fy = attacker.facing
+
+    # 出生点: caster tile 中心 + facing 方向半 tile 偏移 (= 出 caster 身体), 高度抬到胸口.
+    # 参考 exe FUN_004fe964: spawn 在 caster.x/y, z += 32 (高度), 然后按 facing 加 ±24/32 偏移.
+    # 我们 TILE_W=64 → 半 tile = 32; 角色身高 ~80 → 胸口 ≈ -40 (在 tile 中心上 40).
+    spawn_x_px = attacker.x * TILE_W + TILE_W // 2 + fx * (TILE_W // 2)
+    spawn_y_px = attacker.y * TILE_H + TILE_H // 2 + fy * (TILE_H // 2)
+    tx, ty = target_tile
+    target_x_px = tx * TILE_W + TILE_W // 2
+    target_y_px = ty * TILE_H + TILE_H // 2
+
+    e = eng.spawn(think_fn=phoenix_think_fn)
+    e.x = spawn_x_px * FP_ONE
+    e.y = spawn_y_px * FP_ONE
+    e.z = -(TILE_H // 2) * FP_ONE       # 上抬 TILE_H/2 px → anchor 落在 caster tile 上沿
+    e.vx = fx * PHOENIX_SPEED_PX_PER_TICK * FP_ONE
+    e.vy = fy * PHOENIX_SPEED_PX_PER_TICK * FP_ONE
+    e.vz = 0
+    e.atlas_slot = atlas
+    e.frame_idx = 0
+    e.flags |= 0x40
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['target_x'] = target_x_px * FP_ONE
+    e.user_data['target_y'] = target_y_px * FP_ONE
+    e.state_code = _PHOENIX_STATE_OUT
+    # 5 帧出现 seq + 最后帧长持续 (= 留 phoenix 视觉持续整个飞行).
+    seq = [('fm', atlas, i, 4) for i in range(4)] + [('fm', atlas, 4, 200), ('exit',)]
+    eng.attach_seq(e, tuple_to_bytecode(seq))
+    return e
+
+
+# =========================================================================
 # 火龍斬 0x22 — exe @0x504ad2 spawn + @0x504a77 think_fn + @0x676d38 effect seq
 # =========================================================================
 # 无物理 (无 z 落地), 落 cursor → 播放 16 帧火龍 atlas 278 → seq 完 signal IMPACT_2 → damage.
