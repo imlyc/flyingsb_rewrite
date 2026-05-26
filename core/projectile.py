@@ -213,8 +213,9 @@ def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     e.user_data['target_x'] = target_x_px * FP_ONE
     e.user_data['target_y'] = target_y_px * FP_ONE
     e.state_code = _PHOENIX_STATE_OUT
-    # 5 帧出现 seq + 最后帧长持续 (= 留 phoenix 视觉持续整个飞行).
-    seq = [('fm', atlas, i, 4) for i in range(4)] + [('fm', atlas, 4, 200), ('exit',)]
+    # 9 帧完整生长 (0=小火球 → 8=巨大爆炸), 每帧 3 tick = 27 tick 总, 跟飞行 32 tick 长度匹配.
+    # exe 用 4 tick/帧 (20 + 16 = 36 tick), 但分两段 seq attach (0x67312c 然后 0x6731ec). 我们合并 + 提速.
+    seq = [('fm', atlas, i, 3) for i in range(9)] + [('fm', atlas, 8, 60), ('exit',)]
     eng.attach_seq(e, tuple_to_bytecode(seq))
     return e
 
