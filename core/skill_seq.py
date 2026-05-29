@@ -355,6 +355,37 @@ SKILL_SAM_THREE_HIT = [   # 0x16 @0x67304c, 3 IMPACTs/dir (多段 dedup 只末�
     ],
 ]
 
+SKILL_SAM_LIFE_FIRE = [   # 0x15 生命之火 cast @0x672bb8, atlas csam_g0=7. 回血技能 (heal).
+    # UP
+    [
+        ('fm', 7, 0, 6), ('fm', 7, 1, 6), ('fm', 7, 2, 12), ('move', 0, -4, 0),
+        ('fm', 7, 3, 3), ('move', 0, -6, 0), ('impact',),
+        ('fm', 7, 4, 3), ('move', 0, -4, 0), ('fm', 7, 5, 3), ('move', 0, 14, 0),
+        ('fm', 7, 0, 0), ('end',),
+    ],
+    # DN
+    [
+        ('fm', 7, 6, 6), ('fm', 7, 7, 6), ('fm', 7, 8, 12), ('move', 0, 4, 0),
+        ('fm', 7, 9, 3), ('move', 0, 6, 0), ('impact',),
+        ('fm', 7, 10, 3), ('move', 0, 4, 0), ('fm', 7, 11, 3), ('move', 0, -14, 0),
+        ('fm', 7, 6, 0), ('end',),
+    ],
+    # LF
+    [
+        ('fm', 7, 12, 6), ('fm', 7, 13, 6), ('fm', 7, 14, 12), ('move', -6, 0, 0),
+        ('fm', 7, 15, 3), ('move', -8, 0, 0), ('impact',),
+        ('fm', 7, 16, 3), ('move', -6, 0, 0), ('fm', 7, 17, 3), ('move', 20, 0, 0),
+        ('fm', 7, 12, 0), ('end',),
+    ],
+    # RT
+    [
+        ('fm', 7, 18, 6), ('fm', 7, 19, 6), ('fm', 7, 20, 12), ('move', 6, 0, 0),
+        ('fm', 7, 21, 3), ('move', 8, 0, 0), ('impact',),
+        ('fm', 7, 22, 3), ('move', 6, 0, 0), ('fm', 7, 23, 3), ('move', -20, 0, 0),
+        ('fm', 7, 18, 0), ('end',),
+    ],
+]
+
 SKILL_SAM_PHOENIX_CAST = [   # 0x17 caster cast anim @0x6733ac, atlas csam_g4=11
     # UP
     [
@@ -747,6 +778,7 @@ SKILL_SAM_GOD_FIST: list[list[tuple]] = SAM_0x18_GOD_FIST_DATA  # noqa: 见下�
 # skill_id → 4-direction seq table
 SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x14: SKILL_SAM_PUMPKIN_BREAK,    # 三藏 南瓜破 (A 类)
+    0x15: SKILL_SAM_LIFE_FIRE,        # 三藏 生命之火 (heal, 回血技能)
     0x16: SKILL_SAM_THREE_HIT,        # 三藏 不败三击 (A 类 3 IMPACT)
     0x17: SKILL_SAM_PHOENIX_CAST,     # 三藏 凤凰掌 (B 类, cast + spawn phoenix)
     0x18: SKILL_SAM_GOD_FIST,         # 三藏 三藏神拳 (A 类 5 IMPACT, 3 段切换)
@@ -772,6 +804,21 @@ SKILL_COSTS: dict[int, int] = {
     0x23: 900,    # 破天舞
     0x24: 100,    # 無限刀
 }
+
+
+# ---- 辅助/回血技能 (target 友军, IMPACT 时回血而非伤害) ----
+# 0x15 生命之火: 蓝火回 HP. exe dispatcher 0x4fe111 走 victim 循环 + esum1 burst (atlas 299).
+# heal 量公式 exe 未精确提取, 暂用 caster.attack * 3 (典型 三藏 ~60). TODO 校准.
+SKILL_HEAL_SKILLS: set[int] = {0x15}
+
+
+def is_heal_skill(skill_id: int | None) -> bool:
+    return skill_id is not None and skill_id in SKILL_HEAL_SKILLS
+
+
+def heal_amount(attacker, skill_id: int) -> int:
+    """生命之火回血量. 暂用 caster.attack * 3 (placeholder, 待 exe 校准)."""
+    return max(1, attacker.attack * 3)
 
 
 # 技能 IMPACT 时 dispatcher 额外 spawn 的特效 entity seq.

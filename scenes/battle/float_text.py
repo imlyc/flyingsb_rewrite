@@ -9,6 +9,7 @@ import pygame
 
 from core.sprites.loaders import (
     SBTLFONT_DAMAGE_BASE_FRAME,
+    SBTLFONT_HEAL_BASE_FRAME,
     SBTLFONT_MISS_FRAMES,
 )
 
@@ -34,19 +35,20 @@ class FloatText:
 
     def __init__(self, damage: int, remaining_hp: int,
                  world_x: int, world_y: int, started_at: int,
-                 miss: bool = False) -> None:
+                 miss: bool = False, heal: bool = False) -> None:
         self.damage = damage
         self.remaining_hp = remaining_hp   # 兼容字段, 不在 float 里渲染 (持久 HP 标签另渲)
         self.world_x = world_x
         self.world_y = world_y
         self.started_at = started_at
         self.miss = miss
-        # 单行 frame 序列: MISS 红色字母 / 普通黄色 damage 数字
+        self.heal = heal
+        # 单行 frame 序列: MISS 红字母 / heal row-0 数字 / 普通红色 damage 数字
         if miss:
             self._frames = list(SBTLFONT_MISS_FRAMES)
         else:
-            self._frames = [SBTLFONT_DAMAGE_BASE_FRAME + int(c)
-                            for c in str(max(0, damage))]
+            base = SBTLFONT_HEAL_BASE_FRAME if heal else SBTLFONT_DAMAGE_BASE_FRAME
+            self._frames = [base + int(c) for c in str(max(0, damage))]
         self._n = len(self._frames)
 
     def _digit_state(self, digit_idx: int, now_ms: int) -> tuple[int, str, int]:

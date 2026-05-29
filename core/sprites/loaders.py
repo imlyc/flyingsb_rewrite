@@ -159,17 +159,18 @@ def get_fm_surface(resource_name: str) -> pygame.Surface:
 SBTLFONT_DIGIT_BASE_FRAME = 13                         # row 1 cols 0-9 = 红色伤害数字 (跟 MISS 同行同色)
 SBTLFONT_MISS_FRAMES = (23, 24, 25, 25)                # row 1 cols 10-12 = 红色 M/I/S/S
 SBTLFONT_DAMAGE_BASE_FRAME = SBTLFONT_DIGIT_BASE_FRAME # 别名: 伤害数字也是红色 (= 跟 MISS 一致)
+SBTLFONT_HEAL_BASE_FRAME = 0                           # row 0 cols 0-9 = 白色回血数字 (生命之火)
 
 
 def get_sbtlfont_surface() -> pygame.Surface:
     return get_fm_surface("fm_SBTLFONT")
 
 
-def sbtlfont_frame(char_or_digit: int) -> tuple[pygame.Surface, int, int]:
-    """digit 0..9 → atlas frame 13..22; 也可传 frame index 直接取.
-    返回 (subsurface, render_anchor_x, render_anchor_y) — anchor 从 fm_frames 取."""
+def sbtlfont_frame(frame_idx: int) -> tuple[pygame.Surface, int, int]:
+    """frame_idx = sbtlfont atlas 内绝对帧号 (调用方自己算好行列, e.g. row0 白 0-9 /
+    row1 红伤害 13-22 / row2 青绿 26-35). 返回 (subsurface, anchor_x, anchor_y).
+    ⚠ 不再有 digit 快捷映射 — 以前 `<13 → +13` 会把 heal row-0 帧误推到红行."""
     from core.fm_frames import FM_FRAMES
-    frame_idx = char_or_digit if char_or_digit >= 13 else SBTLFONT_DIGIT_BASE_FRAME + char_or_digit
     bbox_data = FM_FRAMES.get("sbtlfont")
     if not bbox_data or frame_idx >= len(bbox_data):
         raise IndexError(f"sbtlfont frame {frame_idx} out of range")

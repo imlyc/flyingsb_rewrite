@@ -172,8 +172,14 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     if not is_last:
         _replay_impact_visuals(battle, attacker)
         return
-    # B 类技能: IMPACT 不直接结算伤害, 而是 spawn 投射物 (think_fn 物理 → 落地后发 SIG_IMPACT_2 才结算)
+    # 回血技能 (生命之火): IMPACT 时给 target 友军回 HP, 不走伤害路径.
     sid = attacker.pending_skill_id
+    if sid is not None:
+        from core.skill_seq import is_heal_skill
+        if is_heal_skill(sid):
+            _apply_heal(battle, attacker)
+            return
+    # B 类技能: IMPACT 不直接结算伤害, 而是 spawn 投射物 (think_fn 物理 → 落地后发 SIG_IMPACT_2 才结算)
     if sid is not None:
         from core.skill_seq import has_impact_spawn, skill_impact_spawn
         if has_impact_spawn(sid):
@@ -216,6 +222,44 @@ def _replay_impact_visuals(battle: "TacticsBattle", attacker: BattleUnit) -> Non
     for t in targets:
         set_reaction(t, "hit", attacker)
         _emit_hit_effect(battle, attacker, t)
+
+
+def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
+    """回血技能结算: 给 _pending_damage_range (or pending_attack_target) 的友军回 HP.
+    生命之火 esum1 burst effect 在 target 上 spawn (视觉)."""
+    from core.skill_seq import heal_amount
+    amt = heal_amount(attacker, attacker.pending_skill_id)
+    targets: list[BattleUnit] = []
+    dmg_tiles = getattr(battle, '_pending_damage_range', None)
+    if dmg_tiles:
+        for (x, y) in dmg_tiles:
+            t = battle.q.occupant(x, y)
+            if t is not None and t.alive and t.is_player == attacker.is_player:
+                targets.append(t)
+    else:
+        t = attacker.pending_attack_target
+        if t is not None and t.alive:
+            targets.append(t)
+    for t in targets:
+        before = t.hp
+        t.hp = min(t.max_hp, t.hp + amt)
+        healed = t.hp - before
+        battle.damage_events.append(DamageEvent(healed, t.hp, t.x, t.y, heal=True))
+        _emit_life_fire_effect(battle, t)
+        battle._log(f"{attacker.name} → {t.name}: 回复 {healed} HP ({t.hp}/{t.max_hp})")
+
+
+def _emit_life_fire_effect(battle: "TacticsBattle", target: BattleUnit) -> None:
+    """生命之火 esum1 (atlas 299) burst 在 target 头顶 (8 帧)."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    from core.sprites.base import TILE_W, TILE_H
+    e = battle.engine.spawn()
+    e.x = (target.x * TILE_W + TILE_W // 2) << 16
+    e.y = (target.y * TILE_H + TILE_H // 2) << 16
+    e.z = -(TILE_H // 2) << 16
+    e.user_data['kind'] = 'hit_effect'
+    seq = [('fm', 299, i, 3) for i in range(8)] + [('exit',)]
+    battle.engine.attach_seq(e, tuple_to_bytecode(seq))
 
 
 def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit) -> None:

@@ -36,6 +36,47 @@ def test_skill_seqs_lookup():
     assert has_skill_seq(0x05) is False
 
 
+def test_sam_all_5_skills_implemented():
+    """三藏 5 技能 (0x14..0x18) 全部已实现."""
+    for sid in (0x14, 0x15, 0x16, 0x17, 0x18):
+        assert has_skill_seq(sid) is True
+
+
+def test_life_fire_is_heal_skill():
+    from core.skill_seq import is_heal_skill
+    assert is_heal_skill(0x15) is True
+    assert is_heal_skill(0x14) is False     # 南瓜破 = 攻击
+    assert is_heal_skill(0x17) is False     # 凤凰掌 = 攻击
+    assert is_heal_skill(None) is False
+
+
+def test_life_fire_heals_ally():
+    """生命之火 IMPACT → 给友军回 HP, 不扣血, 发 heal=True 飘字事件 + esum1 effect."""
+    from core.battle.combat import apply_pending_attack
+    from core.battle.data import BattleUnit
+    b, caster, _enemy = _b_class_battle_fixture((2, 5), (9, 9))
+    ally = BattleUnit(name="孙悟空", level=1, max_hp=80, hp=20, max_mp=0, mp=0, sg=0,
+                      attack=10, defence=0, agile=0, move=3, is_player=True)
+    ally.x, ally.y = 2, 3
+    b.players.append(ally); b.all_units.append(ally)
+
+    caster.pending_attack_target = ally
+    caster.pending_attack_cursor = (2, 3)
+    caster.pending_skill_id = 0x15
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+    apply_pending_attack(b, caster)
+
+    assert ally.hp == 80, "友军应被回满 (20 + caster.attack*3=60 → clamp 80)"
+    assert len(b.damage_events) == 1
+    assert b.damage_events[0].heal is True
+    assert b.damage_events[0].damage == 60   # 实际回复量
+    # esum1 (atlas 299) effect spawn
+    fx = [e for e in b.engine.entities if e.user_data.get('kind') == 'hit_effect'
+          and e.atlas_slot == 299]
+    assert len(fx) == 1
+
+
 def test_skill_seq_for_facing():
     """facing → seq 列表的方向索引."""
     seq_up = skill_seq_for(0x20, (0, -1))

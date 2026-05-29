@@ -139,7 +139,8 @@ def _ingest_damage_events(scene: "BattleScene", now: int) -> None:
         # 同位置先前的 float 全部 demote (instant remove), 只留新一发
         scene._floats = [f for f in scene._floats
                          if abs(f.world_x - wx) > 4 or abs(f.world_y - wy) > 4]
-        scene._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss))
+        scene._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now,
+                                       miss=ev.miss, heal=ev.heal))
     scene.battle.damage_events.clear()
     scene._floats = [f for f in scene._floats if f.alive(now)]
 

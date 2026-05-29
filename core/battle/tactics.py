@@ -418,18 +418,24 @@ class TacticsBattle:
         if self.phase != Phase.PLAYER_AIM or self.aim_cursor is None:
             return False
         u = self.current
+        from core.skill_seq import is_heal_skill
+        heal = is_heal_skill(self.aim_skill_id)
         dmg_tiles = self.damage_range(self.aim_cursor)
-        enemies = []
+        # heal 技能选友军 (is_player 相同); 攻击技能选敌人.
+        targets = []
         for (x, y) in dmg_tiles:
             occ = self.q.occupant(x, y)
-            if occ is not None and occ.alive and occ.is_player != u.is_player:
-                enemies.append(occ)
-        if not enemies:
+            if occ is None or not occ.alive:
+                continue
+            same_side = occ.is_player == u.is_player
+            if (heal and same_side) or (not heal and not same_side):
+                targets.append(occ)
+        if not targets:
             return False
         # primary target: cursor 上的优先 (= 动画落点最合理)
         cx, cy = self.aim_cursor
         cur_occ = self.q.occupant(cx, cy)
-        primary = cur_occ if cur_occ in enemies else enemies[0]
+        primary = cur_occ if cur_occ in targets else targets[0]
         # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
         self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
         combat.begin_attack(self, u, primary, skill_id=self.aim_skill_id,

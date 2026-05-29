@@ -189,8 +189,10 @@ def _resolve_attack_frame(scene: "BattleScene", u, cs):
     ent = u.entity
     slot_lo = ent.atlas_slot & 0xffff
     fm_frame_idx = ent.frame_idx if slot_lo != 0 or ent.frame_idx != 0 else None
-    # 路径选择: slot >= 8 = 全局 atlas idx (mode 0, enemy), 否则 per-character (player)
-    is_global_atlas = slot_lo >= 8
+    # 路径选择: 抽象槽 {0,1,5} (= ATK_A/B/C 普攻, 走 per-character atlas remap), 其余都是
+    # 真实全局 atlas idx (技能 seq + 敌人 + 三藏 SAM_ATK_B). 注意 csam_g0=7 < 8 也是真实 atlas,
+    # 旧的 ">=8" 阈值会把它误判成 per-character → 生命之火 (atlas 7) 方向/sprite 全错.
+    is_global_atlas = slot_lo not in (0, 1, 5)
     if is_global_atlas and fm_frame_idx is not None:
         atlas_key = atlas_resource(slot_lo)
         if atlas_key:

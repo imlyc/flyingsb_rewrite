@@ -19,11 +19,12 @@ class DamageEvent:
     """单次战斗事件, UI 用来弹飘字 (伤害数字 / MISS).
     miss=True 时 damage 无意义, UI 显示 'MISS'.
     """
-    damage: int           # 本次伤害 (绿色大字; miss 时忽略)
+    damage: int           # 本次伤害 (绿色大字; miss 时忽略). heal=True 时 = 回复量
     remaining_hp: int     # 受击后剩余 HP (蓝色小字; miss 时忽略)
     x: int
     y: int
     miss: bool = False
+    heal: bool = False    # True = 回血事件 (生命之火等), 飘字显示 +N 绿色
 
 
 @dataclass
