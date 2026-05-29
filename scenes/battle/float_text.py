@@ -32,6 +32,12 @@ class FloatText:
     FLASH_TOGGLE_TICKS = 2          # 80ms 闪烁周期
     DIGIT_STRIDE_PX = 10            # 位间距 (跟 exe `local_14 * 0xa0000` = 10px 一致)
     RISE_PEAK_PX = 36               # 跳跃峰值高度
+    # 治疗数字 (exe FUN_004d06b0 + mass-spawn FUN_004d074e): 所有位一起 spawn 在高处,
+    # 下落 (descend) → 落到底后闪烁 (flash) → 消失. 没有伤害的 drip + 上升 + hold.
+    # 时长跟伤害数字对齐: 下落 = 伤害 出现+停留 (RISE+HOLD), 闪烁 = 伤害 FLASH.
+    HEAL_DESCEND_TICKS = RISE_TICKS + HOLD_TICKS   # = 42, 跟伤害数字在屏时长一致
+    HEAL_DESCEND_PEAK_PX = 36       # 起始高度 (原点上方)
+    HEAL_FLASH_TICKS = FLASH_TICKS  # = 32, 跟伤害数字闪烁时长一致
 
     def __init__(self, damage: int, remaining_hp: int,
                  world_x: int, world_y: int, started_at: int,
@@ -52,7 +58,19 @@ class FloatText:
         self._n = len(self._frames)
 
     def _digit_state(self, digit_idx: int, now_ms: int) -> tuple[int, str, int]:
-        """返回 (life_ticks, phase, sub_phase_ticks). phase ∈ 'pre','rise','hold','flash','done'."""
+        """返回 (life_ticks, phase, sub_phase_ticks).
+        伤害: phase ∈ 'pre','rise','hold','flash','done' (逐位 drip + 上升 + hold + 闪).
+        治疗: phase ∈ 'descend','flash','done' (一起 spawn + 下落 + 闪)."""
+        if self.heal:
+            ticks = (now_ms - self.started_at) // self.TICK_MS
+            if ticks < 0:
+                return -1, 'pre', 0
+            if ticks < self.HEAL_DESCEND_TICKS:
+                return ticks, 'descend', ticks
+            ticks -= self.HEAL_DESCEND_TICKS
+            if ticks < self.HEAL_FLASH_TICKS:
+                return ticks, 'flash', ticks
+            return ticks, 'done', ticks
         spawn_offset_ms = digit_idx * self.DRIP_PERIOD_TICKS * self.TICK_MS
         elapsed = now_ms - self.started_at - spawn_offset_ms
         if elapsed < 0:
@@ -97,7 +115,14 @@ class FloatText:
                 continue
             if phase == 'flash' and (sub // self.FLASH_TOGGLE_TICKS) % 2 == 1:
                 continue
-            if phase == 'rise':
+            if self.heal:
+                # 连续下落贯穿 descend + flash (exe state0/1 都跑物理). 整体上移, 让最后
+                # 一帧 dy=0 (= 跟伤害数字消失点同高); 起点在原点上方, 匀速下落到原点消失.
+                total_ticks = (now_ms - self.started_at) // self.TICK_MS
+                rate = self.HEAL_DESCEND_PEAK_PX / self.HEAL_DESCEND_TICKS
+                last_tick = self.HEAL_DESCEND_TICKS + self.HEAL_FLASH_TICKS - 1
+                dy = int(rate * (last_tick - total_ticks))
+            elif phase == 'rise':
                 t = sub / self.RISE_TICKS
                 arc = 4.0 * t * (1.0 - t)
                 dy = int(self.RISE_PEAK_PX * arc)
