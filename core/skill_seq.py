@@ -775,8 +775,29 @@ SAM_0x18_GOD_FIST_DATA = [
 SKILL_SAM_GOD_FIST: list[list[tuple]] = SAM_0x18_GOD_FIST_DATA  # noqa: 见下方
 
 
+# ============================================================
+# 孙悟空 10 技能 (skill_id 0x00..0x09). 全 self-cast AOE: caster 念咒 → IMPACT 对
+# tmpl 范围内所有敌人结算伤害 + 普攻同款命中特效 (ef010 方向爆 + et00 刺, 见 hit_effect_seq).
+# exe dispatcher 见 son_dispatch.txt. 大部分共享念咒 cast seq @0x670dc4 (idle op slot5,
+# 8 帧念咒, 方向无关). 少数有专属 summon (分身 0x671b0c / 超亂舞 0x671db0 / 朱雀凤凰火焰).
+#
+# ⚠ caster 念咒 atlas: 原版 cast seq 用 `idle 5` (slot 5 = 孙悟空 primary-attack atlas 槽,
+#   per-character remap, memory 标注静态死路). 我们用全局 atlas 2 (cson_e0, 44帧施法/特效图)
+#   frames 0-7 近似念咒姿态. 走 is_global 渲染路径 (2 not in {0,1,5}). 待游戏内视觉校准.
+# ============================================================
+_SON_CAST_DAJINGANG = [   # 0x670dc4 念咒, cson_e0 frames 0-7 (方向无关)
+    ('fm', 2, 0, 2), ('fm', 2, 1, 2), ('fm', 2, 2, 2), ('fm', 2, 3, 2),
+    ('fm', 2, 4, 2), ('fm', 2, 5, 2), ('fm', 2, 6, 2), ('fm', 2, 7, 3),
+    ('impact',),                      # 念咒完 → AOE 伤害 + 范围每敌人命中特效
+    ('fm', 2, 0, 0), ('end',),
+]
+# idle op 方向无关 → 4 方向共用同一 cast seq.
+SKILL_SON_DAJINGANG: list[list[tuple]] = [_SON_CAST_DAJINGANG] * 4
+
+
 # skill_id → 4-direction seq table
 SKILL_SEQS: dict[int, list[list[tuple]]] = {
+    0x00: SKILL_SON_DAJINGANG,        # 孙悟空 大金刚 (self-cast AOE 菱r2)
     0x14: SKILL_SAM_PUMPKIN_BREAK,    # 三藏 南瓜破 (A 类)
     0x15: SKILL_SAM_LIFE_FIRE,        # 三藏 生命之火 (heal, 回血技能)
     0x16: SKILL_SAM_THREE_HIT,        # 三藏 不败三击 (A 类 3 IMPACT)
@@ -793,6 +814,16 @@ SKILL_SEQS: dict[int, list[list[tuple]]] = {
 # 0x20 垂直斬 cost=175 — 但实测 175 似乎不合理 (角色 max_mp 通常较低); 实际可能是 SG/SP.
 # 暂用 dump 值, 后续 in-game 调试时再校准 (= 是不是 SP 而非 MP 等).
 SKILL_COSTS: dict[int, int] = {
+    0x00: 33,     # 大金刚
+    0x01: 55,     # 猛将神君青龙
+    0x02: 100,    # 甲兵神君白虎
+    0x03: 160,    # 酷酷猫
+    0x04: 280,    # 分身术
+    0x05: 430,    # 凌光神君朱雀
+    0x06: 660,    # 集明神君玄武
+    0x07: 960,    # 美丽月兔
+    0x08: 2000,   # 超级乱舞
+    0x09: 60,     # M.凤凰
     0x14: 120,    # 南瓜破
     0x15: 330,    # 生命之火 (未实现, 但 cost 记下)
     0x16: 440,    # 不败三击

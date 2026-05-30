@@ -58,6 +58,9 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         # 敌人尸体闪烁阶段: blink-off 那帧整个单位 (shadow + 尸体) 都不画.
         if dead_blink_off(scene, u):
             continue
+        # 孙悟空召唤隐身阶段: caster 完全不画 (神兽攻击时孙悟空已翻跟头消失).
+        if getattr(u, 'cast_hidden', False):
+            continue
         # 影子: 活/死单位都画, 跟随单位一起出现/消失 (敌人 blink 期跟着闪).
         blit_shadow(scene.surface, scene._shadow_surf, cx, cy)
         # 死亡分支
@@ -99,6 +102,16 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
     react_off = (0, 0)
     anchor: tuple[int, int] | None = None    # (feet_x, feet_y) within frame; None=用默认 bottom-center
     frame: pygame.Surface
+    # 孙悟空召唤翻跟头: cast_flip_frame 非 None → 显示 ps_CSON105 第 N 帧 (覆盖一切, 方向无关).
+    if getattr(u, 'cast_flip_frame', None) is not None:
+        from core.sprites.loaders import get_somersault_frame, SOMERSAULT_ANCHOR
+        try:
+            frame = get_somersault_frame(u.cast_flip_frame)
+            blit_unit(scene.surface, frame, SOMERSAULT_ANCHOR,
+                      tile_center_x=cx, tile_center_y=cy)
+            return
+        except (FileNotFoundError, ValueError):
+            pass  # 加载失败退回正常 render
     # reaction 序列优先级最高: 用脚本指定的 atlas-06 帧 + 像素位移
     if u.reaction_seq is not None and u.reaction_frame is not None:
         try:

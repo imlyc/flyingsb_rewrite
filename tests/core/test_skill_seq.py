@@ -95,8 +95,8 @@ def test_attack_seq_for_routes_to_skill_when_skill_id_given():
 
 def test_unimplemented_skill_falls_back_to_normal_attack():
     """未 dump 的 skill_id 回落到角色普攻 seq (= 不崩, 视觉先 work).
-    蒙面人 0x20..0x24 全 dump; 其他角色技能尚未 → 用 0x00 等其他 ID 验证 fallback."""
-    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x00)
+    用 0x0a (美娜小回复, 尚未实现) 验证 fallback."""
+    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x0a)
     seq_atk = attack_seq_for("蒙面人", (0, -1), skill_id=None)
     assert seq_skill == seq_atk
 

@@ -140,13 +140,33 @@ _FM_SURF_CACHE: dict[str, pygame.Surface] = {}
 
 
 def get_fm_surface(resource_name: str) -> pygame.Surface:
-    """加载 fm_ atlas 大图. 帧从 fm_frames.FM_FRAMES 取 BBox 子表面."""
+    """加载 fm_ atlas 大图. 帧从 fm_frames.FM_FRAMES 取 BBox 子表面.
+    也能加载任意 .pcx (e.g. ps_CSON105 翻跟头), 不限 fm_ 前缀."""
     if resource_name not in _FM_SURF_CACHE:
         path = SPRITES_DIR / f"{resource_name}.pcx"
         if not path.exists():
             raise FileNotFoundError(path)
         _FM_SURF_CACHE[resource_name] = load_image(path, color_key=AUTO)
     return _FM_SURF_CACHE[resource_name]
+
+
+# 孙悟空翻跟头 ps_CSON105: 256×192 = 4 cols × 2 rows, 每帧 64×96, 8 帧 (蹲→跳→空翻→蜷→倒→球→落→站).
+# 方向无关 (所有方向共用). anchor = (32, 84) 脚部 (跟孙悟空 idle feet 一致, 让翻跟头大致原地).
+SOMERSAULT_ATLAS = "ps_CSON105"
+SOMERSAULT_FRAME_W = 64
+SOMERSAULT_FRAME_H = 96
+SOMERSAULT_COLS = 4
+SOMERSAULT_FRAMES = 8
+SOMERSAULT_ANCHOR = (32, 84)
+
+
+def get_somersault_frame(idx: int) -> pygame.Surface:
+    """孙悟空翻跟头第 idx 帧 (0..7). 用于召唤技能 cast 隐现演出."""
+    surf = get_fm_surface(SOMERSAULT_ATLAS)
+    col = idx % SOMERSAULT_COLS
+    row = idx // SOMERSAULT_COLS
+    return surf.subsurface(pygame.Rect(col * SOMERSAULT_FRAME_W, row * SOMERSAULT_FRAME_H,
+                                       SOMERSAULT_FRAME_W, SOMERSAULT_FRAME_H))
 
 
 # ---------- SBTLFONT 伤害/MISS 数字字体 ----------

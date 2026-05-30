@@ -103,6 +103,10 @@ class BattleUnit:
     pending_caster_coord: object | None = None             # 多阶段 B 类技能 coordinator entity (e.g. 破天舞)
                                                             # 非空 → tactics 拦截 caster.entity 的 IMPACT/END,
                                                             # 转发给 coord, 跳过常规结算/post_attack_anim
+    # 孙悟空召唤演出: caster 翻跟头隐现 (ps_CSON105). cast_flip_frame 非 None → render 显示
+    # 翻跟头第 N 帧 (覆盖普通 sprite); cast_hidden → caster 完全不画 (神兽攻击阶段隐身).
+    cast_flip_frame: int | None = None
+    cast_hidden: bool = False
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
