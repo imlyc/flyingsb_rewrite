@@ -49,10 +49,12 @@ def set_reaction(defender: BattleUnit, seq_kind: str, attacker: BattleUnit | Non
 
 
 def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
-                 defender: BattleUnit, dmg: int, label: str) -> None:
+                 defender: BattleUnit, dmg: int, label: str,
+                 face_attacker: bool = True) -> None:
+    # face_attacker=False (范围/召唤技能): 受击保持原朝向, 不转向攻击者.
     defender.hp = max(0, defender.hp - dmg)
     battle.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
-    set_reaction(defender, "hit", attacker)
+    set_reaction(defender, "hit", attacker if face_attacker else None)
     _emit_hit_effect(battle, attacker, defender)
     battle._log(f"{attacker.name} → {defender.name}: {dmg} {label}命中"
                 + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
@@ -70,7 +72,11 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
     )
     from core.skill_seq import has_skill_impact_extra, skill_impact_extra_seq
     from core.sprites.base import TILE_W, TILE_H
-    specs = pick_hit_effects(attacker.name, None, attacker.facing)
+    # hit-fx 方向 = victim 自己朝向的反向 (exe: 00655c10[006418dc[victim_facing]], 006418dc=[1,0,3,2]
+    # 即 UP↔DN/LF↔RT 反向). 普攻时 victim 已转向攻击者, -victim.facing == attacker.facing (等价);
+    # 范围攻击 victim 不转向 → 用 victim 原朝向反向 (而非 attacker.facing).
+    ef_facing = (-defender.facing[0], -defender.facing[1])
+    specs = pick_hit_effects(attacker.name, None, ef_facing)
     cx = defender.x * TILE_W + TILE_W // 2
     cy = defender.y * TILE_H + TILE_H // 2
     for spec in specs:
@@ -197,7 +203,7 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
             t = battle.q.occupant(x, y)
             if t is None or not t.alive or t.is_player == attacker.is_player:
                 continue
-            _roll_damage_one(battle, attacker, t)
+            _roll_damage_one(battle, attacker, t, face_attacker=False)  # 范围攻击不转向
         return
     target = attacker.pending_attack_target
     if target is None or not target.alive:
@@ -220,7 +226,8 @@ def _replay_impact_visuals(battle: "TacticsBattle", attacker: BattleUnit) -> Non
         if t is not None and t.alive:
             targets.append(t)
     for t in targets:
-        set_reaction(t, "hit", attacker)
+        # 范围攻击 (dmg_tiles) 受击不转向; 单点保持转向攻击者.
+        set_reaction(t, "hit", attacker if not dmg_tiles else None)
         _emit_hit_effect(battle, attacker, t)
 
 
@@ -262,16 +269,18 @@ def _emit_life_fire_effect(battle: "TacticsBattle", target: BattleUnit) -> None:
     battle.engine.attach_seq(e, tuple_to_bytecode(seq))
 
 
-def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit) -> None:
-    """对单个 target roll miss/hit + 损伤 + 反应动画. 抽出来给 AoE 多目标循环用."""
+def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit,
+                     face_attacker: bool = True) -> None:
+    """对单个 target roll miss/hit + 损伤 + 反应动画. 抽出来给 AoE 多目标循环用.
+    face_attacker=False (范围/召唤技能): 受击保持原朝向不转向."""
     if battle.rng.random() < miss_chance(attacker, target):
         battle.damage_events.append(DamageEvent(0, target.hp, target.x, target.y, miss=True))
-        set_reaction(target, "dodge", attacker)
+        set_reaction(target, "dodge", attacker if face_attacker else None)
         battle._log(f"{attacker.name} → {target.name}: MISS (闪避)")
     else:
         raw = attacker.attack - target.defence + battle.rng.randint(-5, 5)
         dmg = max(1, raw)
-        apply_damage(battle, attacker, target, dmg, "")
+        apply_damage(battle, attacker, target, dmg, "", face_attacker=face_attacker)
 
 
 def clear_pending_attack(attacker: BattleUnit) -> None:
