@@ -438,17 +438,17 @@ class TacticsBattle:
         primary = cur_occ if cur_occ in targets else targets[0]
         # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
         self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
-        # 孙悟空召唤技能: 不走标准 attack seq, 由 son_summon coordinator 驱动翻跟头隐现 +
+        # 孙悟空变身技能: 不走标准 attack seq, 由 son_transform coordinator 驱动翻跟头隐现 +
         # 神兽 + AOE 伤害. 手动设 pending (begin_attack 的子集, 不 attach caster seq).
-        from core.son_summon import is_son_summon_skill, start_son_summon
-        if is_son_summon_skill(self.aim_skill_id):
+        from core.son_transform import is_son_transform_skill, start_son_transform
+        if is_son_transform_skill(self.aim_skill_id):
             u.pending_attack_target = primary
             u.pending_attack_cursor = self.aim_cursor
             u.pending_attack_skill = True
             u.pending_skill_id = self.aim_skill_id
             u.pending_impact_count = 0
             u.pending_impact_total = 1
-            start_son_summon(self, u, self.aim_cursor, self.aim_skill_id)
+            start_son_transform(self, u, self.aim_cursor, self.aim_skill_id)
             return True
         combat.begin_attack(self, u, primary, skill_id=self.aim_skill_id,
                             cursor=self.aim_cursor)

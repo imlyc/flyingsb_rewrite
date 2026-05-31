@@ -1,15 +1,15 @@
-"""孙悟空召唤技能演出框架 (skill 0x00..0x09).
+"""孙悟空变身技能演出框架 (skill 0x00..0x09).
 
-exe dispatcher (e.g. 大金刚 FUN_004f460a) 是多阶段召唤演出, 我们用 coordinator entity
+exe dispatcher (e.g. 大金刚 FUN_004f460a) 是多阶段变身演出, 我们用 coordinator entity
 驱动 caster 的翻跟头隐现 + 神兽 spawn + AOE 伤害 + 收尾.
 
 演出流程 (对应 exe state 流):
   FLIP_OUT: caster 翻跟头 (ps_CSON105 0..7) + emong 烟雾 → 翻完 caster 隐身
-  SUMMON:   神兽攻击阶段 (L1 占位: 直接 AOE 伤害; 后续接 eson01 从天而降逐敌)
+  TRANSFORM:   变身形态攻击阶段 (L1 占位: 直接 AOE 伤害; 后续接 eson01 从天而降逐敌)
   FLIP_IN:  caster 现身 + 翻跟头 (0..7) + emong → 翻完
   DONE:     post_attack_anim 收尾 + 销毁 coordinator
 
-caster 召唤期间不走标准 attack seq (caster.entity 不 attach skill seq), 全由 coordinator
+caster 变身期间不走标准 attack seq (caster.entity 不 attach skill seq), 全由 coordinator
 控制 cast_flip_frame / cast_hidden. coordinator 标 projectile=True 让 units_animating 看到,
 防回合提前结束.
 """
@@ -26,17 +26,17 @@ if TYPE_CHECKING:
 
 FP_ONE = 0x10000
 
-# 哪些 skill 走孙悟空召唤演出. L1 先做大金刚, 逐个加.
-SON_SUMMON_SKILLS: set[int] = {0x00}
+# 哪些 skill 走孙悟空变身演出. L1 先做大金刚, 逐个加.
+SON_TRANSFORM_SKILLS: set[int] = {0x00}
 
 # coordinator 状态码 (避开 20 = PROJ_STATE_DONE, units_animating 用它判投射物结束)
 _FLIP_OUT = 100
-_SUMMON = 110
+_TRANSFORM = 110
 _FLIP_IN = 120
 _DONE = 130
 
 FLIP_HOLD_TICKS = 3        # 翻跟头每帧 hold (8 帧 × 3 = 24 tick ≈ 720ms)
-SUMMON_TICKS = 40          # 神兽攻击阶段时长 (占位, 后续 eson01 下落逐敌取代)
+TRANSFORM_TICKS = 40          # 变身形态攻击阶段时长 (占位, 后续 eson01 下落逐敌取代)
 SOMERSAULT_N = 8           # ps_CSON105 8 帧
 
 # emong 烟雾 (atlas 248). 真实用法 (exe 0x670ff0[0..2] + FUN_004f3558/34f6):
@@ -81,8 +81,8 @@ def _spawn_smoke(battle, caster) -> None:
         battle.engine.attach_seq(e, tuple_to_bytecode(seg))
 
 
-def son_summon_think(e: "Entity", eng: "Engine") -> None:
-    """孙悟空召唤 coordinator. 驱动翻跟头隐现 + 神兽 + 伤害 + 收尾."""
+def son_transform_think(e: "Entity", eng: "Engine") -> None:
+    """孙悟空变身 coordinator. 驱动翻跟头隐现 + 神兽 + 伤害 + 收尾."""
     if 'caster' not in e.user_data:
         return  # spawn 时的 init call (state=-1, user_data 未设), 跳过
     caster = e.user_data['caster']
@@ -99,15 +99,15 @@ def son_summon_think(e: "Entity", eng: "Engine") -> None:
                 caster.cast_flip_frame = None
                 caster.cast_hidden = True
                 _spawn_smoke(battle, caster)
-                e.state_code = _SUMMON
+                e.state_code = _TRANSFORM
                 e.user_data['phase_ticks'] = 0
-                _do_summon_damage(e, battle, caster)
+                _do_transform_damage(e, battle, caster)
             else:
                 caster.cast_flip_frame = idx
-    elif e.state_code == _SUMMON:
-        # L1 占位: 等 SUMMON_TICKS (神兽攻击演出时长). 后续接 eson01 下落逐敌.
+    elif e.state_code == _TRANSFORM:
+        # L1 占位: 等 TRANSFORM_TICKS (神兽攻击演出时长). 后续接 eson01 下落逐敌.
         e.user_data['phase_ticks'] += 1
-        if e.user_data['phase_ticks'] >= SUMMON_TICKS:
+        if e.user_data['phase_ticks'] >= TRANSFORM_TICKS:
             # caster 现身, 开始翻跟头出现
             caster.cast_hidden = False
             caster.cast_flip_frame = 0
@@ -136,24 +136,24 @@ def son_summon_think(e: "Entity", eng: "Engine") -> None:
         battle.post_attack_anim(caster)
 
 
-def _do_summon_damage(e: "Entity", battle, caster) -> None:
-    """神兽攻击阶段结算伤害 (L1: 直接 AOE; 后续 eson01 逐敌时移到每次落地)."""
+def _do_transform_damage(e: "Entity", battle, caster) -> None:
+    """变身形态攻击阶段结算伤害 (L1: 直接 AOE; 后续 eson01 逐敌时移到每次落地)."""
     from core.battle import combat
     caster.pending_impact_count = 0   # total=1 → 首即末, 走 AOE 结算
     combat.apply_pending_attack(battle, caster)
 
 
-def start_son_summon(battle, caster, target_tile, skill_id: int) -> "Entity":
-    """启动孙悟空召唤 coordinator. caster 不走标准 attack seq, 全由 coord 控制.
+def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
+    """启动孙悟空变身 coordinator. caster 不走标准 attack seq, 全由 coord 控制.
     调用前 confirm_attack_aim 已设好 caster.pending_* + battle._pending_damage_range."""
     from core.sprites.base import TILE_W, TILE_H
     eng = battle.engine
-    e = eng.spawn(think_fn=son_summon_think)
+    e = eng.spawn(think_fn=son_transform_think)
     e.flags = 0x800 | 0x10000           # alive + has-think-fn, 不渲染 (无 visible bit)
     e.x = (target_tile[0] * TILE_W + TILE_W // 2) << 16
     e.y = (target_tile[1] * TILE_H + TILE_H // 2) << 16
     e.z = 0
-    e.user_data['kind'] = 'son_summon_coord'
+    e.user_data['kind'] = 'son_transform_coord'
     e.user_data['projectile'] = True    # 让 units_animating 看到, 防回合提前结束
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
@@ -168,5 +168,5 @@ def start_son_summon(battle, caster, target_tile, skill_id: int) -> "Entity":
     return e
 
 
-def is_son_summon_skill(skill_id: int | None) -> bool:
-    return skill_id is not None and skill_id in SON_SUMMON_SKILLS
+def is_son_transform_skill(skill_id: int | None) -> bool:
+    return skill_id is not None and skill_id in SON_TRANSFORM_SKILLS

@@ -1,4 +1,4 @@
-"""孙悟空召唤演出 coordinator: 翻跟头隐现 + AOE 伤害 + 收尾."""
+"""孙悟空变身演出 coordinator: 翻跟头隐现 + AOE 伤害 + 收尾."""
 
 import random
 
@@ -47,9 +47,9 @@ def _fixture():
     return b, caster, d1, d2
 
 
-def test_dajingang_summon_choreography():
+def test_dajingang_transform_choreography():
     """大金刚 0x00: 翻跟头消失(cast_flip 0→7) → 隐身+AOE伤害 → 翻跟头出现 → 收尾."""
-    from core.son_summon import start_son_summon, _FLIP_OUT
+    from core.son_transform import start_son_transform, _FLIP_OUT
 
     b, caster, d1, d2 = _fixture()
     caster.pending_attack_target = d1
@@ -59,7 +59,7 @@ def test_dajingang_summon_choreography():
     caster.pending_impact_total = 1
     b._pending_damage_range = {(8, 5), (7, 6)}   # 菱r2 内 2 敌人
 
-    coord = start_son_summon(b, caster, (7, 5), 0x00)
+    coord = start_son_transform(b, caster, (7, 5), 0x00)
     assert caster.cast_flip_frame == 0           # 起手翻跟头第 0 帧
     assert coord.state_code == _FLIP_OUT
     assert caster.pending_caster_coord is coord
@@ -87,8 +87,8 @@ def test_dajingang_summon_choreography():
     assert b._pending_turn_end is True
 
 
-def test_dajingang_is_son_summon_skill():
-    from core.son_summon import is_son_summon_skill
-    assert is_son_summon_skill(0x00) is True
-    assert is_son_summon_skill(0x14) is False   # 三藏南瓜破
-    assert is_son_summon_skill(None) is False
+def test_dajingang_is_son_transform_skill():
+    from core.son_transform import is_son_transform_skill
+    assert is_son_transform_skill(0x00) is True
+    assert is_son_transform_skill(0x14) is False   # 三藏南瓜破
+    assert is_son_transform_skill(None) is False
