@@ -100,15 +100,12 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
                 caster.cast_hidden = True
                 _spawn_smoke(battle, caster)
                 e.state_code = _TRANSFORM
-                e.user_data['phase_ticks'] = 0
-                _do_transform_damage(e, battle, caster)
+                spawn_eson01_attack(battle, caster, e)   # eson01 从天而降逐敌
             else:
                 caster.cast_flip_frame = idx
     elif e.state_code == _TRANSFORM:
-        # L1 占位: 等 TRANSFORM_TICKS (神兽攻击演出时长). 后续接 eson01 下落逐敌.
-        e.user_data['phase_ticks'] += 1
-        if e.user_data['phase_ticks'] >= TRANSFORM_TICKS:
-            # caster 现身, 开始翻跟头出现
+        # eson01 神兽砸完所有 victim (eson_done) → caster 现身翻跟头出现
+        if e.user_data.get('eson_done'):
             caster.cast_hidden = False
             caster.cast_flip_frame = 0
             e.user_data['flip_idx'] = 0
@@ -136,11 +133,162 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
         battle.post_attack_anim(caster)
 
 
-def _do_transform_damage(e: "Entity", battle, caster) -> None:
-    """变身形态攻击阶段结算伤害 (L1: 直接 AOE; 后续 eson01 逐敌时移到每次落地)."""
+# ============ eson01 神兽下落逐敌攻击 (exe FUN_004f4545 → think FUN_004f4288) ============
+# eson01 (atlas 254) 从高空下落砸第一个 victim → 落地伤害 → (停顿) → 抛物线跳向下一个 victim
+# 再砸 → 砸完所有 victim → 升空消失 → 通知 coordinator 进翻跟头出现.
+#
+# 严格还原 exe FUN_004f4288 状态机 + 物理积分器 FUN_004c3211 (全 16.16 fixed, 单位 px):
+#   - 天降下落 (mode 0x41, 仅 z): 从 victim 上方 0x2bc=700px 起, 匀速 vz=-40 (无重力), 落到 z=0.
+#   - 落地 (z<1): 发伤害(-200)+命中特效(-250), z=0, **设 +0x14=20 tick 等待计时器** → state 5.
+#   - 落地停顿 (state 5): 空等 20 tick 才进 state 10 (原版刻意的蓄势/命中强调).
+#   - 跳向下一敌 (state 10 → mode 0x71): 水平 vx=dx/0x28=dx/40 线性匀速;
+#     垂直 vz=+0x28=40 上抛 + 重力 0x2=2px/tick² → 抛物线弧 (峰高 ~380px, 历时 ~40 tick),
+#     落回 z<1 再砸. 水平除数 40 与弧线 tick 数同步 (2*vz/g = 2*40/2 = 40).
+#   - 全砸完 (state 10 else): vz 取反匀速升空, mode 0x41, z>700 时发 -100(eson_done) + 自毁.
+#
+# 我们的 z 约定与 exe 反向 (负 z = 上空, 落地 z=0, 下落 = z 增大). 速度/重力符号相应翻转.
+ESON01_ATLAS = 254
+ESON_SKY_HEIGHT_PX = 700       # 天降起始高度 (exe 0x2bc)
+ESON_DESCEND_VZ = 40           # 天降下落 / 终末升空 匀速 px/tick (exe 0x28, 无重力)
+ESON_SLAM_HOLD_TICKS = 20      # 落地砸中后停顿 tick (exe +0x144+0x14)
+ESON_LEAP_VZ = 40              # 跳跃初始上抛速度 px/tick (exe 0x28)
+ESON_LEAP_GRAVITY = 2          # 跳跃重力 px/tick² (exe 0x2)
+# 弧线历时 = 2*vz/g, 水平匀速除数与之同步 (exe 用 /0x28 = /40, 与 vz=40,g=2 的 40 tick 弧一致)
+ESON_LEAP_TICKS = 2 * ESON_LEAP_VZ // ESON_LEAP_GRAVITY
+
+_ESON_DESCEND = 200          # 天降下落 (避开 20=PROJ_DONE / 100+=coord state)
+_ESON_PAUSE = 203            # 落地停顿
+_ESON_LEAP = 205             # 抛物线跳向下一敌
+_ESON_RISE = 210             # 终末升空
+
+
+def _eson_collect_victims(battle, caster) -> list:
+    """从 _pending_damage_range 收集范围内敌人 (eson01 逐个砸)."""
+    victims = []
+    dmg = getattr(battle, '_pending_damage_range', None)
+    if dmg:
+        for (x, y) in dmg:
+            occ = battle.q.occupant(x, y)
+            if occ is not None and occ.alive and occ.is_player != caster.is_player:
+                victims.append(occ)
+    else:
+        t = caster.pending_attack_target
+        if t is not None and t.alive:
+            victims.append(t)
+    return victims
+
+
+def _victim_ground(victim) -> tuple[int, int]:
+    """victim 脚下 tile 中心的 (x, y) 16.16 坐标."""
+    from core.sprites.base import TILE_W, TILE_H
+    return ((victim.x * TILE_W + TILE_W // 2) << 16,
+            (victim.y * TILE_H + TILE_H // 2) << 16)
+
+
+def _eson_position_above(e: "Entity", victim) -> None:
+    """把 eson01 放到 victim 正上方高空 (准备天降下落)."""
+    e.x, e.y = _victim_ground(victim)
+    e.z = -ESON_SKY_HEIGHT_PX << 16          # 负 z = 上空
+
+
+def _eson_hit(battle, caster, victim) -> None:
+    """eson01 落地砸中 victim: 单体伤害 + hit-fx (范围攻击不转向)."""
+    if not victim.alive:
+        return
     from core.battle import combat
-    caster.pending_impact_count = 0   # total=1 → 首即末, 走 AOE 结算
-    combat.apply_pending_attack(battle, caster)
+    combat._roll_damage_one(battle, caster, victim, face_attacker=False)
+
+
+def _eson_land(e: "Entity") -> None:
+    """落地砸中当前 victim: 切砸地帧 + 伤害 + 启动停顿计时 → _ESON_PAUSE (exe state 0→5)."""
+    ud = e.user_data
+    e.z = 0
+    e.frame_idx = 0                          # exe: 落地切 frame 0 (举臂收势)
+    _eson_hit(ud['battle'], ud['caster'], ud['victims'][ud['idx']])
+    ud['pause_tick'] = 0
+    e.state_code = _ESON_PAUSE
+
+
+def _eson_start_leap(e: "Entity", victim) -> None:
+    """砸完一个 victim 后, 设置抛物线跳向下一个 victim (exe state 10, mode 0x71)."""
+    ud = e.user_data
+    tx, ty = _victim_ground(victim)
+    # 水平: 线性匀速, dx/ESON_LEAP_TICKS per tick (exe /0x28). 终点落地 (z=0).
+    ud['leap_vx'] = (tx - e.x) // ESON_LEAP_TICKS
+    ud['leap_vy'] = (ty - e.y) // ESON_LEAP_TICKS
+    ud['leap_tx'] = tx
+    ud['leap_ty'] = ty
+    # 垂直: 上抛 (我们约定上空 = 负 z, 故初速 -LEAP_VZ; 重力 +GRAVITY 把它拉回 z=0).
+    e.vz = -ESON_LEAP_VZ << 16
+    e.frame_idx = 0                          # 上升时 frame 0 (exe: vz>=1 → frame 0)
+    e.state_code = _ESON_LEAP
+
+
+def eson01_attack_think(e: "Entity", eng: "Engine") -> None:
+    ud = e.user_data
+    if 'victims' not in ud:
+        return  # init call
+
+    if e.state_code == _ESON_DESCEND:
+        # 天降匀速下落 (exe mode 0x41, 无重力), 落地砸.
+        e.z += ESON_DESCEND_VZ << 16
+        e.frame_idx = 1                      # 下落 = 砸地帧 (exe: vz<1 → frame 1)
+        if e.z >= 0:
+            _eson_land(e)
+
+    elif e.state_code == _ESON_PAUSE:
+        # 落地停顿 (exe state 5: 空等 20 tick 才动), 停顿期保持砸地姿 frame 0.
+        ud['pause_tick'] += 1
+        if ud['pause_tick'] >= ESON_SLAM_HOLD_TICKS:
+            ud['idx'] += 1
+            if ud['idx'] >= len(ud['victims']):
+                # 全砸完 → 升空 (exe state 10 else: vz 取反匀速升).
+                e.vz = -ESON_DESCEND_VZ << 16
+                e.frame_idx = 0
+                e.state_code = _ESON_RISE
+            else:
+                _eson_start_leap(e, ud['victims'][ud['idx']])
+
+    elif e.state_code == _ESON_LEAP:
+        # 抛物线跳向下一敌: 水平线性 + 垂直上抛受重力 (exe mode 0x71).
+        e.x += ud['leap_vx']
+        e.y += ud['leap_vy']
+        e.vz += ESON_LEAP_GRAVITY << 16      # 重力把上抛速度拉回 (我们约定 +z = 下)
+        e.z += e.vz
+        e.frame_idx = 1 if e.vz > 0 else 0   # 下落段砸地帧, 上升段举臂帧
+        if e.vz > 0 and e.z >= 0:            # 弧线落回地面 → 砸下一敌
+            e.x, e.y = ud['leap_tx'], ud['leap_ty']
+            _eson_land(e)
+
+    elif e.state_code == _ESON_RISE:
+        # 终末升空匀速 (exe mode 0x41), 升过 700px 高空 → 通知 coordinator + 自毁.
+        e.z += e.vz
+        if (e.z >> 16) <= -ESON_SKY_HEIGHT_PX:
+            ud['coord'].user_data['eson_done'] = True
+            eng.destroy(e)
+
+
+def spawn_eson01_attack(battle, caster, coord: "Entity") -> None:
+    """变身形态攻击: spawn eson01 从天而降逐个砸 victim. 砸完设 coord.eson_done=True."""
+    coord.user_data['eson_done'] = False
+    victims = _eson_collect_victims(battle, caster)
+    if not victims:
+        coord.user_data['eson_done'] = True   # 无敌人, 直接跳过
+        return
+    e = battle.engine.spawn(think_fn=eson01_attack_think)
+    e.atlas_slot = ESON01_ATLAS
+    e.frame_idx = 1                           # 天降即砸地姿
+    e.flags |= 0x40
+    e.vz = 0
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['victims'] = victims
+    e.user_data['idx'] = 0
+    _eson_position_above(e, victims[0])
+    e.state_code = _ESON_DESCEND
 
 
 def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
