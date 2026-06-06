@@ -111,6 +111,10 @@ class BattleUnit:
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
                                               # 之前的 IMPACT 只放 hit-fx + reaction (视觉反馈)
+    # AOE 延迟结算门控 (大金刚等逐个砸的 AOE): True 时该 unit 已扣血+受击+飘字 (造成伤害),
+    # 但虚弱/死亡的视觉表现 (weak pose / 死亡动画) 被抑制, 渲染保持站立. 等 AOE 全部砸完后
+    # 统一释放 → 所有受害者同时进入虚弱/死亡 (造成伤害依次, 伤害结算同时).
+    settle_pending: bool = False
     # 死亡动画计时 (HP=0 + reaction 结束 + 数字进 flash 阶段后开始累计 ms; -1 = 未启动).
     # 时序源 exe FUN_004399c5 / 00439b42 等: 切 ps_*04 row 4 (frames 12/13/14), 每帧 hold 0x14=20 ticks=800ms.
     # 玩家: 走完 fall 永久 hold (尸体, 可复活); 敌人: hold 一段后闪烁消失.

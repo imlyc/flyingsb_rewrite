@@ -158,6 +158,8 @@ def _tick_death_animations(scene: "BattleScene", now: int, dt_ms: int) -> None:
     for unit in scene.battle.all_units:
         if unit.hp > 0 or unit.reaction_seq is not None:
             continue
+        if unit.settle_pending:      # AOE 延迟结算: 未释放前不启动死亡动画
+            continue
         if unit.death_anim_time_ms < 0:
             # 找该 unit 的最近一发伤害数字, 看是否进 flash
             ready = False

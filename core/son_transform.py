@@ -192,11 +192,26 @@ def _eson_position_above(e: "Entity", victim) -> None:
 
 
 def _eson_hit(battle, caster, victim) -> None:
-    """eson01 落地砸中 victim: 单体伤害 + hit-fx (范围攻击不转向)."""
+    """eson01 落地砸中 victim: 造成伤害阶段 (依次进行).
+    扣血 + 受击反应 + 飘字 + hit-fx 立即生效 (范围攻击不转向), 但标 settle_pending
+    抑制虚弱/死亡视觉, 等所有 victim 砸完后 _eson_settle_all 统一释放 (伤害结算同时进行)."""
     if not victim.alive:
         return
     from core.battle import combat
     combat._roll_damage_one(battle, caster, victim, face_attacker=False)
+    victim.settle_pending = True
+
+
+def _eson_settle_all(victims) -> None:
+    """伤害结算阶段 (同时进行): eson01 全部砸完后统一释放延迟结算.
+    所有受害者同时解除抑制 → 死亡的立即同步开始死亡动画, 虚弱的同步显虚弱姿."""
+    for v in victims:
+        if not v.settle_pending:
+            continue
+        v.settle_pending = False
+        # 死亡者绕过逐发飘字门控, 同一 tick 一起开始死亡动画 (保证同步).
+        if not v.alive and v.death_anim_time_ms < 0:
+            v.death_anim_time_ms = 0
 
 
 def _eson_land(e: "Entity") -> None:
@@ -264,6 +279,7 @@ def eson01_attack_think(e: "Entity", eng: "Engine") -> None:
         # 终末升空匀速 (exe mode 0x41), 升过 700px 高空 → 通知 coordinator + 自毁.
         e.z += e.vz
         if (e.z >> 16) <= -ESON_SKY_HEIGHT_PX:
+            _eson_settle_all(ud['victims'])     # 全砸完升空到顶 → 同时结算
             ud['coord'].user_data['eson_done'] = True
             eng.destroy(e)
 

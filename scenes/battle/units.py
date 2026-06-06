@@ -63,8 +63,8 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
             continue
         # 影子: 活/死单位都画, 跟随单位一起出现/消失 (敌人 blink 期跟着闪).
         blit_shadow(scene.surface, scene._shadow_surf, cx, cy)
-        # 死亡分支
-        if not u.alive:
+        # 死亡分支 (settle_pending 时抑制: AOE 延迟结算, 保持站立直到统一释放)
+        if not u.alive and not u.settle_pending:
             if u.death_anim_time_ms >= 0:
                 draw_dead_unit(scene, u, cx, cy)
             else:
@@ -141,7 +141,7 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
         except FileNotFoundError:
             idle_sprite = None
         weakened_sprite = None
-        if u.is_weakened:
+        if u.is_weakened and not u.settle_pending:   # 延迟结算时不显虚弱姿, 等统一释放
             from core.sprites.atlas_classes import weakened_key_from_walk_key
             from core.sprites.loaders import get_weakened_sprite
             try:
