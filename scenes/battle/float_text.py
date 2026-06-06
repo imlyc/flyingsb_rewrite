@@ -102,6 +102,13 @@ class FloatText:
         _, phase, _ = self._digit_state(0, now_ms)
         return phase in ('flash', 'done')
 
+    def landed_at(self, now_ms: int) -> bool:
+        """数字是否已"落定" (= rise 结束, 进入 hold/flash, 但在闪烁之前/含).
+        原版 HP 在数字落定 (-20 settle 信号) 时减少, 早于闪烁. 末位最晚落定, 用它当判据."""
+        last_idx = self._n - 1
+        _, phase, _ = self._digit_state(last_idx, now_ms)
+        return phase in ('hold', 'flash', 'done')
+
     def draw(self, surface: pygame.Surface,
              big_font: pygame.font.Font, small_font: pygame.font.Font,
              cam_x: int, cam_y: int, now_ms: int) -> None:

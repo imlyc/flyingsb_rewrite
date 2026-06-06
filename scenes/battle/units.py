@@ -69,6 +69,9 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
                 draw_dead_unit(scene, u, cx, cy)
             else:
                 draw_dying_pose(scene, u, cx, cy)
+            # 原版: 敌人死亡闪烁时 HP/MP 与尸体门控在同一可见位 → 一起闪烁.
+            # dead_blink_off 已在 blink-off 帧 continue 跳过整个单位, 故这里照画即同步闪.
+            _draw_enemy_hp_mp(scene, u, cx, cy)
             continue
         # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块
         r = rect.inflate(-8, -8)
@@ -83,17 +86,25 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
             # 朝向小三角 (黄)
             draw_facing_arrow(scene, u, rect)
         # HP / MP 持久标签: 仅敌人显示 (己方状态后续移到屏幕顶部 HUD).
-        # 字号 ≈ float text (sbtlfont 14px); 用普通像素字 scene.small (13).
-        # 布局: 居中堆叠在角色头顶, 从上到下 HP → MP → float text.
-        # 颜色: HP 绿(健康) / 黄(虚弱 < 40%) / 红(待挖触发条件); MP 蓝.
-        if not u.is_player:
-            hp_color = scene.HP_WEAKENED_COLOR if u.is_weakened else scene.HP_NUM_COLOR
-            label_cx = cx + 8        # 中间偏右
-            mp = scene.small.render(str(u.mp), True, scene.MP_NUM_COLOR)
-            mp_rect = mp.get_rect(midbottom=(label_cx, cy - 25))
-            scene.surface.blit(mp, mp_rect)
-            hp = scene.small.render(str(u.hp), True, hp_color)
-            scene.surface.blit(hp, hp.get_rect(midbottom=(label_cx, mp_rect.top - 1)))
+        _draw_enemy_hp_mp(scene, u, cx, cy)
+
+
+def _draw_enemy_hp_mp(scene: "BattleScene", u, cx: int, cy: int) -> None:
+    """敌人头顶 HP/MP 标签 (己方在屏幕顶部 HUD). 活/死单位都画 — 死亡时随尸体一起闪烁
+    (原版: HP/MP 与精灵门控同一可见位).
+    字号 ≈ float text (sbtlfont 14px); 用普通像素字 scene.small (13). 居中堆叠在头顶.
+    颜色: HP 绿(健康) / 黄(虚弱 <40% 或已死) / MP 蓝. 显示用 display_hp/display_weakened
+    (受击后滞后到结算 = 数字闪烁时才掉血变色)."""
+    if u.is_player:
+        return
+    weakened = u.display_weakened or u.display_hp <= 0
+    hp_color = scene.HP_WEAKENED_COLOR if weakened else scene.HP_NUM_COLOR
+    label_cx = cx + 8        # 中间偏右
+    mp = scene.small.render(str(u.mp), True, scene.MP_NUM_COLOR)
+    mp_rect = mp.get_rect(midbottom=(label_cx, cy - 25))
+    scene.surface.blit(mp, mp_rect)
+    hp = scene.small.render(str(u.display_hp), True, hp_color)
+    scene.surface.blit(hp, hp.get_rect(midbottom=(label_cx, mp_rect.top - 1)))
 
 
 def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
@@ -141,7 +152,9 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
         except FileNotFoundError:
             idle_sprite = None
         weakened_sprite = None
-        if u.is_weakened and not u.settle_pending:   # 延迟结算时不显虚弱姿, 等统一释放
+        # 虚弱姿态跟 display_hp 一起在"落定"时切换 (原版: HP 与虚弱都读真实表, 提交时一起变,
+        # 早于数字闪烁). display_weakened 基于 display_hp → 受击后滞后到落定才虚弱.
+        if u.display_weakened:
             from core.sprites.atlas_classes import weakened_key_from_walk_key
             from core.sprites.loaders import get_weakened_sprite
             try:

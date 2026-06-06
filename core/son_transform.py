@@ -199,16 +199,20 @@ def _eson_hit(battle, caster, victim) -> None:
         return
     from core.battle import combat
     combat._roll_damage_one(battle, caster, victim, face_attacker=False)
+    # apply_damage 已设 settle_pending + shown_hp_override (逻辑 hp 即扣, 显示/视觉延迟).
+    # 额外标 settle_batch: 不在自己飘字 flash 时结算, 等全砸完批量统一结算 (= 最后一个敌人受击结束).
     victim.settle_pending = True
+    victim.settle_batch = True
 
 
 def _eson_settle_all(victims) -> None:
     """伤害结算阶段 (同时进行): eson01 全部砸完后统一释放延迟结算.
-    所有受害者同时解除抑制 → 死亡的立即同步开始死亡动画, 虚弱的同步显虚弱姿."""
+    所有受害者同时解除抑制 (HP 显示更新 + 虚弱/死亡视觉放行) → 死亡的同步开始死亡动画."""
     for v in victims:
-        if not v.settle_pending:
+        if not (v.settle_pending or v.settle_batch):
             continue
-        v.settle_pending = False
+        v.release_hp_display()   # 存活 → 显示真实 hp; 死亡 → 保留旧值 (不显 0)
+        v.settle_damage()        # 解除 settle_pending/settle_batch (虚弱/死亡视觉放行)
         # 死亡者绕过逐发飘字门控, 同一 tick 一起开始死亡动画 (保证同步).
         if not v.alive and v.death_anim_time_ms < 0:
             v.death_anim_time_ms = 0

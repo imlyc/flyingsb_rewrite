@@ -32,6 +32,7 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
     input_mod.poll_player_hold(scene, dt_ms)
     _ingest_damage_events(scene, now)
     _tick_reactions(scene, dt_ms)
+    _tick_damage_settlement(scene, now)
     _tick_death_animations(scene, now, dt_ms)
     _tick_anim_engine(scene, dt_ms)
 
@@ -89,7 +90,8 @@ def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:
     """单位渲染坐标按速度向当前路径节点插值. 沿格逐步走, 防止两轴并行 lerp 出 45° 飞行."""
     step = scene.UNIT_TILES_PER_SEC * dt_ms / 1000.0
     for unit in scene.battle.all_units:
-        if not unit.alive:
+        # settle_pending: 逻辑已死但视觉仍站立 (大金刚延迟结算) → 仍推进待机/呼吸动画, 防静止.
+        if not unit.alive and not unit.settle_pending:
             continue
         # 当前 lerp 目标: 路径头节点 / 否则 unit 逻辑位置
         if unit.move_path:
@@ -150,6 +152,33 @@ def _tick_reactions(scene: "BattleScene", dt_ms: int) -> None:
     for unit in scene.battle.all_units:
         if unit.reaction_seq is not None:
             advance_reaction(unit, dt_ms)
+
+
+def _tick_damage_settlement(scene: "BattleScene", now: int) -> None:
+    """伤害结算门控 (原版分两个节点, 都在受击反应结束后):
+      (1) **HP 数字减少**: 伤害数字"落定" (rise 结束, 进 hold) 时 — 早于闪烁.
+          存活 → 显示更新到真实 hp; 死亡 → 保留旧值 (原版死亡闪烁期不显 0, 保持原值直到消失).
+      (2) **虚弱/死亡视觉**: 伤害数字进 flash 阶段时放行.
+    大金刚等 settle_batch unit 跳过 (等 son_transform 全砸完批量结算 = 最后一个敌人受击结束).
+    """
+    for unit in scene.battle.all_units:
+        if unit.settle_batch or unit.reaction_seq is not None:
+            continue                     # 批量结算 / 受击反应未结束
+        landed = flashing = False
+        has_float = False
+        for f in scene._floats:
+            if abs(f.world_x - (unit.x * TILE_W + TILE_W // 2)) <= TILE_W:
+                has_float = True
+                if f.landed_at(now):
+                    landed = True
+                if f.flash_started_at(now):
+                    flashing = True
+        # (1) 数字落定 (或无数字兜底) → HP 显示更新
+        if unit.shown_hp_override is not None and (landed or not has_float):
+            unit.release_hp_display()
+        # (2) 数字闪烁 (或无数字兜底) → 虚弱/死亡视觉放行
+        if unit.settle_pending and (flashing or not has_float):
+            unit.settle_damage()
 
 
 def _tick_death_animations(scene: "BattleScene", now: int, dt_ms: int) -> None:

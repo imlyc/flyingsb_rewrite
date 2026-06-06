@@ -52,7 +52,13 @@ def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
                  defender: BattleUnit, dmg: int, label: str,
                  face_attacker: bool = True) -> None:
     # face_attacker=False (范围/召唤技能): 受击保持原朝向, 不转向攻击者.
-    defender.hp = max(0, defender.hp - dmg)
+    # 逻辑 hp 立即扣 (AI/胜负判定要真值); 但**显示 hp + 虚弱/死亡视觉**延迟到结算 (原版语义):
+    # shown_hp_override = 受击前旧值 → HUD 滞后; settle_pending=True → 抑制虚弱/死亡视觉.
+    # 结算时机: 单体/同时 AOE = 该飘字进 flash (update._tick_settlement); 大金刚 = 全砸完批量.
+    old_hp = defender.hp
+    defender.hp = max(0, old_hp - dmg)
+    defender.shown_hp_override = old_hp
+    defender.settle_pending = True
     battle.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
     set_reaction(defender, "hit", attacker if face_attacker else None)
     _emit_hit_effect(battle, attacker, defender)

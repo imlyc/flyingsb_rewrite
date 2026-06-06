@@ -110,17 +110,21 @@ def test_dajingang_aoe_deferred_simultaneous_settle():
         for d in (d1, d2):
             if d.hp == 0 and d.settle_pending and d.death_anim_time_ms < 0:
                 saw_suppressed = True
-        # 抑制期不变绝不允许 hp=0 的敌人启动死亡动画
+        # 抑制期: 不允许 hp=0 的敌人启动死亡动画; 显示 hp 仍是旧值 (HUD 滞后)
         for d in (d1, d2):
             if d.settle_pending:
                 assert d.death_anim_time_ms < 0
+                assert d.display_hp == 10      # 逻辑 hp 已 0, 但显示滞后到结算
         if b._pending_turn_end:
             break
 
     assert saw_suppressed, "致死敌人应在 eson 砸完前被抑制 (依次造成伤害)"
     # 结算后: 两者同时释放, 同步开始死亡动画
     assert d1.hp == 0 and d2.hp == 0
+    # 致死敌人保持受击前 HP 显示 (原版死亡闪烁不显 0)
+    assert d1.display_hp == 10 and d2.display_hp == 10
     assert not d1.settle_pending and not d2.settle_pending
+    assert not d1.settle_batch and not d2.settle_batch
     assert d1.death_anim_time_ms >= 0 and d2.death_anim_time_ms >= 0
 
 

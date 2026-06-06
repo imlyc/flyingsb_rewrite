@@ -111,10 +111,17 @@ class BattleUnit:
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
                                               # 之前的 IMPACT 只放 hit-fx + reaction (视觉反馈)
-    # AOE 延迟结算门控 (大金刚等逐个砸的 AOE): True 时该 unit 已扣血+受击+飘字 (造成伤害),
-    # 但虚弱/死亡的视觉表现 (weak pose / 死亡动画) 被抑制, 渲染保持站立. 等 AOE 全部砸完后
-    # 统一释放 → 所有受害者同时进入虚弱/死亡 (造成伤害依次, 伤害结算同时).
+    # 伤害结算门控 (原版: HP 在"结算"时变, 不在飘伤害数字时变. 结算 ≈ 数字闪烁时刻):
+    #   逻辑 hp 在 apply_damage 即扣 (AI/胜负判定用真值), 但**显示 hp + 虚弱/死亡视觉**延迟到结算.
+    #   settle_pending=True 期间: HUD 显示 shown_hp_override (旧值), weak pose / 死亡动画被抑制,
+    #   渲染保持站立. 结算时 (单体/同时AOE = 飘字进 flash; 大金刚 = 全砸完批量) 解除 → hp 显示更新
+    #   + 虚弱/死亡同时发生.
     settle_pending: bool = False
+    # settle_batch=True (大金刚等逐个砸的 AOE): 不在自己飘字 flash 时结算, 等 AOE 全砸完批量统一结算
+    # (= 最后一个敌人受击结束). 普通单体/同时 AOE 不设, 各自 flash 时结算.
+    settle_batch: bool = False
+    # 显示用 hp 覆盖值 (None = 用真实 hp). settle_pending 期间 = 受击前的旧 hp, 让 HUD 滞后到结算才掉.
+    shown_hp_override: int | None = None
     # 死亡动画计时 (HP=0 + reaction 结束 + 数字进 flash 阶段后开始累计 ms; -1 = 未启动).
     # 时序源 exe FUN_004399c5 / 00439b42 等: 切 ps_*04 row 4 (frames 12/13/14), 每帧 hold 0x14=20 ticks=800ms.
     # 玩家: 走完 fall 永久 hold (尸体, 可复活); 敌人: hold 一段后闪烁消失.
@@ -135,6 +142,29 @@ class BattleUnit:
     @property
     def alive(self) -> bool:
         return self.hp > 0
+
+    @property
+    def display_hp(self) -> int:
+        """HUD 显示用 hp: 结算前显示旧值 (shown_hp_override), 结算后 = 真实 hp."""
+        return self.shown_hp_override if self.shown_hp_override is not None else self.hp
+
+    @property
+    def display_weakened(self) -> bool:
+        """显示用虚弱判定 (基于 display_hp, 让虚弱色/姿态跟 HUD 数字一起在结算时变)."""
+        h = self.display_hp
+        return h > 0 and h * 100 < self.max_hp * 40
+
+    def release_hp_display(self) -> None:
+        """数字落定时更新 HP 显示 (原版: HP 在数字闪烁前减少). 存活 → 显示真实 hp;
+        死亡 → 保留 shown_hp_override (= 受击前旧值, 原版死亡闪烁期不显 0, 保持原值直到消失)."""
+        if self.alive:
+            self.shown_hp_override = None
+
+    def settle_damage(self) -> None:
+        """结算死亡/虚弱视觉 (数字闪烁时放行). HP 数字显示由 release_hp_display 单独控制
+        (落定即更新, 早于此)."""
+        self.settle_pending = False
+        self.settle_batch = False
 
     def snap_render(self) -> None:
         """把渲染坐标瞬间对齐到逻辑位置 (无动画). 摆阵 / 复活时用."""

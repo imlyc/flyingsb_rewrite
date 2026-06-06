@@ -93,6 +93,39 @@ def test_apply_damage_lethal_clamps_hp():
     assert not d.alive
 
 
+def test_apply_damage_defers_displayed_hp_to_settlement():
+    """逻辑 hp 立即扣 (AI/胜负用真值), 但显示 hp + 虚弱/死亡视觉延迟到结算."""
+    b = _FakeBattle()
+    a, d = _unit("a", 0, 0), _unit("d", 1, 0, hp=20)
+    combat.apply_damage(b, a, d, 15, "")        # 20→5 (虚弱阈值 40% of 20 = 8, 5<8)
+    # 逻辑 hp 立即变
+    assert d.hp == 5
+    # 显示 hp 仍是旧值, 受击/虚弱视觉被抑制 (settle_pending)
+    assert d.settle_pending is True
+    assert d.display_hp == 20
+    assert d.display_weakened is False          # 显示层还没虚弱
+    # 数字落定 → HP 显示更新 (存活, 早于闪烁)
+    d.release_hp_display()
+    assert d.display_hp == 5
+    assert d.display_weakened is True
+    # 闪烁 → 虚弱/死亡视觉放行
+    d.settle_damage()
+    assert d.settle_pending is False
+
+
+def test_dying_enemy_keeps_old_hp_display():
+    """致死攻击: 死亡敌人保持受击前 HP 显示 (原版死亡闪烁不显 0, 保持原值直到消失)."""
+    b = _FakeBattle()
+    a, d = _unit("a", 0, 0), _unit("d", 1, 0, hp=12)
+    combat.apply_damage(b, a, d, 99, "")        # 12→0 致死
+    assert d.hp == 0 and not d.alive
+    assert d.display_hp == 12                    # 受击前旧值
+    d.release_hp_display()                       # 死亡 → 不清, 保留旧值
+    assert d.display_hp == 12
+    d.settle_damage()
+    assert d.display_hp == 12                    # 直到消失都显旧值
+
+
 def test_multi_impact_damages_only_on_last():
     """多段攻击 (无限刀 5 IMPACT): 只 *最后* 一段结算伤害, 之前的仅触发视觉反馈."""
     b = _FakeBattle(seed=0)

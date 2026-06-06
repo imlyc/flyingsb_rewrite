@@ -383,7 +383,7 @@ def draw_actor_card(scene: "BattleScene", x: int, y: int, w: int, h: int,
     name_text = f"{u.name}  Lv{u.level}"
     t = scene.font.render(name_text, True, scene.TEXT)
     scene.surface.blit(t, (tx, ty)); ty += 22
-    line = f"HP {u.hp}/{u.max_hp}   MP {u.mp}/{u.max_mp}"
+    line = f"HP {u.display_hp}/{u.max_hp}   MP {u.mp}/{u.max_mp}"   # 显示滞后到结算 (见 BattleUnit.display_hp)
     t = scene.small.render(line, True, scene.TEXT)
     scene.surface.blit(t, (tx, ty)); ty += 16
     draw_sg_icons(scene, tx, ty, u.sg)
