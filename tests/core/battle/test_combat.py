@@ -104,12 +104,12 @@ def test_apply_damage_defers_displayed_hp_to_settlement():
     assert d.settle_pending is True
     assert d.display_hp == 20
     assert d.display_weakened is False          # 显示层还没虚弱
-    # 数字落定 → HP 显示更新 (存活, 早于闪烁)
-    d.release_hp_display()
+    # 受击反应结束 → commit HP (存活, 早于闪烁)
+    d.commit_hp()
     assert d.display_hp == 5
     assert d.display_weakened is True
-    # 闪烁 → 虚弱/死亡视觉放行
-    d.settle_damage()
+    # 闪烁信号 → 虚弱/死亡视觉放行
+    d.release_death_visual()
     assert d.settle_pending is False
 
 
@@ -120,9 +120,9 @@ def test_dying_enemy_keeps_old_hp_display():
     combat.apply_damage(b, a, d, 99, "")        # 12→0 致死
     assert d.hp == 0 and not d.alive
     assert d.display_hp == 12                    # 受击前旧值
-    d.release_hp_display()                       # 死亡 → 不清, 保留旧值
+    d.commit_hp()                                # 死亡 → 不提交, 保留旧值
     assert d.display_hp == 12
-    d.settle_damage()
+    d.release_death_visual()
     assert d.display_hp == 12                    # 直到消失都显旧值
 
 

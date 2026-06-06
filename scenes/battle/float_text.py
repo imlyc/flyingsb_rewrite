@@ -49,6 +49,9 @@ class FloatText:
         self.started_at = started_at
         self.miss = miss
         self.heal = heal
+        # 关联的受击单位 (_ingest 时绑定); 飘字像原版数字实体一样自驱发"闪烁/落定"信号给它.
+        self.target_unit = None
+        self._flash_signaled = False
         # 单行 frame 序列: MISS 红字母 / heal row-0 数字 / 普通红色 damage 数字
         if miss:
             self._frames = list(SBTLFONT_MISS_FRAMES)
@@ -102,12 +105,15 @@ class FloatText:
         _, phase, _ = self._digit_state(0, now_ms)
         return phase in ('flash', 'done')
 
-    def landed_at(self, now_ms: int) -> bool:
-        """数字是否已"落定" (= rise 结束, 进入 hold/flash, 但在闪烁之前/含).
-        原版 HP 在数字落定 (-20 settle 信号) 时减少, 早于闪烁. 末位最晚落定, 用它当判据."""
-        last_idx = self._n - 1
-        _, phase, _ = self._digit_state(last_idx, now_ms)
-        return phase in ('hold', 'flash', 'done')
+    def take_flash_signal(self, now_ms: int) -> bool:
+        """一次性"闪烁"信号 (仿原版数字 entity 进 flash 时发信号驱动死亡). 仅伤害数字; 首次进
+        flash 返回 True, 之后 False."""
+        if self.heal or self._flash_signaled:
+            return False
+        if self.flash_started_at(now_ms):
+            self._flash_signaled = True
+            return True
+        return False
 
     def draw(self, surface: pygame.Surface,
              big_font: pygame.font.Font, small_font: pygame.font.Font,

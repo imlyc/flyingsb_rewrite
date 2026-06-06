@@ -111,17 +111,18 @@ class BattleUnit:
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
                                               # 之前的 IMPACT 只放 hit-fx + reaction (视觉反馈)
-    # 伤害结算门控 (原版: HP 在"结算"时变, 不在飘伤害数字时变. 结算 ≈ 数字闪烁时刻):
-    #   逻辑 hp 在 apply_damage 即扣 (AI/胜负判定用真值), 但**显示 hp + 虚弱/死亡视觉**延迟到结算.
-    #   settle_pending=True 期间: HUD 显示 shown_hp_override (旧值), weak pose / 死亡动画被抑制,
-    #   渲染保持站立. 结算时 (单体/同时AOE = 飘字进 flash; 大金刚 = 全砸完批量) 解除 → hp 显示更新
-    #   + 虚弱/死亡同时发生.
-    settle_pending: bool = False
-    # settle_batch=True (大金刚等逐个砸的 AOE): 不在自己飘字 flash 时结算, 等 AOE 全砸完批量统一结算
-    # (= 最后一个敌人受击结束). 普通单体/同时 AOE 不设, 各自 flash 时结算.
-    settle_batch: bool = False
-    # 显示用 hp 覆盖值 (None = 用真实 hp). settle_pending 期间 = 受击前的旧 hp, 让 HUD 滞后到结算才掉.
+    # === 原版式双值 HP (working buffer + committed) + 事件(signal)驱动提交 ===
+    # 原版: 命中即扣"工作缓冲"(判死亡/AI), 攻击动画结束(受击反应后)才 commit 回真实表(= 显示值),
+    # 死亡动画由数字闪烁信号触发. 我们对应:
+    #   hp                = 工作缓冲 (apply_damage 即扣; alive/AI/胜负读它)
+    #   committed_hp 显示  = 真实表 (受击反应结束 commit_hp 提交 → display_hp; 死亡保留旧值不显 0)
+    # shown_hp_override = committed 显示值的滞后表示 (None = 已与 hp 同步; 非 None = 受击前旧值待提交).
     shown_hp_override: int | None = None
+    # 死亡/虚弱视觉门控: True = 工作缓冲已死但死亡动画/尸体未放行 (保持站立呼吸). 数字闪烁信号
+    # (_on_damage_flash) 或大金刚批量释放. settle_batch: 大金刚等逐个砸 AOE, 不在自己数字信号时
+    # 释放, 等全砸完批量统一 (= 最后一个敌人受击结束).
+    settle_pending: bool = False
+    settle_batch: bool = False
     # 死亡动画计时 (HP=0 + reaction 结束 + 数字进 flash 阶段后开始累计 ms; -1 = 未启动).
     # 时序源 exe FUN_004399c5 / 00439b42 等: 切 ps_*04 row 4 (frames 12/13/14), 每帧 hold 0x14=20 ticks=800ms.
     # 玩家: 走完 fall 永久 hold (尸体, 可复活); 敌人: hold 一段后闪烁消失.
@@ -145,24 +146,23 @@ class BattleUnit:
 
     @property
     def display_hp(self) -> int:
-        """HUD 显示用 hp: 结算前显示旧值 (shown_hp_override), 结算后 = 真实 hp."""
+        """committed HP (= 显示值/真实表). 提交前显示受击前旧值, 提交后 = 工作缓冲 hp."""
         return self.shown_hp_override if self.shown_hp_override is not None else self.hp
 
     @property
     def display_weakened(self) -> bool:
-        """显示用虚弱判定 (基于 display_hp, 让虚弱色/姿态跟 HUD 数字一起在结算时变)."""
+        """显示用虚弱判定 (基于 committed display_hp, 让虚弱色/姿态跟 HP 一起在提交时变)."""
         h = self.display_hp
         return h > 0 and h * 100 < self.max_hp * 40
 
-    def release_hp_display(self) -> None:
-        """数字落定时更新 HP 显示 (原版: HP 在数字闪烁前减少). 存活 → 显示真实 hp;
-        死亡 → 保留 shown_hp_override (= 受击前旧值, 原版死亡闪烁期不显 0, 保持原值直到消失)."""
+    def commit_hp(self) -> None:
+        """提交工作缓冲 → committed 显示值 (原版动作结束/受击反应后 commit 回真实表).
+        存活 → 显示同步到 hp; 死亡 → 保留旧值 (原版死亡闪烁期不显 0, 保持原值直到消失)."""
         if self.alive:
             self.shown_hp_override = None
 
-    def settle_damage(self) -> None:
-        """结算死亡/虚弱视觉 (数字闪烁时放行). HP 数字显示由 release_hp_display 单独控制
-        (落定即更新, 早于此)."""
+    def release_death_visual(self) -> None:
+        """放行死亡/虚弱视觉门控 (由数字闪烁信号触发). 之前一直保持站立呼吸."""
         self.settle_pending = False
         self.settle_batch = False
 

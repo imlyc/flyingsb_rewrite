@@ -31,8 +31,8 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
     _tick_unit_positions(scene, dt_ms)
     input_mod.poll_player_hold(scene, dt_ms)
     _ingest_damage_events(scene, now)
-    _tick_reactions(scene, dt_ms)
-    _tick_damage_settlement(scene, now)
+    _tick_reactions(scene, dt_ms)            # 受击反应结束 → commit HP (原版 case0xb 在反应后提交)
+    _tick_damage_signals(scene, now)         # 飘字闪烁信号 → 触发死亡动画 (原版数字闪烁驱动)
     _tick_death_animations(scene, now, dt_ms)
     _tick_anim_engine(scene, dt_ms)
 
@@ -141,64 +141,53 @@ def _ingest_damage_events(scene: "BattleScene", now: int) -> None:
         # 同位置先前的 float 全部 demote (instant remove), 只留新一发
         scene._floats = [f for f in scene._floats
                          if abs(f.world_x - wx) > 4 or abs(f.world_y - wy) > 4]
-        scene._floats.append(FloatText(ev.damage, ev.remaining_hp, wx, wy, now,
-                                       miss=ev.miss, heal=ev.heal))
+        ft = FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss, heal=ev.heal)
+        # 绑定受击单位 → 飘字自驱发"闪烁"信号给它 (仿原版数字 entity 发 signal). 含已死单位.
+        ft.target_unit = next((u for u in scene.battle.all_units
+                               if u.x == ev.x and u.y == ev.y), None)
+        scene._floats.append(ft)
     scene.battle.damage_events.clear()
     scene._floats = [f for f in scene._floats if f.alive(now)]
 
 
 def _tick_reactions(scene: "BattleScene", dt_ms: int) -> None:
-    """推进 reaction 序列 (受击 / 闪避). 结束后还原朝向 (阵亡保持面向攻击者)."""
+    """推进 reaction 序列 (受击 / 闪避). 受击反应**结束**时 commit HP (原版: 动作动画结束/反应后
+    把工作缓冲提交回真实表 = 显示值; 早于数字闪烁). 存活 → 显示同步真实 hp + 虚弱; 死亡 → 保留旧值."""
     for unit in scene.battle.all_units:
-        if unit.reaction_seq is not None:
-            advance_reaction(unit, dt_ms)
+        if unit.reaction_seq is None:
+            continue
+        advance_reaction(unit, dt_ms)
+        if unit.reaction_seq is None and not unit.settle_batch:   # 刚结束 (非大金刚批量)
+            unit.commit_hp()
 
 
-def _tick_damage_settlement(scene: "BattleScene", now: int) -> None:
-    """伤害结算门控 (原版分两个节点, 都在受击反应结束后):
-      (1) **HP 数字减少**: 伤害数字"落定" (rise 结束, 进 hold) 时 — 早于闪烁.
-          存活 → 显示更新到真实 hp; 死亡 → 保留旧值 (原版死亡闪烁期不显 0, 保持原值直到消失).
-      (2) **虚弱/死亡视觉**: 伤害数字进 flash 阶段时放行.
-    大金刚等 settle_batch unit 跳过 (等 son_transform 全砸完批量结算 = 最后一个敌人受击结束).
-    """
-    for unit in scene.battle.all_units:
-        if unit.settle_batch or unit.reaction_seq is not None:
-            continue                     # 批量结算 / 受击反应未结束
-        landed = flashing = False
-        has_float = False
-        for f in scene._floats:
-            if abs(f.world_x - (unit.x * TILE_W + TILE_W // 2)) <= TILE_W:
-                has_float = True
-                if f.landed_at(now):
-                    landed = True
-                if f.flash_started_at(now):
-                    flashing = True
-        # (1) 数字落定 (或无数字兜底) → HP 显示更新
-        if unit.shown_hp_override is not None and (landed or not has_float):
-            unit.release_hp_display()
-        # (2) 数字闪烁 (或无数字兜底) → 虚弱/死亡视觉放行
-        if unit.settle_pending and (flashing or not has_float):
-            unit.settle_damage()
+def _on_damage_flash(scene: "BattleScene", unit) -> None:
+    """伤害数字"闪烁"信号 handler: 放行死亡/虚弱视觉, 致死单位启动死亡动画
+    (原版: 死亡动画在数字闪烁时触发). 大金刚 settle_batch 由批量处理, 跳过."""
+    if unit.settle_batch:
+        return
+    unit.release_death_visual()
+    if not unit.alive and unit.reaction_seq is None and unit.death_anim_time_ms < 0:
+        unit.death_anim_time_ms = 0
+
+
+def _tick_damage_signals(scene: "BattleScene", now: int) -> None:
+    """飘字 entity 自驱的"闪烁"信号 → 触发死亡 (替代每帧轮询). 每发数字首次进 flash 发一次."""
+    for f in scene._floats:
+        if f.target_unit is not None and f.take_flash_signal(now):
+            _on_damage_flash(scene, f.target_unit)
 
 
 def _tick_death_animations(scene: "BattleScene", now: int, dt_ms: int) -> None:
-    """死亡动画计时: HP=0 + reaction 已结束 + 该 unit 的最近一发伤害数字进入 flash 阶段
-    → 启动死亡 tick. 跟原版"死亡动画在数字闪烁时触发"对齐."""
+    """死亡动画计时累加 (启动主路径 = _on_damage_flash 闪烁信号). 兜底: 视觉已放行
+    (settle_pending 已清) 且反应结束但死亡未启动 (如反应罕见地晚于闪烁) → 补启动."""
     for unit in scene.battle.all_units:
-        if unit.hp > 0 or unit.reaction_seq is not None:
+        if unit.hp > 0:
             continue
-        if unit.settle_pending:      # AOE 延迟结算: 未释放前不启动死亡动画
-            continue
-        if unit.death_anim_time_ms < 0:
-            # 找该 unit 的最近一发伤害数字, 看是否进 flash
-            ready = False
-            for f in scene._floats:
-                if (abs(f.world_x - (unit.x * TILE_W + TILE_W // 2)) <= TILE_W
-                        and f.flash_started_at(now)):
-                    ready = True; break
-            if ready or not scene._floats:    # 没数字也立即开 (配置缺失兜底)
-                unit.death_anim_time_ms = 0
-        else:
+        if (unit.death_anim_time_ms < 0 and not unit.settle_pending
+                and not unit.settle_batch and unit.reaction_seq is None):
+            unit.death_anim_time_ms = 0
+        if unit.death_anim_time_ms >= 0:
             unit.death_anim_time_ms += dt_ms
 
 

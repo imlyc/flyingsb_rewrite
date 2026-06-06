@@ -211,8 +211,8 @@ def _eson_settle_all(victims) -> None:
     for v in victims:
         if not (v.settle_pending or v.settle_batch):
             continue
-        v.release_hp_display()   # 存活 → 显示真实 hp; 死亡 → 保留旧值 (不显 0)
-        v.settle_damage()        # 解除 settle_pending/settle_batch (虚弱/死亡视觉放行)
+        v.commit_hp()            # 提交工作缓冲 → 显示 (存活同步真值; 死亡保留旧值不显 0)
+        v.release_death_visual() # 放行 settle_pending/settle_batch (虚弱/死亡视觉)
         # 死亡者绕过逐发飘字门控, 同一 tick 一起开始死亡动画 (保证同步).
         if not v.alive and v.death_anim_time_ms < 0:
             v.death_anim_time_ms = 0
