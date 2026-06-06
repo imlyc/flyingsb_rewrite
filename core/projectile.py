@@ -127,61 +127,126 @@ def spawn_cloudwave_projectile(battle, attacker, target_tile: tuple[int, int]) -
 
 
 # =========================================================================
-# 凤凰掌 0x17 三藏 — exe @0x4fe964 spawn + @0x4fe717 think_fn + @0x67312c traj
+# 凤凰掌 0x17 三藏 — 严格还原 exe (caster dispatcher FUN_004febad + phoenix think FUN_004fe717)
 # =========================================================================
-# Exe flow:
-#   spawn 在 caster + 小偏移, mode 0x31 (toward-target spring), atlas 269-272 per facing.
-#   state 0: attach 出现 seq (atlas N frames 0-4 @ 4 ticks each, exe @0x67312c[facing])
-#   state 10: physics tick spring-toward-target. 当 entity 经过 target tile (e.g. UP: entity.y <=
-#             target.y) → 翻转速度 step. 进 state 20.
-#   state 20: 继续 physics (= 现在远离 target 飞出去). 当 entity 跑出屏幕 (-100/+540 边界) →
-#             SIG -200 + -205 + destroy.
+# Exe 真实流程 (2026-06-01 重新逆向):
+#   1. caster 念咒 (csam_g4 @0x6733ac) IMPACT(-100) → FUN_004fe964 spawn 凤凰.
+#   2. 凤凰 think FUN_004fe717:
+#      - state 0:  **不调物理**, 只等 grow seq (0x67312c, atlas 帧 0-4, 每帧 4 tick) 跑完
+#                  → 即凤凰**在 caster 原地由小变大, 无位移**. 跑完挂飞行 seq (0x6731ec) 进 state 10.
+#      - state 10: 调物理 (mode 0x31 弹簧朝 target), 飞行 seq = 帧 5-8 循环 (扑翅). 抵达 target → state 20.
+#      - state 20: 继续飞出屏幕 → 发 -200.
+#   3. caster dispatcher 收 -200 → 爆炸阶段 (state 0x28): 每 4 tick 在 target 周围随机散布
+#      (±32px x, +24px y, 72±32px 高) spawn 1 个 **efock01 爆炸** (FUN_004feb72→think FUN_004feb17,
+#      efock01 seq 0x655e58 帧 0-7), 共 8 个, 每个音效 0xd7. 8 个放完 (state 0x32) 才结算伤害+受击.
 #
-# 我们简化: 用 4 phase 状态机.
-#   FLYING_OUT: 从 caster 朝 target 飞, linear velocity. 抵 target 时 → SIG_IMPACT_2 + 切 FLYING_BACK
-#   FLYING_BACK: 沿原速度反向, 飞 30 tick → destroy
+# 工程实现: 凤凰用 think_fn 全手动驱动 (长大→飞→爆), 爆炸 burst 用独立 seq entity (自动 exit).
+#   damage 在 8 个 burst 全 spawn 后发 SIG_IMPACT_2 (= 原版"爆完才结算"), 爆炸期 phoenix
+#   (projectile, state≠20) 存活挡住回合结束.
 PHOENIX_ATLAS_BY_FACING = (269, 270, 271, 272)  # UP/DN/LF/RT, exe esam03a/b/c/d
-PHOENIX_SPEED_PX_PER_TICK = 12      # 飞行速度 (px/tick @ 30ms = 400 px/s)
-PHOENIX_BACK_TICKS = 30             # IMPACT 后飞 30 tick 退场
 
-_PHOENIX_STATE_OUT = 0
-_PHOENIX_STATE_BACK = 1
-_PHOENIX_STATE_DONE = 2
+PHOENIX_GROW_FRAMES = 5             # 原地长大帧 0-4 (exe grow seq 0x67312c)
+PHOENIX_GROW_FRAME_TICKS = 4       # 每帧 4 tick (exe), 5×4 = 20 tick 长大
+PHOENIX_FLAP_FRAMES = (5, 6, 7, 8)  # 飞行扑翅循环帧 5-8 (exe flight seq 0x6731ec)
+PHOENIX_FLAP_FRAME_TICKS = 4
+PHOENIX_SPEED_PX_PER_TICK = 12      # 飞行速度 (px/tick)
+
+EFOCK01_ATLAS = 291                 # efock01 爆炸 atlas
+# efock01 爆炸 seq (exe @0x655e58, 帧 0-7, ticks 1/1/3/3/3/4/6/6 = 27 tick ≈ 1080ms)
+EFOCK01_EXPLOSION_SEQ: list[tuple] = [
+    ('fm', EFOCK01_ATLAS, 0, 1), ('fm', EFOCK01_ATLAS, 1, 1),
+    ('fm', EFOCK01_ATLAS, 2, 3), ('fm', EFOCK01_ATLAS, 3, 3),
+    ('fm', EFOCK01_ATLAS, 4, 3), ('fm', EFOCK01_ATLAS, 5, 4),
+    ('fm', EFOCK01_ATLAS, 6, 6), ('fm', EFOCK01_ATLAS, 7, 6),
+    ('exit',),
+]
+PHOENIX_BURST_COUNT = 8            # 爆炸数 (exe +0x42 == 8)
+PHOENIX_BURST_INTERVAL = 4        # 每 4 tick 1 爆 (exe +0x190 + 4 <= tick)
+PHOENIX_BURST_SCATTER_PX = 32     # ±32px 水平散布 (exe rand%0x40 - 0x20)
+PHOENIX_BURST_Y_OFFSET = 24       # +24px (exe +0x180000)
+PHOENIX_BURST_Z_BASE = 72         # 72px 高 (exe +0x480000)
+
+_PHOENIX_GROW = 0
+_PHOENIX_FLY = 10
+_PHOENIX_EXPLODE = 14
+_PHOENIX_DONE = 30                 # 避开 20 (= units_animating PROJ_DONE)
+
+
+def _phoenix_flap(e: "Entity") -> None:
+    """飞行扑翅: 帧 5-8 循环 (每帧 PHOENIX_FLAP_FRAME_TICKS tick)."""
+    ud = e.user_data
+    ud['flap'] = ud.get('flap', 0) + 1
+    idx = (ud['flap'] // PHOENIX_FLAP_FRAME_TICKS) % len(PHOENIX_FLAP_FRAMES)
+    e.frame_idx = PHOENIX_FLAP_FRAMES[idx]
+
+
+def _spawn_efock_burst(battle, e: "Entity") -> None:
+    """在 target 周围随机散布 spawn 1 个 efock01 爆炸 (exe state 0x28 单次)."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    rng = battle.rng
+    ud = e.user_data
+    ox = rng.randint(-PHOENIX_BURST_SCATTER_PX, PHOENIX_BURST_SCATTER_PX)
+    zoff = PHOENIX_BURST_Z_BASE + rng.randint(-PHOENIX_BURST_SCATTER_PX, PHOENIX_BURST_SCATTER_PX)
+    b = battle.engine.spawn()
+    b.x = ud['target_x'] + (ox << 16)
+    b.y = ud['target_y'] + (PHOENIX_BURST_Y_OFFSET << 16)
+    b.z = -(zoff << 16)                 # 负 z = 上空 (高度)
+    b.atlas_slot = EFOCK01_ATLAS
+    b.frame_idx = 0
+    b.user_data['kind'] = 'hit_effect'
+    battle.engine.attach_seq(b, tuple_to_bytecode(EFOCK01_EXPLOSION_SEQ))
 
 
 def phoenix_think_fn(e: "Entity", eng: "Engine") -> None:
-    if e.state_code == _PHOENIX_STATE_OUT:
+    ud = e.user_data
+    if 'target_x' not in ud:
+        return  # init call
+
+    if e.state_code == _PHOENIX_GROW:
+        # 原地由小变大 (帧 0-4), 无位移. 长大完成 → 起飞.
+        ud['grow'] = ud.get('grow', 0) + 1
+        fr = ud['grow'] // PHOENIX_GROW_FRAME_TICKS
+        if fr >= PHOENIX_GROW_FRAMES:
+            e.frame_idx = PHOENIX_FLAP_FRAMES[0]
+            e.state_code = _PHOENIX_FLY
+        else:
+            e.frame_idx = fr
+
+    elif e.state_code == _PHOENIX_FLY:
         e.x += e.vx
         e.y += e.vy
-        # 检测是否经过 target (= 速度方向跨过 target 坐标)
-        tx = e.user_data['target_x']
-        ty = e.user_data['target_y']
-        passed = False
-        if e.vx > 0 and e.x >= tx: passed = True
-        elif e.vx < 0 and e.x <= tx: passed = True
-        elif e.vy > 0 and e.y >= ty: passed = True
-        elif e.vy < 0 and e.y <= ty: passed = True
+        _phoenix_flap(e)
+        # 抵达 target (速度方向跨过 target 坐标) → 进爆炸阶段
+        tx, ty = ud['target_x'], ud['target_y']
+        passed = ((e.vx > 0 and e.x >= tx) or (e.vx < 0 and e.x <= tx)
+                  or (e.vy > 0 and e.y >= ty) or (e.vy < 0 and e.y <= ty))
         if passed:
-            eng._signal(e, SIG_IMPACT_2)
-            e.user_data['back_ticks'] = 0
-            e.state_code = _PHOENIX_STATE_BACK
-    elif e.state_code == _PHOENIX_STATE_BACK:
-        # 继续匀速冲过 target, 直到 BACK_TICKS 收尾
-        e.x += e.vx
+            ud['burst_n'] = 0
+            ud['burst_tick'] = PHOENIX_BURST_INTERVAL    # 立即放第一爆
+            e.state_code = _PHOENIX_EXPLODE
+
+    elif e.state_code == _PHOENIX_EXPLODE:
+        e.x += e.vx                       # 凤凰继续飞出屏幕 (exe state 20)
         e.y += e.vy
-        e.user_data['back_ticks'] += 1
-        if e.user_data['back_ticks'] >= PHOENIX_BACK_TICKS:
-            eng._signal(e, SIG_END)
-            eng.destroy(e)
-            e.state_code = _PHOENIX_STATE_DONE
+        _phoenix_flap(e)
+        ud['burst_tick'] += 1
+        if ud['burst_tick'] >= PHOENIX_BURST_INTERVAL:
+            ud['burst_tick'] = 0
+            _spawn_efock_burst(ud['battle'], e)
+            ud['burst_n'] += 1
+            if ud['burst_n'] >= PHOENIX_BURST_COUNT:
+                # 8 爆放完 → 结算伤害 + 收尾 (exe state 0x32)
+                eng._signal(e, SIG_IMPACT_2)
+                eng._signal(e, SIG_END)
+                eng.destroy(e)
+                e.state_code = _PHOENIX_DONE
 
 
 def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Entity":
-    """spawn 凤凰掌 — phoenix 从 caster 朝 cursor 飞, 抵达时 SIG_IMPACT_2 触发伤害, 继续飞过去退场.
-    atlas 按 caster facing 选 (UP=269/DN=270/LF=271/RT=272 = esam03a/b/c/d).
+    """spawn 凤凰掌 — 凤凰在 caster 原地由小变大 → 飞向 cursor → 抵达后在敌人周围连爆 8 个
+    efock01 → 爆完发 SIG_IMPACT_2 结算伤害. atlas 按 caster facing 选 (269-272 = esam03a/b/c/d).
     """
     from core.sprites.base import TILE_W, TILE_H
-    from core.anim_engine.bytecode import tuple_to_bytecode
     from core.reaction_seq import facing_to_seq_index
     eng = battle.engine
 
@@ -189,9 +254,7 @@ def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     atlas = PHOENIX_ATLAS_BY_FACING[facing_idx]
     fx, fy = attacker.facing
 
-    # 出生点: caster tile 中心 + facing 方向半 tile 偏移 (= 出 caster 身体), 高度抬到胸口.
-    # 参考 exe FUN_004fe964: spawn 在 caster.x/y, z += 32 (高度), 然后按 facing 加 ±24/32 偏移.
-    # 我们 TILE_W=64 → 半 tile = 32; 角色身高 ~80 → 胸口 ≈ -40 (在 tile 中心上 40).
+    # 出生点: caster tile 中心 + facing 半 tile 偏移 (出身体前方), 高度抬到胸口.
     spawn_x_px = attacker.x * TILE_W + TILE_W // 2 + fx * (TILE_W // 2)
     spawn_y_px = attacker.y * TILE_H + TILE_H // 2 + fy * (TILE_H // 2)
     tx, ty = target_tile
@@ -210,13 +273,10 @@ def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     e.flags |= 0x40
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
+    e.user_data['battle'] = battle
     e.user_data['target_x'] = target_x_px * FP_ONE
     e.user_data['target_y'] = target_y_px * FP_ONE
-    e.state_code = _PHOENIX_STATE_OUT
-    # 9 帧完整生长 (0=小火球 → 8=巨大爆炸), 每帧 3 tick = 27 tick 总, 跟飞行 32 tick 长度匹配.
-    # exe 用 4 tick/帧 (20 + 16 = 36 tick), 但分两段 seq attach (0x67312c 然后 0x6731ec). 我们合并 + 提速.
-    seq = [('fm', atlas, i, 3) for i in range(9)] + [('fm', atlas, 8, 60), ('exit',)]
-    eng.attach_seq(e, tuple_to_bytecode(seq))
+    e.state_code = _PHOENIX_GROW       # 先原地长大 (think_fn 全手动驱动, 不挂 seq)
     return e
 
 
