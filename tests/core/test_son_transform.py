@@ -216,6 +216,73 @@ def test_qinglong_ice_cone_shatter_sequence():
     assert d1_react_ticks > 30, f"冰锥雨期敌人应持续受击动画, 实际 {d1_react_ticks} tick"
 
 
+def test_baihu_whirlwind_attack():
+    """白虎: 神兽 (eson03 256) 盘踞 + 旋风 (ehari00 295 旋涡环升起成柱) + 敌人击退抖动 + 伤害."""
+    from core.son_transform import (WIND_ATLAS, BH_ATLAS, BH_WIND_HEIGHT,
+                                     WIND_TOP as WIND_TORNADO_HEIGHT, start_son_transform)
+    from core.fm_frames import FM_FRAMES
+    from core.raw_attack_seqs import atlas_resource
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x02
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x02)
+
+    def wind_renderable(e):
+        if e.user_data.get('kind') != 'hit_effect' or not e.user_data.get('ring'):
+            return False
+        if not e.is_playing() and not e.user_data.get('projectile'):
+            return False
+        fr = FM_FRAMES.get(atlas_resource(e.atlas_slot & 0xffff))
+        return e.atlas_slot == WIND_ATLAS and fr is not None and 0 <= e.frame_idx < len(fr)
+
+    saw_beast = 0
+    max_column_h = 0
+    reached_wind_h = False
+    max_lift = 0.0
+    spin_cols_seen = set()
+    landed_after_lift = False
+    react_during_spin = False        # 腾空旋转期不应有受击 (用户确认)
+    react_after_land = False         # 摔落地面才受击
+    for _ in range(500):
+        b.engine.tick()
+        airborne = d1.wind_spin_col >= 0 or d1.wind_lift > 0
+        if d1.reaction_seq is not None:
+            if airborne:
+                react_during_spin = True
+            elif max_lift > 30:      # 已经腾空过又落地后才受击
+                react_after_land = True
+        if abs(d1.wind_lift - BH_WIND_HEIGHT) < 18:   # 阶段1 浮到过风高度附近
+            reached_wind_h = True
+        max_lift = max(max_lift, d1.wind_lift)
+        if d1.wind_spin_col >= 0:                     # 腾空旋转 = 切换不同朝向帧
+            spin_cols_seen.add(d1.wind_spin_col)
+        if max_lift > 30 and d1.wind_lift == 0.0:
+            landed_after_lift = True
+        for e in b.engine.entities:
+            if wind_renderable(e):
+                max_column_h = max(max_column_h, -(e.z >> 16))
+            if e.atlas_slot == BH_ATLAS and e.user_data.get('victims') is not None:
+                saw_beast += 1
+        if b._pending_turn_end:
+            break
+    assert saw_beast > 0, "白虎神兽本体应在场"
+    assert max_column_h > WIND_TORNADO_HEIGHT // 2, f"旋涡环应升起成旋风柱, 峰高 {max_column_h}"
+    # 阶段1: 浮到风高度; 阶段2: 抛得明显更高 (fling 峰 >> 风高度)
+    assert reached_wind_h, "阶段1 应浮到风高度附近"
+    assert max_lift > BH_WIND_HEIGHT + 30, f"阶段2 应抛向天空 (远高于风高度), 峰={max_lift}"
+    # 腾空旋转 = 切换 4 个朝向帧 (绕中轴线), 非 2D 图片旋转
+    assert len(spin_cols_seen) == 4, f"腾空应循环 4 朝向帧旋转, 实际见 {sorted(spin_cols_seen)}"
+    assert landed_after_lift, "敌人抛起后应落回地面"
+    # 受击特效只在摔落地面时, 旋转/腾空期间无
+    assert not react_during_spin, "阶段1 旋转/腾空期间不应有受击特效"
+    assert react_after_land, "摔落地面时应有受击 (= 伤害结算)"
+    assert d1.hp < 50 and d2.hp < 50, "白虎应伤到两敌"
+    assert b._pending_turn_end is True
+
+
 def test_son_aoe_placeholder_skills_damage():
     """酷酷猫/分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
     for sid in (0x03, 0x04, 0x08):

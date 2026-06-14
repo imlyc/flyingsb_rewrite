@@ -36,7 +36,7 @@ FP_ONE = 0x10000
 SON_BEAST_CONFIG: dict[int, tuple] = {
     0x00: ('eson01',),
     0x01: ('qinglong', 255),    # 青龙 eson02: 盘踞神兽 + 冰锥雨 (见 video 1:00:48)
-    0x02: ('sweep', 256, 4),    # 白虎 eson03
+    0x02: ('baihu', 256),       # 白虎 eson03: 盘踞神兽 + 旋风 (以风击退敌人, ehari00 旋涡)
     0x03: ('aoe',),             # 酷酷猫 (TODO eson04a-e 257-261)
     0x04: ('aoe',),             # 分身术 (TODO 4 分身)
     0x05: ('sweep', 262, 1),    # 朱雀 eson05
@@ -57,6 +57,8 @@ def _spawn_beast_attack(battle, caster, coord: "Entity") -> None:
         spawn_eson01_attack(battle, caster, coord)
     elif kind == 'qinglong':
         spawn_qinglong_beast(battle, caster, coord, cfg[1])
+    elif kind == 'baihu':
+        spawn_baihu_beast(battle, caster, coord, cfg[1])
     elif kind == 'sweep':
         spawn_sweep_beast(battle, caster, coord, cfg[1], cfg[2])
     else:
@@ -683,6 +685,194 @@ def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.x, e.y = _victim_ground(caster)        # 战场中心 = caster tile
     e.z = -QL_DESCEND_HEIGHT << 16
     e.state_code = _QL_DESCEND
+
+
+# ============ 白虎: 盘踞神兽 + 旋风 (技能描述: 化身白虎以风击退敌人. video flyingsb6 3:15) ============
+# 原版: 白虎神兽 (eson03 atlas256) 落到中心盘踞 (coil seq 0x671b48 = 帧 0,1,2,3,1); 对每个敌人
+# 卷起**旋风/龙卷** — exe FUN_004da929 用 ehari00 (atlas295) 旋涡环, 按高度分帧组叠成竖直旋转柱;
+# 敌人被风**击退/抖动** (弹簧物理). 我们: 每敌持续从脚下升起 ehari00 旋涡环堆成旋风柱 + 受击抖动.
+BH_ATLAS = 256
+BH_COIL_FRAMES = (0, 1, 2, 3, 1)   # exe seq 0x671b48
+BH_DESCEND_HEIGHT = 220
+BH_DESCEND_VZ = 22
+BH_ATTACK_TICKS = 80             # 阶段1: 浮到风高度+旋转+旋风 (exe tick 8~0x78)
+BH_FLING_TICKS = 14              # 阶段2: 抛向天空 (exe 0x77<tick<0x8c 强力上推 +0x40000)
+BH_FALL_MAX_TICKS = 110          # 落下兜底上限 (抛出屏外, 落回耗时较长)
+BH_WIND_INTERVAL = 4            # 每 4 tick 每敌升一对旋涡环 (exe tick%4)
+# 敌人被风吹起 (exe FUN_004da9ed): 阶段1浮到风高度(z<0x64=100), 阶段2强力抛飞, 落地结算伤害.
+BH_WIND_HEIGHT = 82            # 阶段1风高度 px
+BH_LIFT_ACCEL = 0.55           # 阶段1上吹加速 (exe 0x21999)
+BH_LIFT_GRAVITY = 0.5          # 重力 (exe spring accel 0x20000)
+BH_FLING_ACCEL = 2.6           # 阶段2强力上推 (exe 0x40000, 远大于阶段1) → 抛出屏顶 (峰 ~570px)
+BH_FALL_GRAVITY = 1.1          # 落下重力 (比上吹重力大, 摔得干脆)
+# 腾空旋转: 切 idle row4 4 列(朝向) = 绕中轴线转. exe seq 0x656ef8 帧序 16,19,17,18 = 列 0,3,1,2
+# = UP,RIGHT,DOWN,LEFT (direction_cols UP=0/DOWN=1/LEFT=2/RIGHT=3), 每帧 3 tick.
+BH_SPIN_COLS = (0, 3, 1, 2)
+BH_SPIN_FRAME_TICKS = 3
+WIND_ATLAS = 295                 # ehari00 旋涡环
+# ehari00 21 帧 = 旋涡环由大到小. exe 按高度 8 段 (每 16px) 选环: **低=小环(18-20), 高=大环(0-2)**.
+WIND_BANDS = (
+    (18, 19, 20), (15, 16, 17), (12, 13, 14), (9, 10, 11),
+    (6, 7, 8), (3, 4, 5), (0, 1, 2), (0, 1, 2),
+)
+WIND_BAND_PX = 16                # 每段 16px (exe (z>>16)>>4)
+WIND_TOP = 128                   # 旋风柱总高 (8 段 × 16, exe z>0x80 消失)
+WIND_RING_VZ = 6                # 旋涡环上升 px/tick
+WIND_RADIUS = 17                 # 旋涡环绕敌人半径 px
+_BH_DESCEND = 0
+_BH_ATTACK = 1
+_BH_FLING = 2
+_BH_FALL = 3
+_BH_RISE = 4
+
+
+def whirlwind_ring_think(e: "Entity", eng: "Engine") -> None:
+    """旋涡环: 从敌人脚下升起, 按高度换环大小 (低小高大) + 旋转, 升到顶消失. 双股螺旋叠成旋风柱."""
+    ud = e.user_data
+    if 'ring' not in ud:
+        return
+    e.z -= WIND_RING_VZ << 16            # 上升 (我们约定上空 = 负 z)
+    ud['life'] += 1
+    h = -(e.z >> 16)                     # 当前高度 px
+    band = min(7, max(0, h // WIND_BAND_PX))
+    e.frame_idx = WIND_BANDS[band][(ud['life'] // 2) % 3]
+    if h >= WIND_TOP:
+        eng.destroy(e)
+
+
+def _spawn_wind_pair(battle, vx, vy, phase) -> None:
+    """在敌人两侧 (相位差 180°) 各升一个旋涡环 = 两股风; phase 每次旋转 → 双螺旋."""
+    import math
+    for dphase in (0.0, math.pi):
+        a = phase + dphase
+        ox = int(math.cos(a) * WIND_RADIUS) << 16
+        oy = int(math.sin(a) * WIND_RADIUS * 0.4) << 16   # 椭圆 (俯视透视)
+        e = battle.engine.spawn(think_fn=whirlwind_ring_think)
+        e.atlas_slot = WIND_ATLAS
+        e.frame_idx = WIND_BANDS[0][0]
+        e.flags |= 0x40
+        e.x = vx + ox
+        e.y = vy + oy
+        e.z = 0
+        e.user_data['kind'] = 'hit_effect'
+        e.user_data['projectile'] = True
+        e.user_data['ring'] = True
+        e.user_data['life'] = 0
+
+
+def _bh_update_airborne(ud, mode: str) -> bool:
+    """更新每个 victim 腾空 + 旋转. mode: 'float'=浮到风高度 / 'fling'=强力抛飞 / 'fall'=只重力落下.
+    返回是否全部已落地 (FALL 阶段判结算)."""
+    lifts = ud.setdefault('lift_vz', {})
+    ud['spin_phase'] = ud.get('spin_phase', 0) + 1
+    spin_col = BH_SPIN_COLS[(ud['spin_phase'] // BH_SPIN_FRAME_TICKS) % 4]   # 切朝向 = 转
+    all_landed = True
+    for v in ud['victims']:
+        if not v.alive:
+            continue
+        vz = lifts.get(id(v), 0.0)
+        if mode == 'float':
+            if v.wind_lift < BH_WIND_HEIGHT:
+                vz += BH_LIFT_ACCEL
+            vz -= BH_LIFT_GRAVITY
+        elif mode == 'fling':
+            vz += BH_FLING_ACCEL
+            vz -= BH_LIFT_GRAVITY
+        else:                                  # fall (重力更大, 摔得干脆)
+            vz -= BH_FALL_GRAVITY
+        v.wind_lift = max(0.0, v.wind_lift + vz)
+        if v.wind_lift <= 0.0:
+            vz = 0.0
+            v.wind_spin_col = -1               # 落地 → 停转 (恢复正常朝向渲染)
+        else:
+            all_landed = False
+            v.wind_spin_col = spin_col          # 腾空 → 绕中轴线切朝向旋转
+        lifts[id(v)] = vz
+    return all_landed
+
+
+def baihu_beast_think(e: "Entity", eng: "Engine") -> None:
+    ud = e.user_data
+    if 'victims' not in ud:
+        return
+    battle, caster = ud['battle'], ud['caster']
+    if e.state_code == _BH_DESCEND:
+        e.z += BH_DESCEND_VZ << 16
+        _bh_coil(e)
+        if e.z >= 0:
+            e.z = 0
+            ud['atk_tick'] = 0
+            e.state_code = _BH_ATTACK
+    elif e.state_code == _BH_ATTACK:                  # 阶段1: 浮到风高度 + 旋转 + 旋风
+        _bh_coil(e)
+        ud['atk_tick'] += 1
+        t = ud['atk_tick']
+        _bh_update_airborne(ud, 'float')
+        ud['phase'] += 0.4                            # 双螺旋相位旋转
+        if t % BH_WIND_INTERVAL == 0:                 # 两股风: 每敌两侧各升旋涡环
+            for v in ud['victims']:
+                if v.alive:
+                    vx, vy = _victim_ground(v)
+                    _spawn_wind_pair(battle, vx, vy, ud['phase'])
+        # 注: 阶段1(浮+旋转)无受击特效; 受击/命中特效只在最后摔落地面时由 _aoe_hit_all 触发 (用户确认)
+        if t >= BH_ATTACK_TICKS:
+            ud['fling_tick'] = 0
+            e.state_code = _BH_FLING
+    elif e.state_code == _BH_FLING:                   # 阶段2: 抛向天空
+        _bh_coil(e)
+        ud['fling_tick'] += 1
+        _bh_update_airborne(ud, 'fling')
+        if ud['fling_tick'] >= BH_FLING_TICKS:
+            ud['fall_tick'] = 0
+            e.state_code = _BH_FALL
+    elif e.state_code == _BH_FALL:                    # 落下 → 落地结算伤害
+        _bh_coil(e)
+        ud['fall_tick'] += 1
+        landed = _bh_update_airborne(ud, 'fall')
+        if landed or ud['fall_tick'] >= BH_FALL_MAX_TICKS:
+            for v in ud['victims']:
+                v.wind_lift = 0.0
+                v.wind_spin_col = -1
+            _aoe_hit_all(battle, caster, ud['victims'])   # 摔地受伤 (exe z<1 发 -200/-250)
+            e.state_code = _BH_RISE
+    elif e.state_code == _BH_RISE:
+        e.z -= BH_DESCEND_VZ << 16
+        _bh_coil(e)
+        if (e.z >> 16) <= -BH_DESCEND_HEIGHT:
+            for v in ud['victims']:
+                v.wind_lift = 0.0                     # 安全复位
+                v.wind_spin_col = -1
+            ud['coord'].user_data['eson_done'] = True
+            eng.destroy(e)
+
+
+def _bh_coil(e: "Entity") -> None:
+    ud = e.user_data
+    ud['anim_tick'] += 1
+    e.frame_idx = BH_COIL_FRAMES[(ud['anim_tick'] // QL_COIL_TICKS) % len(BH_COIL_FRAMES)]
+
+
+def spawn_baihu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
+    """白虎: 神兽落到中心盘踞 + 利爪连击 (爪痕 + 抖动) + 末尾伤害."""
+    coord.user_data['eson_done'] = False
+    victims = _eson_collect_victims(battle, caster)
+    e = battle.engine.spawn(think_fn=baihu_beast_think)
+    e.atlas_slot = atlas
+    e.frame_idx = 0
+    e.flags |= 0x40
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 10            # 神兽本体盖在爪痕之上
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['victims'] = victims
+    e.user_data['anim_tick'] = 0
+    e.user_data['atk_tick'] = 0
+    e.user_data['phase'] = 0.0
+    e.x, e.y = _victim_ground(caster)
+    e.z = -BH_DESCEND_HEIGHT << 16
+    e.state_code = _BH_DESCEND
 
 
 # ============ AOE 占位 (酷酷猫/分身术/超亂舞, 待做专属演出) ============

@@ -73,10 +73,11 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
             # dead_blink_off 已在 blink-off 帧 continue 跳过整个单位, 故这里照画即同步闪.
             _draw_enemy_hp_mp(scene, u, cx, cy)
             continue
-        # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块
+        # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块. 旋风吹起时本体上移 (影子留地面).
         r = rect.inflate(-8, -8)
+        body_cy = cy - int(round(u.wind_lift))
         if u.sprite_key:
-            _draw_live_sprite(scene, u, cx, cy)
+            _draw_live_sprite(scene, u, cx, body_cy)
         else:
             color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
             pygame.draw.rect(scene.surface, color, r)
@@ -123,6 +124,16 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
             return
         except (FileNotFoundError, ValueError):
             pass  # 加载失败退回正常 render
+    # 白虎旋风吹起: 显示 idle atlas06 row4(重击姿) 循环 4 列(朝向) = 绕中轴线旋转 (覆盖 reaction/locomotion)
+    if u.wind_spin_col >= 0:
+        try:
+            idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
+            frame = idle.sheet.frame(u.wind_spin_col, 4)        # row 4 = 重击姿 (exe 帧 16-19)
+            anchor = idle.sheet.feet_anchor(u.wind_spin_col, 0)
+            blit_unit(scene.surface, frame, anchor, tile_center_x=cx, tile_center_y=cy)
+            return
+        except FileNotFoundError:
+            pass
     # reaction 序列优先级最高: 用脚本指定的 atlas-06 帧 + 像素位移
     if u.reaction_seq is not None and u.reaction_frame is not None:
         try:

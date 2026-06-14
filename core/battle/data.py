@@ -103,6 +103,11 @@ class BattleUnit:
     pending_caster_coord: object | None = None             # 多阶段 B 类技能 coordinator entity (e.g. 破天舞)
                                                             # 非空 → tactics 拦截 caster.entity 的 IMPACT/END,
                                                             # 转发给 coord, 跳过常规结算/post_attack_anim
+    # 白虎旋风: 被风吹起的高度 (px, >0 = 离地腾空). 渲染时本体上移 wind_lift, 影子留地面.
+    wind_lift: float = 0.0
+    # 腾空旋转: 显示 idle atlas06 row4(重击姿) 的列号 = 朝向, 循环 UP→RIGHT→DOWN→LEFT 切帧
+    # = 绕自身中轴线转 (原版 seq 0x656ef8 = 帧16/19/17/18). -1 = 不旋转.
+    wind_spin_col: int = -1
     # 孙悟空召唤演出: caster 翻跟头隐现 (ps_CSON105). cast_flip_frame 非 None → render 显示
     # 翻跟头第 N 帧 (覆盖普通 sprite); cast_hidden → caster 完全不画 (神兽攻击阶段隐身).
     cast_flip_frame: int | None = None
