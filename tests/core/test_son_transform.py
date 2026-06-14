@@ -128,8 +128,97 @@ def test_dajingang_aoe_deferred_simultaneous_settle():
     assert d1.death_anim_time_ms >= 0 and d2.death_anim_time_ms >= 0
 
 
-def test_dajingang_is_son_transform_skill():
-    from core.son_transform import is_son_transform_skill
-    assert is_son_transform_skill(0x00) is True
+def test_all_10_son_skills_are_transform_skills():
+    from core.son_transform import is_son_transform_skill, SON_BEAST_CONFIG
+    for sid in range(0x00, 0x0a):
+        assert is_son_transform_skill(sid) is True
     assert is_son_transform_skill(0x14) is False   # 三藏南瓜破
     assert is_son_transform_skill(None) is False
+    assert set(SON_BEAST_CONFIG) == set(range(0x00, 0x0a))
+
+
+def _run_son_skill(sid):
+    """跑一个孙悟空技能到回合结束, 返回 (b, caster, d1, d2, beast_atlas_seen)."""
+    from core.son_transform import start_son_transform
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = sid
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), sid)
+    seen = set()
+    for _ in range(400):
+        b.engine.tick()
+        for e in b.engine.entities:
+            if e.atlas_slot in (255, 256, 262, 263, 264, 267):
+                seen.add(e.atlas_slot)
+        if b._pending_turn_end:
+            break
+    return b, caster, d1, d2, seen
+
+
+def test_son_sweep_beasts_spawn_and_damage():
+    """青龙/白虎/朱雀/玄武/月兔/凤凰: 召唤对应神兽 atlas, 范围伤害, 收尾."""
+    for sid, atlas in [(0x01, 255), (0x02, 256), (0x05, 262),
+                       (0x06, 263), (0x07, 264), (0x09, 267)]:
+        b, caster, d1, d2, seen = _run_son_skill(sid)
+        assert atlas in seen, f"skill 0x{sid:02x} 应召唤 atlas {atlas}, 实际 {seen}"
+        assert d1.hp < 50 and d2.hp < 50, f"skill 0x{sid:02x} 应伤到两敌"
+        assert caster.cast_flip_frame is None and not caster.cast_hidden
+        assert b._pending_turn_end is True
+
+
+def test_qinglong_ice_cone_shatter_sequence():
+    """青龙冰锥序列 (用户确认): 小冰锥(0-3)/大冰锥(28/31/34) 下落 → 落地碎裂为小冰块(12-23)."""
+    from core.son_transform import EICE_CONE_SMALL, EICE_CONE_BIG, EICE_SHATTER
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x01
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    from core.son_transform import start_son_transform
+    from core.fm_frames import FM_FRAMES
+    from core.raw_attack_seqs import atlas_resource
+    start_son_transform(b, caster, (7, 5), 0x01)
+
+    def render_frame(e):
+        # 复刻 hit_effect.draw 的渲染条件 (回归 "spawned 但 projectile 没设导致不渲染" bug)
+        if e.user_data.get('kind') != 'hit_effect' or not (e.flags & 0x40):
+            return None
+        if not e.is_playing() and not e.user_data.get('projectile'):
+            return None
+        fr = FM_FRAMES.get(atlas_resource(e.atlas_slot & 0xffff))
+        if e.atlas_slot != 300 or fr is None or not (0 <= e.frame_idx < len(fr)):
+            return None
+        return e.frame_idx
+
+    saw_cone = saw_big = saw_shatter = 0
+    d1_react_ticks = 0
+    for _ in range(600):
+        b.engine.tick()
+        if d1.reaction_seq is not None:      # 雨期受击反应 (用户问题1)
+            d1_react_ticks += 1
+        for e in b.engine.entities:
+            f = render_frame(e)
+            if f in EICE_CONE_SMALL:
+                saw_cone += 1
+            elif f in EICE_CONE_BIG:
+                saw_big += 1
+            elif f in EICE_SHATTER:
+                saw_shatter += 1
+        if b._pending_turn_end:
+            break
+    assert saw_cone > 0, "应有小冰锥下落 (frames 0-3)"
+    assert saw_big > 0, "应有大冰锥收尾 (frames 28/31/34)"
+    assert saw_shatter > 0, "冰锥落地应碎裂为小冰块 (frames 12-23)"
+    assert d1_react_ticks > 30, f"冰锥雨期敌人应持续受击动画, 实际 {d1_react_ticks} tick"
+
+
+def test_son_aoe_placeholder_skills_damage():
+    """酷酷猫/分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
+    for sid in (0x03, 0x04, 0x08):
+        b, caster, d1, d2, seen = _run_son_skill(sid)
+        assert d1.hp < 50 and d2.hp < 50
+        assert b._pending_turn_end is True
