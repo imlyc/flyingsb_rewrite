@@ -73,5 +73,25 @@ class Entity:
     # 自由扩展槽 (DOIT_melee 用 +0x3c..0x7d 当 impact_results, +0x110 当 caster.id 之类)
     user_data: dict = field(default_factory=dict)
 
+    # 池回收簿记 (engine 用): _born_tick = spawn 时的 tick 序号 (防本帧被 think); _pooled = 已归还空闲表.
+    _born_tick: int = -1
+    _pooled: bool = False
+
     def is_playing(self) -> bool:
         return bool(self.flags & 0x20000) and len(self.seq) > 0
+
+    def reset(self) -> None:
+        """复用槽位前清回初始态 (= 原版 entity slot 回收). 不动 id (= 固定槽位号)."""
+        self.flags = 0
+        self.x = self.y = self.z = 0
+        self.target_x = self.target_y = self.target_z = 0
+        self.pos_buf = b'\x00' * 0x24
+        self.atlas_base = self.atlas_slot = self.frame_idx = 0
+        self.save_atlas_base = self.save_atlas_slot = self.save_frame_idx = 0
+        self.think_fn = None
+        self.state_code = 0
+        self.seq = b''
+        self.ticks = self.offset = 0
+        self.vx = self.vy = self.vz = 0
+        self.signal_target = None
+        self.user_data = {}      # 新 dict (而非 clear): 任何对旧 dict 的悬挂引用看不到新数据

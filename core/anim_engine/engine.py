@@ -25,6 +25,8 @@ class Engine:
 
     def __init__(self):
         self.entities: list[Entity] = []
+        self._free: list[Entity] = []                # 空闲槽位 (destroy 归还, spawn 复用 = 原版留洞复用)
+        self._tick_id: int = 0                       # 当前 tick 序号 (本帧出生的实体不在本帧被 think)
         self.active_action: Optional[Entity] = None  # 对应 exe DAT_008698dc
         self.swing_sound: int = -1                   # 对应 0x6566c0
         self._break: bool = False
@@ -44,29 +46,33 @@ class Engine:
     # --- 实体管理 ---
 
     def spawn(self, think_fn: Optional[Callable] = None) -> Entity:
-        """创建新实体, 对应 OBJ_create. 立即调一次 think_fn(state=-1) 做 init."""
-        e = Entity()
-        e.id = len(self.entities)
+        """创建新实体, 对应 OBJ_create. 立即调一次 think_fn(state=-1) 做 init.
+        优先复用 destroy 归还的空闲槽位 (= 原版定长池), 无空闲才扩容 — 防实体列表只增不减."""
+        if self._free:
+            e = self._free.pop()
+            e.reset()
+            e._pooled = False
+        else:
+            e = Entity()
+            e.id = len(self.entities)
+            self.entities.append(e)
         e.flags = 0x800
+        e._born_tick = self._tick_id     # 本帧出生 → tick phase1 跳过 (复用槽在快照里, 否则会本帧多跑一拍)
         if think_fn is not None:
             e.flags |= 0x10000
             e.think_fn = think_fn
             e.state_code = -1
-            think_fn(e, self)        # init call
+            think_fn(e, self)            # init call
             e.state_code = 0
-        self.entities.append(e)
         return e
 
     def destroy(self, e: Entity):
-        """对应 FUN_004c4a6f. 清字段, 不真删 (留个洞 = 原版语义)."""
-        e.flags = 0
-        e.seq = b''
-        e.ticks = 0
-        e.offset = 0
-        e.think_fn = None
-        e.state_code = 0
-        e.signal_target = None
-        e.user_data.clear()
+        """对应 FUN_004c4a6f. 清字段成空洞 + 归还空闲表供 spawn 复用 (= 原版留洞复用)."""
+        if e._pooled:
+            return                       # 防重复 destroy 把同一槽位放进空闲表两次
+        e.reset()
+        e._pooled = True
+        self._free.append(e)
 
     # --- seq 操作 ---
 
@@ -125,13 +131,20 @@ class Engine:
         (1) think_fn 实体每帧调 think_fn (= 投射物物理 / 自定义状态机驱动)
         (2) seq 实体推进 seq 字节码 (FM/MOVE/SIGNAL/...)
         """
+        self._tick_id += 1
         # (1) think_fn 实体: 不靠 seq, think_fn 自己驱动状态. 用 list() 避免迭代时 spawn 改 list 出问题.
         # bit 16 = has think_fn; bit 11 = 仍在 pool 内.
         for e in list(self.entities):
-            if e.think_fn is None:
-                continue
             if (e.flags & 0x800) == 0:
-                continue   # 已 destroy
+                continue   # 已 destroy (空洞)
+            if e.think_fn is None:
+                # 无 think 的一次性特效 (烟雾/命中火花等): seq EXIT 后只清了 playing 位, alive 仍在.
+                # 这类跑完就回收槽位, 否则永不释放 → 累积 (EXIT 不会 destroy).
+                if not e.is_playing() and e.user_data.get('kind') == 'hit_effect':
+                    self.destroy(e)
+                continue
+            if e._born_tick == self._tick_id:
+                continue   # 本帧刚 spawn (复用槽在快照里) → 不在出生帧 think, 跟 append-only 行为一致
             e.think_fn(e, self)
 
         # (2) seq 实体: 标准字节码推进 (原版 FUN_00438e00)
