@@ -335,6 +335,7 @@ def spawn_eson01_attack(battle, caster, coord: "Entity") -> None:
     e.vz = 0
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 10            # 神兽本体盖在命中特效之上
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
@@ -557,6 +558,7 @@ def spawn_sweep_beast(battle, caster, coord: "Entity", atlas: int, frame_count: 
     e.vz = 0
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 10            # 神兽本体盖在命中特效之上
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
@@ -671,6 +673,7 @@ def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.flags |= 0x40
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 10            # 青龙本体盖在冰锥之上 (用户要求)
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord

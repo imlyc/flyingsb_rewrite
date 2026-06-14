@@ -24,16 +24,16 @@ def draw_hit_effects(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     支持 mid-seq atlas 切换 (= 技能 extra fx 中段从一个 atlas 换到另一个), 每帧从
     entity.atlas_slot 反查 atlas_key, 不缓存.
     投射物 (think_fn 物理驱动) 在飞行期没 seq running, 但 visible flag (0x40) 为 1, 也要画.
+
+    绘制顺序: 按 user_data['draw_order'] 升序 (默认 0), 同序保持 spawn 顺序. 神兽本体
+    (draw_order 高) 最后画 = 在冰锥等粒子之上 (e.g. 青龙盖在冰锥上).
     """
-    for ent in scene.battle.engine.entities:
-        if ent.user_data.get('kind') != 'hit_effect':
-            continue
-        # 可见性:
-        #  - seq running (普通 hit-fx, EXIT op 后 playing flag 落下 → 自然消失)
-        #  - 或: 投射物飞行期 (没 seq, 但 think_fn 驱动; 落地/destroy 后 user_data 被清, 不再渲染)
-        if not ent.is_playing():
-            if not ent.user_data.get('projectile'):
-                continue
+    # 收集可见的 hit_effect, 稳定按 draw_order 排序 (高的后画 = 上层)
+    ents = [e for e in scene.battle.engine.entities
+            if e.user_data.get('kind') == 'hit_effect'
+            and (e.is_playing() or e.user_data.get('projectile'))]
+    ents.sort(key=lambda e: e.user_data.get('draw_order', 0))
+    for ent in ents:
         slot_lo = ent.atlas_slot & 0xffff
         atlas_key = atlas_resource(slot_lo)
         if atlas_key is None:
