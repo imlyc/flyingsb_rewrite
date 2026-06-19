@@ -20,6 +20,7 @@ class _B:
         self._pending_damage_range = None
         self._pending_turn_end = False
         self.all_units: list = []
+        self.shake_offset = (0, 0)             # 玄武地震 (镜像 TacticsBattle)
 
     def _log(self, m): self.messages.append(m)
 
@@ -321,6 +322,53 @@ def test_zhuque_fire_rain():
     assert saw_ball > 0, "应有 ej3 火球下落"
     assert saw_burst > 0, "火球落地应有 fire01 火焰爆"
     assert d1.hp < 50 and d2.hp < 50, "朱雀应伤到两敌"
+    assert b._pending_turn_end is True
+
+
+def test_xuanwu_earthquake_and_rockfall():
+    """玄武: 神兽 (eson06 263) 盘踞 + 地震 (shake_offset 抖动) + 每敌砸多块落石 (eba00/01 320/321) + 伤害."""
+    from core.son_transform import (XW_ATLAS, XW_ROCK_VARIANTS, XW_SHAKE_AMP,
+                                    start_son_transform)
+    from core.fm_frames import FM_FRAMES
+    from core.raw_attack_seqs import atlas_resource
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x06
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x06)
+
+    def renders(e):
+        if e.user_data.get('kind') != 'hit_effect':
+            return False
+        if not e.is_playing() and not e.user_data.get('projectile'):
+            return False
+        fr = FM_FRAMES.get(atlas_resource(e.atlas_slot & 0xffff))
+        return (e.atlas_slot in XW_ROCK_VARIANTS
+                and fr is not None and 0 <= e.frame_idx < len(fr))
+
+    saw_beast = saw_rock = shake_ticks = 0
+    max_shake = 0
+    for _ in range(500):
+        b.engine.tick()
+        sx, sy = b.shake_offset
+        if sx or sy:
+            shake_ticks += 1
+            max_shake = max(max_shake, abs(sx), abs(sy))
+        for e in b.engine.entities:
+            if e.atlas_slot == XW_ATLAS and e.user_data.get('victims') is not None:
+                saw_beast += 1
+            if renders(e):
+                saw_rock += 1
+        if b._pending_turn_end:
+            break
+    assert saw_beast > 0, "玄武本体应在场盘踞"
+    assert shake_ticks > 0, "盘踞期应触发地震 (shake_offset 抖动)"
+    assert max_shake <= XW_SHAKE_AMP, "震幅不应超过 XW_SHAKE_AMP"
+    assert saw_rock > 0, "应有落石 (eba00/01) 下落/碎裂渲染"
+    assert b.shake_offset == (0, 0), "升空后地震应停"
+    assert d1.hp < 50 and d2.hp < 50, "玄武落石应伤到两敌"
     assert b._pending_turn_end is True
 
 

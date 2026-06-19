@@ -85,6 +85,9 @@ class TacticsBattle:
         from core.anim_engine.engine import Engine
         from core.anim_engine.entity import SIG_IMPACT, SIG_END, SIG_IMPACT_2
         self.engine = Engine()
+        # 屏幕震动偏移 (px): 玄武地震等由 engine entity 每 tick 写随机抖动, scene.draw 叠加到相机.
+        # (0,0) = 不震. 见 core.son_transform earthquake_think (exe FUN_004d8b0c 抖相机原点).
+        self.shake_offset: tuple[int, int] = (0, 0)
         self._SIG_IMPACT = SIG_IMPACT
         self._SIG_IMPACT_2 = SIG_IMPACT_2
         self._SIG_END = SIG_END

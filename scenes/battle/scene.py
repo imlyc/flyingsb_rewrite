@@ -187,6 +187,10 @@ class BattleScene(Scene):
     def draw(self) -> None:
         self.surface.fill((0, 0, 0))
         cam_x, cam_y = int(self._cam_x), int(self._cam_y)
+        # 屏幕震动 (玄武地震): 相机原点每 tick 随机抖动 (engine entity 写 battle.shake_offset)
+        sx, sy = self.battle.shake_offset
+        cam_x += sx
+        cam_y += sy
 
         # 1) 复用世界地图的地形
         self.world_map.draw_terrain(self.surface, cam_x, cam_y)

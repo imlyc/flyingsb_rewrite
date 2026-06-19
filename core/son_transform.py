@@ -40,7 +40,7 @@ SON_BEAST_CONFIG: dict[int, tuple] = {
     0x03: ('aoe',),             # 酷酷猫 (TODO eson04a-e 257-261)
     0x04: ('aoe',),             # 分身术 (TODO 4 分身)
     0x05: ('zhuque', 262),      # 朱雀 eson05: 红凤凰悬空 + 火雨 ("以火攻击敌人")
-    0x06: ('sweep', 263, 3),    # 玄武 eson06
+    0x06: ('xuanwu', 263),      # 玄武 eson06: 盘踞神兽 + 地震 (屏幕震动) + 每敌冰柱 eba00/01
     0x07: ('sweep', 264, 10),   # 美丽月兔 eson07a
     0x08: ('aoe',),             # 超亂舞 (TODO 16 粒子)
     0x09: ('sweep', 267, 4),    # M凤凰 eson09
@@ -61,6 +61,8 @@ def _spawn_beast_attack(battle, caster, coord: "Entity") -> None:
         spawn_baihu_beast(battle, caster, coord, cfg[1])
     elif kind == 'zhuque':
         spawn_zhuque_beast(battle, caster, coord, cfg[1])
+    elif kind == 'xuanwu':
+        spawn_xuanwu_beast(battle, caster, coord, cfg[1])
     elif kind == 'sweep':
         spawn_sweep_beast(battle, caster, coord, cfg[1], cfg[2])
     else:
@@ -383,7 +385,6 @@ def _aoe_hit_all(battle, caster, victims) -> None:
 # 白虎(beast 自身扑击 atlas6)/凤凰 待做.
 SON_BEAST_VICTIM_FX: dict[int, tuple] = {
     0x05: (294, (0,), 4),                   # 朱雀 ej3 火
-    0x06: (320, (0, 1), 4),                 # 玄武 eba00 冰柱
     0x07: (227, (8, 9, 10, 11, 12, 13), 4),  # 月兔 ds_chiri
 }
 PARTICLE_FALL_HEIGHT_PX = 90    # 粒子起始高度 (victim 头上)
@@ -991,6 +992,158 @@ def spawn_zhuque_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.x, e.y = _victim_ground(caster)
     e.z = -(ZHUQUE_DESCEND_HEIGHT << 16)
     e.state_code = _ZQ_DESCEND
+
+
+# ============ 玄武: 盘踞神兽 + 地震 (屏幕震动) + 每敌冰柱 (exe FUN_004f6f63 + FUN_004dc42f) ============
+# 原版: 玄武神兽 (eson06 atlas263) 落到中心盘踞 (coil seq DAT_00671c68 = 帧0,1,2 ticks 8/8/15 循环);
+# 落地即触发**地震** FUN_004d8c81(10,10,1000) = 相机每 tick 随机抖 ±10px (FUN_004d8b0c). 盘踞 0x80(128)
+# tick; 结束前 0x1e(30) tick 对**每个**敌人头顶砸**落石** (FUN_004dc42f, eba00/eba01 随机). 到时停
+# 地震 + 升空. 落石 (FUN_004dc371): 从上空匀速落下 → 落地 (音效+受击反应) → 碎裂成一片乱石 → 伤害.
+# ⚠ eba00/eba01 是**石块** (非冰): 帧0=完整石头, 帧1..n=砸地碎成多块不同形状的散石 (用户确认: 落多形状石).
+XW_ATLAS = 263
+XW_COIL_FRAMES = ((0, 8), (1, 8), (2, 15))   # exe seq DAT_00671c68 (帧, ticks), 循环
+XW_DESCEND_HEIGHT = 220
+XW_DESCEND_VZ = 22
+XW_COIL_TICKS = 128             # 盘踞总时长 (exe +0x190 = +0x80)
+XW_ROCK_LEAD = 30              # 结束前砸落石 (exe frame == end - 0x1e)
+XW_SHAKE_AMP = 10               # 地震振幅 px (exe FUN_004d8c81(10,10,...))
+# 落石 (eba): exe 600px 上空匀速落下 (vz=-64); 这里降高度保证在屏内. 每敌砸多块不同形状石.
+XW_ROCK_VARIANTS = (320, 321)             # eba00 (小石→小碎堆) / eba01 (大石→大范围散石) 随机
+XW_ROCK_LAND_FRAMES = {320: (1, 2, 3), 321: (1, 2, 3, 4)}   # 落地碎裂帧 (exe land seq, 碎成多石)
+XW_ROCK_HEIGHT = 220            # 落石起始高度 px (exe 0x258=600, 降以多在屏内)
+XW_ROCK_VZ = 24                 # 落石下落 px/tick (exe vz=-64)
+XW_ROCK_FRAME_TICKS = 2         # 碎裂帧 tick (exe land seq ticks=2)
+_XW_DESCEND = 0
+_XW_COIL = 1
+_XW_RISE = 2
+_XW_ROCK_FALL = 0
+_XW_ROCK_SHATTER = 1
+
+
+def _xw_coil(e: "Entity") -> None:
+    """玄武盘踞动画: 帧 0,1,2 各 ticks 8/8/15, 循环 (exe seq DAT_00671c68)."""
+    ud = e.user_data
+    ud['anim_tick'] += 1
+    total = sum(t for _, t in XW_COIL_FRAMES)
+    t = ud['anim_tick'] % total
+    acc = 0
+    for frame, ticks in XW_COIL_FRAMES:
+        acc += ticks
+        if t < acc:
+            e.frame_idx = frame
+            return
+
+
+def falling_rock_think(e: "Entity", eng: "Engine") -> None:
+    """玄武落石 (eba00/01): 从上空匀速落下 → 落地 (受击反应) → 碎成多石帧动画 → 结算伤害 (exe FUN_004dc371)."""
+    ud = e.user_data
+    if 'rock' not in ud:
+        return
+    battle, caster, victim = ud['battle'], ud['caster'], ud['victim']
+    if e.state_code == _XW_ROCK_FALL:
+        e.z += XW_ROCK_VZ << 16
+        if e.z >= 0:
+            e.z = 0
+            # 落地: 受击反应 (exe -250, 无伤害, 范围攻击不转向) + 切碎裂首帧
+            _ql_rain_react(battle, caster, victim)
+            land = XW_ROCK_LAND_FRAMES[ud['variant']]
+            ud['land_frames'] = land
+            ud['land_idx'] = 0
+            ud['land_tick'] = 0
+            e.frame_idx = land[0]
+            e.state_code = _XW_ROCK_SHATTER
+    elif e.state_code == _XW_ROCK_SHATTER:
+        ud['land_tick'] += 1
+        if ud['land_tick'] >= XW_ROCK_FRAME_TICKS:
+            ud['land_tick'] = 0
+            ud['land_idx'] += 1
+            if ud['land_idx'] >= len(ud['land_frames']):
+                # 碎裂播完: 结算伤害 (exe -200) + 销毁
+                if victim.alive:
+                    from core.battle import combat
+                    combat._roll_damage_one(battle, caster, victim, face_attacker=False)
+                eng.destroy(e)
+                return
+            e.frame_idx = ud['land_frames'][ud['land_idx']]
+
+
+def _spawn_rock_fall(battle, caster, victim) -> None:
+    """对 victim 头顶砸 1 块落石 (exe FUN_004dc42f). 随机 eba00/eba01 → 不同敌人石块形状/大小不同."""
+    variant = XW_ROCK_VARIANTS[battle.rng.randint(0, 1)]
+    vx, vy = _victim_ground(victim)
+    e = battle.engine.spawn(think_fn=falling_rock_think)
+    e.atlas_slot = variant
+    e.frame_idx = 0                          # 下落帧 = 完整石头
+    e.flags |= 0x40
+    e.x = vx
+    e.y = vy
+    e.z = -(XW_ROCK_HEIGHT << 16)
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['rock'] = True
+    e.user_data['variant'] = variant
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['victim'] = victim
+    e.state_code = _XW_ROCK_FALL
+
+
+def xuanwu_beast_think(e: "Entity", eng: "Engine") -> None:
+    ud = e.user_data
+    if 'victims' not in ud:
+        return
+    battle, caster = ud['battle'], ud['caster']
+    if e.state_code == _XW_DESCEND:
+        e.z += XW_DESCEND_VZ << 16
+        _xw_coil(e)
+        if e.z >= 0:
+            e.z = 0
+            ud['coil_tick'] = 0
+            ud['rocks_spawned'] = False
+            e.state_code = _XW_COIL
+    elif e.state_code == _XW_COIL:
+        _xw_coil(e)
+        # 地震: 相机每 tick 随机抖 ±AMP (exe FUN_004d8b0c)
+        amp = XW_SHAKE_AMP
+        battle.shake_offset = (battle.rng.randint(-amp, amp), battle.rng.randint(-amp, amp))
+        ud['coil_tick'] += 1
+        t = ud['coil_tick']
+        # 结束前 LEAD tick: 每敌头顶砸落石 (exe frame == end - 0x1e)
+        if not ud['rocks_spawned'] and t >= XW_COIL_TICKS - XW_ROCK_LEAD:
+            ud['rocks_spawned'] = True
+            for v in ud['victims']:
+                if v.alive:
+                    _spawn_rock_fall(battle, caster, v)
+        if t >= XW_COIL_TICKS:
+            battle.shake_offset = (0, 0)         # 停地震 (exe FUN_004d8ce1)
+            e.state_code = _XW_RISE
+    elif e.state_code == _XW_RISE:
+        e.z -= XW_DESCEND_VZ << 16
+        _xw_coil(e)
+        if (e.z >> 16) <= -XW_DESCEND_HEIGHT:
+            ud['coord'].user_data['eson_done'] = True
+            eng.destroy(e)
+
+
+def spawn_xuanwu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
+    """玄武: 神兽落到中心盘踞 + 地震 (屏幕震动) + 末尾每敌冰柱 + 伤害 + 升空."""
+    coord.user_data['eson_done'] = False
+    victims = _eson_collect_victims(battle, caster)
+    e = battle.engine.spawn(think_fn=xuanwu_beast_think)
+    e.atlas_slot = atlas
+    e.frame_idx = 0
+    e.flags |= 0x40
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 10            # 玄武本体盖在冰柱之上
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['victims'] = victims
+    e.user_data['anim_tick'] = 0
+    e.x, e.y = _victim_ground(caster)         # 战场中心 = caster tile
+    e.z = -XW_DESCEND_HEIGHT << 16
+    e.state_code = _XW_DESCEND
 
 
 # ============ AOE 占位 (酷酷猫/分身术/超亂舞, 待做专属演出) ============
