@@ -39,7 +39,7 @@ SON_BEAST_CONFIG: dict[int, tuple] = {
     0x02: ('baihu', 256),       # 白虎 eson03: 盘踞神兽 + 旋风 (以风击退敌人, ehari00 旋涡)
     0x03: ('aoe',),             # 酷酷猫 (TODO eson04a-e 257-261)
     0x04: ('aoe',),             # 分身术 (TODO 4 分身)
-    0x05: ('sweep', 262, 1),    # 朱雀 eson05
+    0x05: ('zhuque', 262),      # 朱雀 eson05: 红凤凰悬空 + 火雨 ("以火攻击敌人")
     0x06: ('sweep', 263, 3),    # 玄武 eson06
     0x07: ('sweep', 264, 10),   # 美丽月兔 eson07a
     0x08: ('aoe',),             # 超亂舞 (TODO 16 粒子)
@@ -59,6 +59,8 @@ def _spawn_beast_attack(battle, caster, coord: "Entity") -> None:
         spawn_qinglong_beast(battle, caster, coord, cfg[1])
     elif kind == 'baihu':
         spawn_baihu_beast(battle, caster, coord, cfg[1])
+    elif kind == 'zhuque':
+        spawn_zhuque_beast(battle, caster, coord, cfg[1])
     elif kind == 'sweep':
         spawn_sweep_beast(battle, caster, coord, cfg[1], cfg[2])
     else:
@@ -873,6 +875,122 @@ def spawn_baihu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.x, e.y = _victim_ground(caster)
     e.z = -BH_DESCEND_HEIGHT << 16
     e.state_code = _BH_DESCEND
+
+
+# ============ 朱雀: 红凤凰悬空 + 火雨 (exe FUN_004f6764 beast + FUN_004f663a 火 + FUN_004f65c7) ============
+# 原版: 朱雀神兽 (eson05 atlas262, 大红凤凰单帧) 落到中心**悬空**; 悬停 0x80(128)tick 期间每 8 tick 从
+# 高空(z=0x280=640px)在中心周围随机落下 1 颗火球 (ej3 atlas294 帧60), 火球落地 (z<1) 挂火爆 seq
+# 0x655fa4 (fire01 atlas309 帧0-10) 燃烧; 火雨止后结算 AOE 伤害; 凤凰升空消失.
+ZHUQUE_ATLAS = 262             # eson05 红凤凰 (1 帧)
+ZHUQUE_DESCEND_HEIGHT = 250    # 进场高度
+ZHUQUE_HOVER_HEIGHT = 96       # 悬空高度 (飞行神兽, 不落地)
+ZHUQUE_DESCEND_VZ = 18
+ZHUQUE_FIRE_TICKS = 128        # 火雨持续 (exe +0x80)
+ZHUQUE_FIRE_INTERVAL = 8       # 每 8 tick 落 1 颗火 (exe tick%8)
+ZHUQUE_FIRE_END_MARGIN = 30    # 结束前 0x1e tick 停撒 (exe timer-0x1e)
+ZHUQUE_FINALE_TICKS = 18       # 末尾让最后的火烧完
+FIREBALL_ATLAS = 294           # ej3 帧60 = 下落火球
+FIREBALL_FRAME = 60
+FIRE_BURST_ATLAS = 309         # fire01 帧0-10 = 落地火焰爆
+FIRE_FALL_HEIGHT = 360         # 火球起始高度 (exe 640, 略降)
+FIRE_FALL_VZ = 30              # 火球下落 px/tick (exe 48)
+FIRE_SCATTER_X = 112           # 火雨水平散布 (exe rand%0x80)
+FIRE_SCATTER_Y = 42
+_ZQ_DESCEND = 0
+_ZQ_HOVER = 1
+_ZQ_FINALE = 2
+_ZQ_RISE = 3
+
+
+def _spawn_fire_burst(battle, x, y) -> None:
+    """火球落地: 火焰爆 (fire01 帧0-10, seq 跑完自动回收) — exe seq 0x655fa4."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    seq = [('fm', FIRE_BURST_ATLAS, f, 1) for f in range(11)] + [('exit',)]
+    e = battle.engine.spawn()
+    e.x = x
+    e.y = y
+    e.z = 0
+    e.user_data['kind'] = 'hit_effect'
+    battle.engine.attach_seq(e, tuple_to_bytecode(seq))
+
+
+def fire_rain_think(e: "Entity", eng: "Engine") -> None:
+    """下落火球: 从高空落下, 落地 → 火焰爆 + 自身消失 (exe FUN_004f65c7)."""
+    ud = e.user_data
+    if 'fire' not in ud:
+        return
+    e.z += FIRE_FALL_VZ << 16
+    if e.z >= 0:
+        e.z = 0
+        _spawn_fire_burst(ud['battle'], e.x, e.y)
+        eng.destroy(e)
+
+
+def _spawn_fireball(battle, cx, cy) -> None:
+    rng = battle.rng
+    e = battle.engine.spawn(think_fn=fire_rain_think)
+    e.atlas_slot = FIREBALL_ATLAS
+    e.frame_idx = FIREBALL_FRAME
+    e.flags |= 0x40
+    e.x = cx + (rng.randint(-FIRE_SCATTER_X, FIRE_SCATTER_X) << 16)
+    e.y = cy + (rng.randint(-FIRE_SCATTER_Y, FIRE_SCATTER_Y) << 16)
+    e.z = -((FIRE_FALL_HEIGHT + rng.randint(0, 60)) << 16)
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['fire'] = True
+    e.user_data['battle'] = battle
+
+
+def zhuque_beast_think(e: "Entity", eng: "Engine") -> None:
+    ud = e.user_data
+    if 'victims' not in ud:
+        return
+    battle, caster = ud['battle'], ud['caster']
+    if e.state_code == _ZQ_DESCEND:
+        e.z += ZHUQUE_DESCEND_VZ << 16
+        if e.z >= -(ZHUQUE_HOVER_HEIGHT << 16):     # 降到悬空高度 (仍在空中)
+            e.z = -(ZHUQUE_HOVER_HEIGHT << 16)
+            ud['fire_tick'] = 0
+            e.state_code = _ZQ_HOVER
+    elif e.state_code == _ZQ_HOVER:
+        ud['fire_tick'] += 1
+        t = ud['fire_tick']
+        if t % ZHUQUE_FIRE_INTERVAL == 0 and t < ZHUQUE_FIRE_TICKS - ZHUQUE_FIRE_END_MARGIN:
+            cx, cy = _victim_ground(caster)         # 中心 = caster
+            _spawn_fireball(battle, cx, cy)
+        if t >= ZHUQUE_FIRE_TICKS:
+            _aoe_hit_all(battle, caster, ud['victims'])   # 火雨止 → AOE 伤害
+            ud['finale_tick'] = 0
+            e.state_code = _ZQ_FINALE
+    elif e.state_code == _ZQ_FINALE:
+        ud['finale_tick'] += 1
+        if ud['finale_tick'] >= ZHUQUE_FINALE_TICKS:
+            e.state_code = _ZQ_RISE
+    elif e.state_code == _ZQ_RISE:
+        e.z -= ZHUQUE_DESCEND_VZ << 16
+        if (e.z >> 16) <= -(ZHUQUE_HOVER_HEIGHT + ZHUQUE_DESCEND_HEIGHT):
+            ud['coord'].user_data['eson_done'] = True
+            eng.destroy(e)
+
+
+def spawn_zhuque_beast(battle, caster, coord: "Entity", atlas: int) -> None:
+    """朱雀: 红凤凰落到中心悬空 + 火雨 + AOE 伤害 + 升空."""
+    coord.user_data['eson_done'] = False
+    victims = _eson_collect_victims(battle, caster)
+    e = battle.engine.spawn(think_fn=zhuque_beast_think)
+    e.atlas_slot = atlas
+    e.frame_idx = 0
+    e.flags |= 0x40
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 10            # 凤凰本体盖在火雨之上
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['victims'] = victims
+    e.x, e.y = _victim_ground(caster)
+    e.z = -(ZHUQUE_DESCEND_HEIGHT << 16)
+    e.state_code = _ZQ_DESCEND
 
 
 # ============ AOE 占位 (酷酷猫/分身术/超亂舞, 待做专属演出) ============

@@ -283,6 +283,47 @@ def test_baihu_whirlwind_attack():
     assert b._pending_turn_end is True
 
 
+def test_zhuque_fire_rain():
+    """朱雀: 红凤凰 (eson05 262) 悬空 + 火雨 (ej3 294 火球下落 → fire01 309 火爆) + AOE 伤害."""
+    from core.son_transform import (ZHUQUE_ATLAS, FIREBALL_ATLAS, FIRE_BURST_ATLAS,
+                                    start_son_transform)
+    from core.fm_frames import FM_FRAMES
+    from core.raw_attack_seqs import atlas_resource
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x05
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x05)
+
+    def renders(e, atlas):
+        if e.user_data.get('kind') != 'hit_effect':
+            return False
+        if not e.is_playing() and not e.user_data.get('projectile'):
+            return False
+        fr = FM_FRAMES.get(atlas_resource(e.atlas_slot & 0xffff))
+        return e.atlas_slot == atlas and fr is not None and 0 <= e.frame_idx < len(fr)
+
+    saw_bird = saw_ball = saw_burst = 0
+    for _ in range(500):
+        b.engine.tick()
+        for e in b.engine.entities:
+            if e.atlas_slot == ZHUQUE_ATLAS and e.user_data.get('victims') is not None:
+                saw_bird += 1
+            if renders(e, FIREBALL_ATLAS):
+                saw_ball += 1
+            if renders(e, FIRE_BURST_ATLAS):
+                saw_burst += 1
+        if b._pending_turn_end:
+            break
+    assert saw_bird > 0, "朱雀凤凰本体应在场"
+    assert saw_ball > 0, "应有 ej3 火球下落"
+    assert saw_burst > 0, "火球落地应有 fire01 火焰爆"
+    assert d1.hp < 50 and d2.hp < 50, "朱雀应伤到两敌"
+    assert b._pending_turn_end is True
+
+
 def test_son_aoe_placeholder_skills_damage():
     """酷酷猫/分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
     for sid in (0x03, 0x04, 0x08):
