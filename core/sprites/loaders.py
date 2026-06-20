@@ -139,6 +139,13 @@ def load_smenu_icon(idx: int) -> pygame.Surface:
 _FM_SURF_CACHE: dict[str, pygame.Surface] = {}
 
 
+# 个别 atlas 透明色不在左上角 (AUTO 采样 (0,0) 会取错): 显式指定. eson09 大凤凰背景=绿(0,255,0),
+# 但 (0,0) 是帧 BBox 外的黑边 → AUTO 误取黑, 绿背景没抠掉 (用户: 凤凰背景还是绿色).
+_FM_COLORKEY_OVERRIDE: dict[str, tuple[int, int, int]] = {
+    "fm_ESON09": (0, 255, 0),
+}
+
+
 def get_fm_surface(resource_name: str) -> pygame.Surface:
     """加载 fm_ atlas 大图. 帧从 fm_frames.FM_FRAMES 取 BBox 子表面.
     也能加载任意 .pcx (e.g. ps_CSON105 翻跟头), 不限 fm_ 前缀."""
@@ -146,7 +153,8 @@ def get_fm_surface(resource_name: str) -> pygame.Surface:
         path = SPRITES_DIR / f"{resource_name}.pcx"
         if not path.exists():
             raise FileNotFoundError(path)
-        _FM_SURF_CACHE[resource_name] = load_image(path, color_key=AUTO)
+        ck = _FM_COLORKEY_OVERRIDE.get(resource_name, AUTO)
+        _FM_SURF_CACHE[resource_name] = load_image(path, color_key=ck)
     return _FM_SURF_CACHE[resource_name]
 
 

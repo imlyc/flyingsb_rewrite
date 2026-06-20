@@ -160,9 +160,9 @@ def _run_son_skill(sid):
 
 
 def test_son_sweep_beasts_spawn_and_damage():
-    """青龙/白虎/朱雀/玄武/月兔/凤凰: 召唤对应神兽 atlas, 范围伤害, 收尾."""
+    """青龙/白虎/朱雀/玄武/月兔: 召唤对应神兽 atlas, 范围伤害, 收尾. (0x09 凤凰是治疗类, 另测)"""
     for sid, atlas in [(0x01, 255), (0x02, 256), (0x05, 262),
-                       (0x06, 263), (0x07, 264), (0x09, 267)]:
+                       (0x06, 263), (0x07, 264)]:
         b, caster, d1, d2, seen = _run_son_skill(sid)
         assert atlas in seen, f"skill 0x{sid:02x} 应召唤 atlas {atlas}, 实际 {seen}"
         assert d1.hp < 50 and d2.hp < 50, f"skill 0x{sid:02x} 应伤到两敌"
@@ -423,6 +423,53 @@ def test_yuetu_beast_and_star_sparkles():
     assert cleared_after_peak, "末尾受击特效应全部一起消失"
     assert saw_sparkle > 0, "应有 ds_chiri 碎屑点缀"
     assert d1.hp < 50 and d2.hp < 50, "月兔应伤到两敌"
+    assert b._pending_turn_end is True
+
+
+def test_mfeng_revive_and_feathers():
+    """M凤凰 0x09 (纯复活术): 大凤凰(eson09 267) + **只复活死者回满, 存活者(哪怕残血)无效** + 羽毛(e00 247)."""
+    from core.son_transform import MF_ATLAS, MF_FEATHER_ATLAS, start_son_transform
+    from core.battle.data import BattleUnit
+    b, caster, d1, d2 = _fixture()
+    caster.max_hp = 100
+    caster.hp = 30                              # 施法者残血 → 应回满
+    # 加一个**死亡**队友 (hp=0) → 应被复活回满
+    dead = BattleUnit(name="紫河", level=1, max_hp=80, hp=0, max_mp=0, mp=0, sg=0,
+                      attack=10, defence=0, agile=0, move=3, is_player=True)
+    dead.x, dead.y = 6, 5
+    dead.death_anim_time_ms = 0                 # 已进入死亡动画
+    b.players.append(dead)
+    b.all_units.append(dead)
+    assert not dead.alive
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x09
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}   # 即使范围里有敌人, 凤凰也不该伤他们
+    start_son_transform(b, caster, (7, 5), 0x09)
+
+    saw_phoenix = saw_feather = 0
+    cloud_targets = set()
+    for _ in range(600):
+        b.engine.tick()
+        for e in b.engine.entities:
+            if e.atlas_slot == MF_ATLAS and e.user_data.get('allies') is not None:
+                saw_phoenix += 1
+            if e.atlas_slot == MF_FEATHER_ATLAS and e.user_data.get('feather'):
+                saw_feather += 1
+            if e.user_data.get('cloud'):
+                cloud_targets.add(e.user_data['target_x'])
+        if b._pending_turn_end:
+            break
+    assert saw_phoenix > 0, "应召唤大凤凰 eson09 (267)"
+    assert saw_feather > 0, "应有羽毛光点 (e00 247)"
+    assert len(cloud_targets) >= 4, "应有多朵祥云散布在不同水平位置 (非对称聚两侧)"
+    # 收尾时祥云应已全部飘出销毁 (主凤凰飞出屏外 + 等云走完)
+    assert not any(e.user_data.get('cloud') for e in b.engine.entities if e.flags & 0x800), \
+        "回合结束时祥云应已全部飘出"
+    assert dead.alive and dead.hp == 80, "死亡队友应被复活回满"
+    assert dead.death_anim_time_ms == -1, "复活应取消死亡动画"
+    assert caster.hp == 30, "存活施法者(残血)不应被治疗 (复活术对存活者无效)"
+    assert d1.hp == 50 and d2.hp == 50, "凤凰是治疗类, 不应伤敌"
     assert b._pending_turn_end is True
 
 

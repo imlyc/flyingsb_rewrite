@@ -47,6 +47,9 @@ def draw_hit_effects(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
             continue
         fx, fy, fw, fh, ax, ay = frames[ent.frame_idx]
         sub = atlas_surf.subsurface(pygame.Rect(fx, fy, fw, fh))
+        if ent.user_data.get('flip_x'):          # 水平翻转 (祥云朝向): 镜像图 + 镜像锚点
+            sub = pygame.transform.flip(sub, True, False)
+            ax = fw - ax
         sx = (ent.x >> 16) - cam_x - ax
         # z 表示离地面高度 (< 0 = 上空): 加到 screen y 上让飞行物显示在 world_y 上方.
         sy = (ent.y >> 16) + (ent.z >> 16) - cam_y - ay
