@@ -372,6 +372,60 @@ def test_xuanwu_earthquake_and_rockfall():
     assert b._pending_turn_end is True
 
 
+def test_yuetu_beast_and_star_sparkles():
+    """月兔: 线条魔画 (264→265) 循环 + 正常受击特效(et00紫星+ef010红刺)累积叠加→末尾全清 + 一次伤害."""
+    from core.son_transform import YT_ATLAS, YT_SPARKLE_ATLAS, start_son_transform
+    from core.fm_frames import FM_FRAMES
+    from core.raw_attack_seqs import atlas_resource
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x07
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x07)
+
+    def renders(e, atlas):
+        if e.user_data.get('kind') != 'hit_effect':
+            return False
+        if not e.is_playing() and not e.user_data.get('projectile'):
+            return False
+        fr = FM_FRAMES.get(atlas_resource(e.atlas_slot & 0xffff))
+        return e.atlas_slot == atlas and fr is not None and 0 <= e.frame_idx < len(fr)
+
+    saw_beast = saw_265 = saw_sparkle = 0
+    max_burst = 0
+    burst_atlases = set()
+    cleared_after_peak = False
+    for _ in range(500):
+        b.engine.tick()
+        nburst = 0
+        for e in b.engine.entities:
+            if e.user_data.get('victims') is not None and e.atlas_slot in (264, 265):
+                saw_beast += 1
+                if e.atlas_slot == 265:
+                    saw_265 += 1            # 盘踞动画切到 eson07b atlas265
+            if renders(e, YT_SPARKLE_ATLAS):
+                saw_sparkle += 1
+            if e.user_data.get('burst'):
+                nburst += 1
+                burst_atlases.add(e.user_data.get('atlas_key'))
+        if nburst > max_burst:
+            max_burst = nburst
+        if max_burst > 4 and nburst == 0:
+            cleared_after_peak = True      # 峰值后归零 = 末尾全部一起消失
+        if b._pending_turn_end:
+            break
+    assert saw_beast > 0, "月兔本体应在场"
+    assert saw_265 > 0, "盘踞动画应循环到 eson07b (atlas265)"
+    assert max_burst > 4, "正常受击特效应持续累积叠加 (不消失)"
+    assert {"et00", "ef010"} & burst_atlases, "应含 et00 紫星 / ef010 红刺 (正常受击特效)"
+    assert cleared_after_peak, "末尾受击特效应全部一起消失"
+    assert saw_sparkle > 0, "应有 ds_chiri 碎屑点缀"
+    assert d1.hp < 50 and d2.hp < 50, "月兔应伤到两敌"
+    assert b._pending_turn_end is True
+
+
 def test_son_aoe_placeholder_skills_damage():
     """酷酷猫/分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
     for sid in (0x03, 0x04, 0x08):

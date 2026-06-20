@@ -41,7 +41,7 @@ SON_BEAST_CONFIG: dict[int, tuple] = {
     0x04: ('aoe',),             # 分身术 (TODO 4 分身)
     0x05: ('zhuque', 262),      # 朱雀 eson05: 红凤凰悬空 + 火雨 ("以火攻击敌人")
     0x06: ('xuanwu', 263),      # 玄武 eson06: 盘踞神兽 + 地震 (屏幕震动) + 每敌冰柱 eba00/01
-    0x07: ('sweep', 264, 10),   # 美丽月兔 eson07a
+    0x07: ('yuetu', 264),       # 美丽月兔 eson07a/b: 召唤线条魔画 + 星光弹幕 (ds_chiri)
     0x08: ('aoe',),             # 超亂舞 (TODO 16 粒子)
     0x09: ('sweep', 267, 4),    # M凤凰 eson09
 }
@@ -63,6 +63,8 @@ def _spawn_beast_attack(battle, caster, coord: "Entity") -> None:
         spawn_zhuque_beast(battle, caster, coord, cfg[1])
     elif kind == 'xuanwu':
         spawn_xuanwu_beast(battle, caster, coord, cfg[1])
+    elif kind == 'yuetu':
+        spawn_yuetu_beast(battle, caster, coord, cfg[1])
     elif kind == 'sweep':
         spawn_sweep_beast(battle, caster, coord, cfg[1], cfg[2])
     else:
@@ -385,7 +387,6 @@ def _aoe_hit_all(battle, caster, victims) -> None:
 # 白虎(beast 自身扑击 atlas6)/凤凰 待做.
 SON_BEAST_VICTIM_FX: dict[int, tuple] = {
     0x05: (294, (0,), 4),                   # 朱雀 ej3 火
-    0x07: (227, (8, 9, 10, 11, 12, 13), 4),  # 月兔 ds_chiri
 }
 PARTICLE_FALL_HEIGHT_PX = 90    # 粒子起始高度 (victim 头上)
 PARTICLE_FALL_VZ = 8            # 粒子下落 px/tick
@@ -1144,6 +1145,198 @@ def spawn_xuanwu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.x, e.y = _victim_ground(caster)         # 战场中心 = caster tile
     e.z = -XW_DESCEND_HEIGHT << 16
     e.state_code = _XW_DESCEND
+
+
+# ============ 美丽月兔: 召唤线条魔画 + 星光弹幕 (exe FUN_004f77ab + FUN_004e8192) ============
+# 原版: 月兔神兽 (eson07a 264 帧0-9 → eson07b 265 帧0-6, "Beauty rabbit" 华丽线条魔画) 落到中心,
+# 循环绘制这幅画; 盘踞 0x80(128)tick; **最后 0x1e(30)tick 每 tick** 对每敌发受击反应(-250) + 撒
+# 2 颗星光粒子 (ds_chiri atlas227 frames8-15) + 音效0xd4 = 持续星光弹幕. 到时升空. 伤害末尾统一结算.
+YT_ATLAS = 264                  # eson07a (起手)
+# 盘踞动画: 264 帧0-9 → 265 帧0-6 循环 (exe seq DAT_00671c8c, 每帧 3 tick). (atlas, frame)
+YT_COIL = ([(264, i) for i in range(10)] + [(265, i) for i in range(7)])
+YT_COIL_FRAME_TICKS = 3
+# 魔画 305x351 锚点(158,156)≈中心; z=0 落地则一半沉到脚下(太低), 140太高 → 取 70 让魔画中心≈屏幕中心.
+YT_HOVER_HEIGHT = 70            # 悬空高度 px (魔画中心抬到屏幕中心; 用户校: 0太低/140太高)
+YT_DROP = 120                   # 进场下落距离 (从更高处落到悬空高度)
+YT_DESCEND_VZ = 22
+YT_HOLD_TICKS = 128             # 盘踞总时长 (exe +0x190 = +0x80)
+YT_BARRAGE_LEAD = 30            # 最后 30tick 弹幕 (exe end - 0x1e <= frame)
+# 弹幕**主视觉 = 大白爆命中特效**: exe 每 tick 对每敌 FUN_004cba90(enemy,-250) → 全局战斗控制器
+# SIG_IMPACT_2 命中结算 → 命中特效 (_emit_hit_effect = et00 紫星 + ef010 红刺, 截图里的大白爆).
+# 每 tick 连放 → 持续大爆 (单个 320ms, 多个叠加=持续亮). 伤害数字只一次 (起手结算, 后续纯视觉).
+# 小碎屑 (ds_chiri) 是配角点缀, 不是主视觉.
+YT_SPARKLE_ATLAS = 227
+YT_SPARKLE_FRAMES = ((8, 2), (9, 2), (10, 2), (11, 2), (12, 1), (13, 1), (14, 1), (15, 1))  # (帧,ticks)
+YT_SPARKLE_HEIGHT = 72          # 起始高度 px (exe victim.z+0x48, 敌人头顶上方)
+YT_SPARKLE_VZ = 8               # 上喷初速 px/tick (exe 0x80000)
+YT_SPARKLE_GRAVITY = 0.5        # 重力 (exe 0x8000), 上喷后回落
+YT_SPARKLE_DX = 1               # 左右分开 px/tick (exe ±0x10000=±1.0)
+# 大白爆 = **正常受击特效全套** (pick_hit_effects = et00 紫星 + ef010 红刺, 跟普通命中一样). 用户看视频
+# 确认: 弹幕期每 N tick 持续生成正常受击特效, **不断累积叠加而不消失** (et00 紫星 + ef010 红刺都堆),
+# 最后一次伤害时全部**一起消失**. 让特效实体持久: 必须带 think_fn (否则 engine.tick sweep 回收无 think
+# 的 hit_effect) + projectile=True (seq 播完定格仍渲染). beast 追踪, 末尾统一 destroy.
+YT_HIT_INTERVAL = 2             # 每 N tick spawn 一组正常受击特效 (持续累积叠加)
+YT_REACT_INTERVAL = 10          # 弹幕期每 N tick 重戳受击反应 (~15tick, 重戳前续上 = 全程持续受击)
+_YT_DESCEND = 0
+_YT_BARRAGE = 1
+_YT_RISE = 2
+
+
+def _yt_animate(e: "Entity") -> None:
+    """月兔盘踞: 264 帧0-9 → 265 帧0-6 循环 (跨 atlas, 每帧 3 tick)."""
+    ud = e.user_data
+    ud['anim_tick'] += 1
+    idx = (ud['anim_tick'] // YT_COIL_FRAME_TICKS) % len(YT_COIL)
+    atlas, frame = YT_COIL[idx]
+    e.atlas_slot = atlas
+    e.frame_idx = frame
+
+
+def yuetu_sparkle_think(e: "Entity", eng: "Engine") -> None:
+    """月兔星光粒子: 升起 + 左右漂移 (含重力) + 播 8 帧闪光 → 完则消失 (exe FUN_004e8152)."""
+    ud = e.user_data
+    if 'sparkle' not in ud:
+        return
+    e.x += ud['vx']
+    e.vz += int(YT_SPARKLE_GRAVITY * 65536)      # 重力 (z 向下为正 → 抵消上升)
+    e.z += e.vz
+    ud['frame_tick'] += 1
+    cur_frame, cur_ticks = YT_SPARKLE_FRAMES[ud['frame_idx']]
+    if ud['frame_tick'] >= cur_ticks:
+        ud['frame_tick'] = 0
+        ud['frame_idx'] += 1
+        if ud['frame_idx'] >= len(YT_SPARKLE_FRAMES):
+            eng.destroy(e)
+            return
+        e.frame_idx = YT_SPARKLE_FRAMES[ud['frame_idx']][0]
+
+
+def _spawn_yuetu_sparkles(battle, victim) -> None:
+    """对 victim 撒 2 颗星光 (左右分开漂移), 从头上方升起 (exe FUN_004e8192 loop ×2)."""
+    vx, vy = _victim_ground(victim)
+    for i in range(2):
+        e = battle.engine.spawn(think_fn=yuetu_sparkle_think)
+        e.atlas_slot = YT_SPARKLE_ATLAS
+        e.frame_idx = YT_SPARKLE_FRAMES[0][0]
+        e.flags |= 0x40
+        e.x = vx
+        e.y = vy
+        # 从敌人头顶一点喷出 (2 颗同起点, 靠 vx 左右分开 = 喷射)
+        e.z = -(YT_SPARKLE_HEIGHT << 16)
+        e.vz = -(YT_SPARKLE_VZ << 16)            # 上喷 (我们约定上空 = 负 z)
+        e.user_data['kind'] = 'hit_effect'
+        e.user_data['projectile'] = True
+        e.user_data['sparkle'] = True
+        e.user_data['draw_order'] = 20           # 画在魔画(10)之上 (魔画是背景线条画, 星光在前)
+        e.user_data['vx'] = (YT_SPARKLE_DX if i == 0 else -YT_SPARKLE_DX) << 16
+        e.user_data['frame_idx'] = 0
+        e.user_data['frame_tick'] = 0
+
+
+def _yt_hit_persist_think(e: "Entity", eng: "Engine") -> None:
+    """空 think: 仅为让累积的受击特效**不被 engine.tick sweep 回收** (sweep 只清无 think 的 hit_effect).
+    seq 播完后 projectile=True 让它定格渲染, beast 末尾统一 destroy."""
+    return
+
+
+def _spawn_yuetu_hit(battle, caster, victim, anchors) -> list:
+    """对 victim spawn 1 组**正常受击特效** (et00 紫星 + ef010 红刺, 同普通命中), 但实体持久(不自毁).
+    每敌**第一组随机抖动 ±8px 定锚点, 之后都叠在该锚点** (anchors 缓存). 返回 entity 列表供末尾清除."""
+    from core.hit_effect_seq import (
+        HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX, pick_hit_effects,
+    )
+    from core.sprites.base import TILE_W, TILE_H
+    key = id(victim)
+    if key not in anchors:               # 第一组: 随机抖动定锚点; 后续复用
+        anchors[key] = (battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX),
+                        battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX))
+    jx, jy = anchors[key]
+    # hit-fx 朝向 = victim 原朝向反向 (范围攻击不转向); 跟 combat._emit_hit_effect 一致
+    ef_facing = (-victim.facing[0], -victim.facing[1])
+    specs = pick_hit_effects(caster.name, None, ef_facing)
+    cx = victim.x * TILE_W + TILE_W // 2 + jx
+    cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX + jy
+    out = []
+    for spec in specs:
+        # 固定中心 (不抖动): 累积的紫星/红刺精确叠在同一点 (普通命中会 ±8px 抖, 月兔这里不抖)
+        e = battle.engine.spawn(think_fn=_yt_hit_persist_think)   # 带 think → 豁免 sweep 回收
+        e.x = cx << 16
+        e.y = cy << 16
+        e.z = 0
+        e.user_data['kind'] = 'hit_effect'
+        e.user_data['atlas_key'] = spec.atlas_key
+        e.user_data['projectile'] = True         # seq 播完定格仍渲染 (累积不消失)
+        e.user_data['burst'] = True
+        e.user_data['draw_order'] = 15            # 受击特效在魔画之上, 小碎屑(20)之下
+        battle.engine.attach_seq(e, spec.to_bytecode())
+        out.append(e)
+    return out
+
+
+def yuetu_beast_think(e: "Entity", eng: "Engine") -> None:
+    ud = e.user_data
+    if 'victims' not in ud:
+        return
+    battle, caster = ud['battle'], ud['caster']
+    if e.state_code == _YT_DESCEND:
+        e.z += YT_DESCEND_VZ << 16
+        _yt_animate(e)
+        if e.z >= -(YT_HOVER_HEIGHT << 16):        # 落到悬空高度 (仍在空中)
+            e.z = -(YT_HOVER_HEIGHT << 16)
+            ud['hold_tick'] = 0
+            e.state_code = _YT_BARRAGE
+    elif e.state_code == _YT_BARRAGE:
+        _yt_animate(e)
+        ud['hold_tick'] += 1
+        t = ud['hold_tick']
+        # 最后 LEAD tick: 命中特效持续生成累积 (不消失) + 小碎屑 + **受击反应全程持续** (与特效同时).
+        if t >= YT_HOLD_TICKS - YT_BARRAGE_LEAD:
+            from core.battle import combat
+            since = t - (YT_HOLD_TICKS - YT_BARRAGE_LEAD)
+            for v in ud['victims']:
+                if not v.alive:
+                    continue
+                if since % YT_HIT_INTERVAL == 0:
+                    ud['bursts'].extend(_spawn_yuetu_hit(battle, caster, v, ud['hit_anchor']))
+                if since % YT_REACT_INTERVAL == 0:
+                    combat.set_reaction(v, "hit", None)       # 受击反应 (与受击特效/星光同时, 无伤害)
+                _spawn_yuetu_sparkles(battle, v)              # 小碎屑点缀 (exe FUN_004e8192)
+        if t >= YT_HOLD_TICKS:
+            # 最后一次伤害 + 累积的命中特效**全部一起消失**
+            _aoe_hit_all(battle, caster, ud['victims'])
+            for be in ud['bursts']:
+                eng.destroy(be)
+            ud['bursts'].clear()
+            e.state_code = _YT_RISE
+    elif e.state_code == _YT_RISE:
+        e.z -= YT_DESCEND_VZ << 16
+        _yt_animate(e)
+        if (e.z >> 16) <= -(YT_HOVER_HEIGHT + YT_DROP):
+            ud['coord'].user_data['eson_done'] = True
+            eng.destroy(e)
+
+
+def spawn_yuetu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
+    """美丽月兔: 召唤线条魔画落中心循环绘制 + 末尾星光弹幕 + AOE 伤害 + 升空."""
+    coord.user_data['eson_done'] = False
+    victims = _eson_collect_victims(battle, caster)
+    e = battle.engine.spawn(think_fn=yuetu_beast_think)
+    e.atlas_slot = atlas
+    e.frame_idx = 0
+    e.flags |= 0x40
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['draw_order'] = 0             # 魔画是**背景**线条画 → 大白爆/星光(后 spawn)画在它之上
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['victims'] = victims
+    e.user_data['anim_tick'] = 0
+    e.user_data['bursts'] = []                # 累积的命中特效, 末尾统一清除
+    e.user_data['hit_anchor'] = {}            # 每敌的受击特效锚点偏移 (首组随机, 后续复用)
+    e.x, e.y = _victim_ground(caster)         # 战场中心 = caster tile
+    e.z = -((YT_HOVER_HEIGHT + YT_DROP) << 16)   # 从高处落到悬空高度
+    e.state_code = _YT_DESCEND
 
 
 # ============ AOE 占位 (酷酷猫/分身术/超亂舞, 待做专属演出) ============
