@@ -1240,35 +1240,25 @@ def _yt_hit_persist_think(e: "Entity", eng: "Engine") -> None:
 
 
 def _spawn_yuetu_hit(battle, caster, victim, anchors) -> list:
-    """对 victim spawn 1 组**正常受击特效** (et00 紫星 + ef010 红刺, 同普通命中), 但实体持久(不自毁).
-    每敌**第一组随机抖动 ±8px 定锚点, 之后都叠在该锚点** (anchors 缓存). 返回 entity 列表供末尾清除."""
-    from core.hit_effect_seq import (
-        HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX, pick_hit_effects,
-    )
+    """对 victim spawn 1 组**正常受击特效** (复用 combat 的 spec/spawn — 与普通命中同一套真值), 但
+    实体持久不自毁 (累积叠加). 每敌**第一组随机抖动 ±8px 定锚点, 之后都叠在该锚点** (anchors 缓存).
+    与普通命中差异仅: 固定锚点(非每次抖) + persist(累积). 返回 entity 列表供末尾清除."""
+    from core.battle import combat
+    from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
     from core.sprites.base import TILE_W, TILE_H
     key = id(victim)
     if key not in anchors:               # 第一组: 随机抖动定锚点; 后续复用
         anchors[key] = (battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX),
                         battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX))
     jx, jy = anchors[key]
-    # hit-fx 朝向 = victim 原朝向反向 (范围攻击不转向); 跟 combat._emit_hit_effect 一致
-    ef_facing = (-victim.facing[0], -victim.facing[1])
-    specs = pick_hit_effects(caster.name, None, ef_facing)
     cx = victim.x * TILE_W + TILE_W // 2 + jx
     cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX + jy
     out = []
-    for spec in specs:
-        # 固定中心 (不抖动): 累积的紫星/红刺精确叠在同一点 (普通命中会 ±8px 抖, 月兔这里不抖)
-        e = battle.engine.spawn(think_fn=_yt_hit_persist_think)   # 带 think → 豁免 sweep 回收
-        e.x = cx << 16
-        e.y = cy << 16
-        e.z = 0
-        e.user_data['kind'] = 'hit_effect'
-        e.user_data['atlas_key'] = spec.atlas_key
-        e.user_data['projectile'] = True         # seq 播完定格仍渲染 (累积不消失)
-        e.user_data['burst'] = True
-        e.user_data['draw_order'] = 15            # 受击特效在魔画之上, 小碎屑(20)之下
-        battle.engine.attach_seq(e, spec.to_bytecode())
+    for spec in combat.hit_effect_specs(victim, caster.name):   # 复用: 受击放哪些特效
+        e = combat._spawn_effect_entity(battle, cx, cy, spec,   # 复用: spawn + attach_seq
+                                        think_fn=_yt_hit_persist_think,  # 豁免 sweep 回收
+                                        persist=True, draw_order=15)
+        e.user_data['burst'] = True            # 标记供 beast 末尾统一销毁
         out.append(e)
     return out
 

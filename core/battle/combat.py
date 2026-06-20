@@ -73,16 +73,10 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
     技能攻击 (pending_skill_id != None) 额外 spawn 1 个特效 (= 技能 dispatcher 在 IMPACT
     时主动调 FUN_004d0c90 加挂的, 见 SKILL_IMPACT_EXTRA).
     """
-    from core.hit_effect_seq import (
-        HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX, pick_hit_effects,
-    )
+    from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
     from core.skill_seq import has_skill_impact_extra, skill_impact_extra_seq
     from core.sprites.base import TILE_W, TILE_H
-    # hit-fx 方向 = victim 自己朝向的反向 (exe: 00655c10[006418dc[victim_facing]], 006418dc=[1,0,3,2]
-    # 即 UP↔DN/LF↔RT 反向). 普攻时 victim 已转向攻击者, -victim.facing == attacker.facing (等价);
-    # 范围攻击 victim 不转向 → 用 victim 原朝向反向 (而非 attacker.facing).
-    ef_facing = (-defender.facing[0], -defender.facing[1])
-    specs = pick_hit_effects(attacker.name, None, ef_facing)
+    specs = hit_effect_specs(defender, attacker.name)
     cx = defender.x * TILE_W + TILE_W // 2
     cy = defender.y * TILE_H + TILE_H // 2
     for spec in specs:
@@ -115,18 +109,32 @@ def _spawn_skill_extra_effect(battle: "TacticsBattle", world_x: int, world_y: in
     battle.engine.attach_seq(e, tuple_to_bytecode(seq_tuples))
 
 
-def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, spec) -> None:
+def hit_effect_specs(defender: BattleUnit, attacker_name: str | None) -> list:
+    """命中产生的特效 spec 列表 (et00 紫星/长椭圆 + ef010 红刺). 供 _emit_hit_effect 及召唤技
+    (如月兔累积受击特效) 共用 — 受击特效"放哪些"是一处真值. hit-fx 朝向 = victim 原朝向反向."""
+    from core.hit_effect_seq import pick_hit_effects
+    ef_facing = (-defender.facing[0], -defender.facing[1])
+    return pick_hit_effects(attacker_name, None, ef_facing)
+
+
+def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, spec,
+                         *, think_fn=None, persist: bool = False, draw_order: int = 0):
     """通用 effect entity spawn: 跟原版 FUN_004d0c90 blood_spawn 同套路.
-    spawn anim_engine entity → 设世界坐标 → attach_seq 跑 FM op 字节码.
-    EXIT op 自然结束后 playing flag 自动落下, render 端跳过该 entity.
-    """
-    e = battle.engine.spawn()
+    spawn anim_engine entity → 设世界坐标 → attach_seq 跑 FM op 字节码. 返回 entity.
+    EXIT op 自然结束后 playing flag 自动落下, render 端跳过该 entity (= 一次性, engine 回收).
+    persist=True (+ think_fn 豁免 sweep): seq 播完定格仍渲染 (累积不消失, 调用方负责销毁)."""
+    e = battle.engine.spawn(think_fn=think_fn)
     e.x = world_x << 16
     e.y = world_y << 16
     e.z = 0
     e.user_data['kind'] = 'hit_effect'
     e.user_data['atlas_key'] = spec.atlas_key
+    if persist:
+        e.user_data['projectile'] = True     # 播完定格仍渲染
+    if draw_order:
+        e.user_data['draw_order'] = draw_order
     battle.engine.attach_seq(e, spec.to_bytecode())
+    return e
 
 
 def strike_skill(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:
