@@ -473,9 +473,35 @@ def test_mfeng_revive_and_feathers():
     assert b._pending_turn_end is True
 
 
+def test_kukumao_smile_cat_performance():
+    """酷酷猫 0x03 (解异常, 治疗类): 笑脸猫五段静态演出 (eson04a-e 257-261), 不伤敌, 收尾."""
+    from core.son_transform import start_son_transform
+    from core.raw_attack_seqs import atlas_resource
+    from core.fm_frames import FM_FRAMES
+    b, caster, d1, d2 = _fixture()
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x03
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x03)
+    seen_atlas = set()
+    for _ in range(400):
+        b.engine.tick()
+        for e in b.engine.entities:
+            if e.user_data.get('kukumao'):
+                fr = FM_FRAMES.get(atlas_resource(e.atlas_slot & 0xffff))
+                if fr is not None and e.is_playing():
+                    seen_atlas.add(e.atlas_slot)
+        if b._pending_turn_end:
+            break
+    assert {257, 258, 259, 260, 261} <= seen_atlas, f"应播完笑脸猫五段 eson04a-e, 实际 {seen_atlas}"
+    assert d1.hp == 50 and d2.hp == 50, "酷酷猫是解异常治疗类, 不应伤敌"
+    assert b._pending_turn_end is True
+
+
 def test_son_aoe_placeholder_skills_damage():
-    """酷酷猫/分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
-    for sid in (0x03, 0x04, 0x08):
+    """分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
+    for sid in (0x04, 0x08):
         b, caster, d1, d2, seen = _run_son_skill(sid)
         assert d1.hp < 50 and d2.hp < 50
         assert b._pending_turn_end is True

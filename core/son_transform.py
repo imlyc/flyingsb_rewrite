@@ -37,7 +37,7 @@ SON_BEAST_CONFIG: dict[int, tuple] = {
     0x00: ('eson01',),
     0x01: ('qinglong', 255),    # 青龙 eson02: 盘踞神兽 + 冰锥雨 (见 video 1:00:48)
     0x02: ('baihu', 256),       # 白虎 eson03: 盘踞神兽 + 旋风 (以风击退敌人, ehari00 旋涡)
-    0x03: ('aoe',),             # 酷酷猫 (TODO eson04a-e 257-261)
+    0x03: ('kukumao', 257),     # 酷酷猫 eson04a-e: 笑脸猫五段演出 + 解异常 (治疗类, 解异常暂占位)
     0x04: ('aoe',),             # 分身术 (TODO 4 分身)
     0x05: ('zhuque', 262),      # 朱雀 eson05: 红凤凰悬空 + 火雨 ("以火攻击敌人")
     0x06: ('xuanwu', 263),      # 玄武 eson06: 盘踞神兽 + 地震 (屏幕震动) + 每敌冰柱 eba00/01
@@ -67,6 +67,8 @@ def _spawn_beast_attack(battle, caster, coord: "Entity") -> None:
         spawn_yuetu_beast(battle, caster, coord, cfg[1])
     elif kind == 'mfeng':
         spawn_mfeng_beast(battle, caster, coord, cfg[1])
+    elif kind == 'kukumao':
+        spawn_kukumao_beast(battle, caster, coord)
     elif kind == 'sweep':
         spawn_sweep_beast(battle, caster, coord, cfg[1], cfg[2])
     else:
@@ -1543,7 +1545,63 @@ def spawn_mfeng_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     _spawn_mfeng_clouds(battle, caster, coord)    # 8 朵祥云散布簇拥
 
 
-# ============ AOE 占位 (酷酷猫/分身术/超亂舞, 待做专属演出) ============
+# ============ 酷酷猫: 笑脸猫五段演出 + 解异常 (exe FUN_004f5f0d spawn + FUN_004f5ecc think + seq 0x671b80) ============
+# 原版: "变成笑容猫, 解除全部的异常状态". 静态居中播放五段动画 (eson04a-e 257-261): 黑剪影→橙猫→
+# 逐级放大到大笑脸 (柴郡猫式咧嘴, 末段只剩漂浮的大笑). think 无物理 (静态), seq 播完发-100 销毁.
+# ⚠目标=队友(解异常治疗类, 非攻击). **解异常暂占位** (无异常状态系统, 留 _kukumao_cure 钩子).
+KUKUMAO_HEIGHT = 90             # 居中高度 px (静态, 笑脸猫显示在屏幕中部)
+# seq 0x671b80: eson04a 帧0-4 → b/c/d/e 各(长hold帧0 + 帧1-3快闪). 省略原 sound 289 (wav 未接).
+KUKUMAO_SEQ = (
+    [('fm', 257, i, 3) for i in range(5)]
+    + [('fm', 258, 0, 24)] + [('fm', 258, i, 3) for i in (1, 2, 3)]
+    + [('fm', 259, 0, 24)] + [('fm', 259, i, 3) for i in (1, 2, 3)]
+    + [('fm', 260, 0, 24)] + [('fm', 260, i, 3) for i in (1, 2, 3)]
+    + [('fm', 261, 0, 24)] + [('fm', 261, i, 3) for i in (1, 2, 3)]
+    + [('exit',)]
+)
+
+
+def _kukumao_cure(battle, caster) -> None:
+    """酷酷猫解除全队异常状态. ⚠目前无异常状态系统 → 占位空操作.
+    待加状态系统后, 这里遍历队友清其异常状态字段 (allies = players if caster.is_player else enemies)."""
+    return
+
+
+def kukumao_think(e: "Entity", eng: "Engine") -> None:
+    """笑脸猫: 静态播 seq (atlas 自动切 257→261); 播完 → 解异常 + 收尾销毁 (exe FUN_004f5ecc)."""
+    ud = e.user_data
+    if 'kukumao' not in ud:
+        return
+    if e.is_playing():
+        ud['started'] = True
+        return
+    if ud.get('started') and not ud['done']:       # 五段演出播完
+        ud['done'] = True
+        _kukumao_cure(ud['battle'], ud['caster'])    # 解异常 (占位)
+        ud['coord'].user_data['eson_done'] = True
+        eng.destroy(e)
+
+
+def spawn_kukumao_beast(battle, caster, coord: "Entity") -> None:
+    """酷酷猫: 笑脸猫居中静态播五段演出 + 解异常 (无伤害)."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    coord.user_data['eson_done'] = False
+    e = battle.engine.spawn(think_fn=kukumao_think)
+    e.flags |= 0x40
+    e.x, e.y = _victim_ground(caster)             # 屏幕中心 = caster tile
+    e.z = -(KUKUMAO_HEIGHT << 16)
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['draw_order'] = 10
+    e.user_data['kukumao'] = True
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['started'] = False
+    e.user_data['done'] = False
+    battle.engine.attach_seq(e, tuple_to_bytecode(KUKUMAO_SEQ))
+
+
+# ============ AOE 占位 (分身术/超亂舞, 待做专属演出) ============
 _AOE_HOLD = 230
 
 
