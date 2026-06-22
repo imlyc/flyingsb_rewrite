@@ -549,9 +549,36 @@ def test_fenshen_clones_per_enemy_and_caster_somersault():
     assert b._pending_turn_end is True
 
 
-def test_son_aoe_placeholder_skills_damage():
-    """超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
-    for sid in (0x08,):
-        b, caster, d1, d2, seen = _run_son_skill(sid)
-        assert d1.hp < 50 and d2.hp < 50
-        assert b._pending_turn_end is True
+def test_luanwu_skateboards():
+    """超亂舞 0x08: 施法姿(ps_CSON102) → 16 滑板(eson08 266)满天飞 + 周期受击 + 末尾伤害, 滑板全销毁."""
+    from core.son_transform import start_son_transform, LUANWU_SKATE_ATLAS, LUANWU_COUNT
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x08
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x08)
+    assert caster.cast_pose_frame is not None, "超亂舞起手应有 ps_CSON102 施法姿"
+    skate_ids = set()
+    saw_cast_hold = saw_react = False
+    for _ in range(400):
+        b.engine.tick()
+        if caster.cast_pose_frame is not None:
+            saw_cast_hold = True        # 施法姿保持 (不翻跟斗)
+        if d1.reaction_seq is not None or d2.reaction_seq is not None:
+            saw_react = True
+        for e in b.engine.entities:
+            if e.user_data.get('skate') and e.atlas_slot == LUANWU_SKATE_ATLAS:
+                skate_ids.add(id(e))
+        if b._pending_turn_end:
+            break
+    assert len(skate_ids) == LUANWU_COUNT, f"应有 {LUANWU_COUNT} 个滑板, 实际 {len(skate_ids)}"
+    assert saw_cast_hold, "孙悟空应保持施法姿 (不翻跟斗)"
+    assert saw_react, "滑板期敌人应周期受击"
+    assert d1.hp < 50 and d2.hp < 50, "超亂舞应伤到两敌"
+    assert caster.cast_pose_frame is None, "收尾应清施法姿"
+    # 收尾滑板应全销毁
+    assert not any(e.user_data.get('skate') for e in b.engine.entities if e.flags & 0x800), \
+        "收尾时滑板应全销毁"
+    assert b._pending_turn_end is True
