@@ -25,6 +25,10 @@ POOL, CHOSEN = 0, 1
 COLS = 4  # 每个区域每行格数
 
 
+# 我方待选区的固定排序 (角色移回待选时按此名册顺序归位)
+_ROSTER_IDX = {name: i for i, name in enumerate(PLAYER_ROSTER)}
+
+
 def _enemy_sprite_key(name: str) -> str | None:
     spr = ENEMY_TEMPLATES[name].get("sprite")
     return f"ps_{spr}" if spr else None
@@ -61,13 +65,15 @@ class ArenaSetupScene(Scene):
         self.name_font = load_chinese_font(14)
         self.hint_font = load_chinese_font(15)
 
-        # 四个名单 (存名字, 战斗时再造 BattleUnit). 出战名单 = 上次记忆 (落盘读回).
+        # 我方: 待选↔出战互移 (单选 = 每角色只能选一次, 但队伍可多人), 选中即从待选移走.
+        # 敌方: 待选区常驻名册, 多选 (e_chosen 可含重复, 同角色同时在待选+出战).
+        # 出战名单 = 上次记忆 (落盘读回).
         from scenes.arena.store import load_selection
         saved_p, saved_e = load_selection()
-        self.p_chosen: list[str] = list(saved_p)
-        self.e_chosen: list[str] = list(saved_e)
+        self.p_chosen: list[str] = list(dict.fromkeys(saved_p))   # 去重保序
         self.p_pool: list[str] = [n for n in PLAYER_ROSTER if n not in self.p_chosen]
-        self.e_pool: list[str] = [n for n in ENEMY_ROSTER if n not in self.e_chosen]
+        self.e_pool: list[str] = list(ENEMY_ROSTER)
+        self.e_chosen: list[str] = list(saved_e)
 
         # 光标: (side, region, idx)
         self.side = LEFT
@@ -168,18 +174,28 @@ class ArenaSetupScene(Scene):
                 self.idx = ni
 
     def _move_focused(self) -> None:
-        src = self._cur_list()
-        if not src:
+        cur = self._cur_list()
+        if not cur:
             return
-        name = src.pop(self.idx)
-        dst_region = CHOSEN if self.region == POOL else POOL
-        dst = self._list(self.side, dst_region)
-        dst.append(name)
-        # 当前区域被挪空 → 焦点跟随刚挪过去的角色 (目标区域末位)
-        if not src:
-            self.region = dst_region
-            self.idx = len(dst) - 1
+        if self.side == LEFT:
+            # 我方: 原 KOF 移动模型 — 待选↔出战互移, 选中即移走 (每角色只能选一次)
+            name = cur.pop(self.idx)
+            dst_region = CHOSEN if self.region == POOL else POOL
+            dst = self._list(LEFT, dst_region)
+            dst.append(name)
+            if dst_region == POOL:            # 待选区保持固定名册顺序
+                dst.sort(key=lambda n: _ROSTER_IDX[n])
+            if not cur:                       # 当前区挪空 → 焦点跟随该角色
+                self.region = dst_region
+                self.idx = dst.index(name)
+            else:
+                self._clamp_idx()
+        elif self.region == POOL:
+            # 敌方待选: 常驻不移除, 多选追加一个副本 (可重复)
+            self.e_chosen.append(cur[self.idx])
         else:
+            # 敌方出战: 移除该实例 (待选区仍有)
+            cur.pop(self.idx)
             self._clamp_idx()
 
     def _start_battle(self) -> None:
