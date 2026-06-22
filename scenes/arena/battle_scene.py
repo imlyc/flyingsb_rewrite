@@ -21,12 +21,16 @@ from scenes.arena.terrain import ArenaTerrain
 def _random_positions(
     terrain: ArenaTerrain, rng: random.Random, count: int,
     x_lo: int, x_hi: int, used: set[tuple[int, int]],
+    y_lo: int | None = None, y_hi: int | None = None,
 ) -> list[tuple[int, int]]:
-    """在 x∈[x_lo,x_hi], y∈内部 的空格里随机挑 count 个互不重叠的位置."""
+    """在 x∈[x_lo,x_hi], y∈[y_lo,y_hi] 的空格里随机挑 count 个互不重叠的位置.
+    y 范围默认整张内部 (1..h-2)."""
+    y0 = 1 if y_lo is None else y_lo
+    y1 = (terrain.h - 2) if y_hi is None else y_hi
     cands = [
         (x, y)
         for x in range(x_lo, x_hi + 1)
-        for y in range(1, terrain.h - 1)
+        for y in range(y0, y1 + 1)
         if terrain.passable(x, y) and (x, y) not in used
     ]
     rng.shuffle(cands)
@@ -60,17 +64,20 @@ class ArenaBattleScene(BattleScene):
         players = [build_player_unit(n) for n in player_names]
         enemies = [build_enemy_unit(n) for n in enemy_names]
 
+        # 敌我双方位置随机, 不分左右. 优先居中内缩区域 (远离围墙 + 开局都在视野内),
+        # 数量太多排不下时再回退到全内部补齐.
         used: set[tuple[int, int]] = set()
-        mid = terrain.w // 2
-        ppos = _random_positions(terrain, rng, len(players), 1, mid - 1, used)
-        epos = _random_positions(terrain, rng, len(enemies), mid, terrain.w - 2, used)
-        # 兜底: 哪侧没排满, 从全图剩余空格补
-        if len(ppos) < len(players):
-            ppos += _random_positions(terrain, rng, len(players) - len(ppos),
-                                      1, terrain.w - 2, used)
-        if len(epos) < len(enemies):
-            epos += _random_positions(terrain, rng, len(enemies) - len(epos),
-                                      1, terrain.w - 2, used)
+        total = len(players) + len(enemies)
+        mx = max(2, terrain.w // 5)               # 左右各内缩 ~1/5
+        my = max(2, terrain.h // 5)
+        allpos = _random_positions(terrain, rng, total,
+                                   mx, terrain.w - 1 - mx, used,
+                                   my, terrain.h - 1 - my)
+        if len(allpos) < total:                   # 居中区不够 → 全内部补
+            allpos += _random_positions(terrain, rng, total - len(allpos),
+                                        1, terrain.w - 2, used)
+        ppos = allpos[:len(players)]
+        epos = allpos[len(players):]
 
         battle = TacticsBattle(
             players, enemies,
