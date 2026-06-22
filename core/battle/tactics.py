@@ -452,10 +452,17 @@ class TacticsBattle:
             u.pending_impact_count = 0
             u.pending_impact_total = 1
             start_son_transform(self, u, self.aim_cursor, self.aim_skill_id)
+            self._clear_aim_overlay()
             return True
         combat.begin_attack(self, u, primary, skill_id=self.aim_skill_id,
                             cursor=self.aim_cursor)
+        self._clear_aim_overlay()
         return True
+
+    def _clear_aim_overlay(self) -> None:
+        """攻击/施法已确认 → 清 AIM 高亮 (红伤害范围 / 白攻击范围 / cursor 消失), 攻击走 pending_*."""
+        self.aim_cursor = None
+        self.aim_attack_range = set()
 
     def cancel_attack_aim(self) -> bool:
         """AIM 阶段 ESC: 取消, 退回 PLAYER_MOVE. 清 cursor / 攻击范围."""
