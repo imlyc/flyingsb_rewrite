@@ -46,9 +46,9 @@ class TitleScene(Scene):
         self.title_font = load_chinese_font(64)
         self.item_font = load_chinese_font(36)
         self.items: list[tuple[str, callable]] = [
+            ("竞技场", self._action_arena),
             ("新游戏", self._action_new_game),
             ("读取存档", self._action_load_save),
-            ("竞技场", self._action_arena),
             ("退出", self._action_quit),
         ]
         self.selected = 0
