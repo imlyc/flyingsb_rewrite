@@ -39,8 +39,11 @@ class TacticsBattle:
         rng: random.Random | None = None,
         player_positions: list[tuple[int, int]] | None = None,
         enemy_positions: list[tuple[int, int]] | None = None,
+        arena_mode: bool = False,
     ) -> None:
         self.rng = rng or random.Random()
+        # 竞技场模式: 胜利不结算经验/金钱/升级 (纯对战沙盒)
+        self.arena_mode = arena_mode
         self.players = players
         self.enemies = enemies
         self.map = battle_map or default_battle_map(rng=self.rng)
@@ -272,10 +275,13 @@ class TacticsBattle:
             return True
         if not any(e.alive for e in self.enemies):
             self.phase = Phase.VICTORY
-            self.exp_gained = sum(e.exp_reward for e in self.enemies)
-            self.money_gained = sum(e.money_reward for e in self.enemies)
-            self._log(f"敌人全灭! 经验+{self.exp_gained} 金钱+{self.money_gained}")
-            self._allocate_levelups()
+            if self.arena_mode:
+                self._log("敌人全灭! (竞技场模式: 无经验结算)")
+            else:
+                self.exp_gained = sum(e.exp_reward for e in self.enemies)
+                self.money_gained = sum(e.money_reward for e in self.enemies)
+                self._log(f"敌人全灭! 经验+{self.exp_gained} 金钱+{self.money_gained}")
+                self._allocate_levelups()
             return True
         return False
 

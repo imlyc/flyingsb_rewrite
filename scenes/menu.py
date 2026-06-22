@@ -48,6 +48,7 @@ class TitleScene(Scene):
         self.items: list[tuple[str, callable]] = [
             ("新游戏", self._action_new_game),
             ("读取存档", self._action_load_save),
+            ("竞技场", self._action_arena),
             ("退出", self._action_quit),
         ]
         self.selected = 0
@@ -92,6 +93,10 @@ class TitleScene(Scene):
             print(f"读取存档失败: {e}")
             return
         self.next_scene = WorldMapScene(self.surface, self.audio, save=save)
+
+    def _action_arena(self) -> None:
+        from scenes.arena import ArenaSetupScene
+        self.next_scene = ArenaSetupScene(self.surface, self.audio)
 
     def _action_quit(self) -> None:
         self._quit_requested = True
