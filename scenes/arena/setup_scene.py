@@ -61,11 +61,13 @@ class ArenaSetupScene(Scene):
         self.name_font = load_chinese_font(14)
         self.hint_font = load_chinese_font(15)
 
-        # 四个名单 (存名字, 战斗时再造 BattleUnit)
-        self.p_pool: list[str] = list(PLAYER_ROSTER)
-        self.p_chosen: list[str] = []
-        self.e_pool: list[str] = list(ENEMY_ROSTER)
-        self.e_chosen: list[str] = []
+        # 四个名单 (存名字, 战斗时再造 BattleUnit). 出战名单 = 上次记忆 (落盘读回).
+        from scenes.arena.store import load_selection
+        saved_p, saved_e = load_selection()
+        self.p_chosen: list[str] = list(saved_p)
+        self.e_chosen: list[str] = list(saved_e)
+        self.p_pool: list[str] = [n for n in PLAYER_ROSTER if n not in self.p_chosen]
+        self.e_pool: list[str] = [n for n in ENEMY_ROSTER if n not in self.e_chosen]
 
         # 光标: (side, region, idx)
         self.side = LEFT
@@ -183,6 +185,8 @@ class ArenaSetupScene(Scene):
     def _start_battle(self) -> None:
         if not self.p_chosen or not self.e_chosen:
             return
+        from scenes.arena.store import save_selection
+        save_selection(self.p_chosen, self.e_chosen)   # 记住本次出战名单
         from scenes.arena.battle_scene import ArenaBattleScene
         self.next_scene = ArenaBattleScene(
             self.surface, self.audio,
