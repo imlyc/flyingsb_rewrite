@@ -114,8 +114,8 @@ class ArenaSetupScene(Scene):
             self._start_battle()
             return True
         if k == pygame.K_TAB:
-            # 四区轮换 (跳过空区域): 左可选 → 左出战 → 右可选 → 右出战 → 循环
-            order = [(LEFT, POOL), (LEFT, CHOSEN), (RIGHT, POOL), (RIGHT, CHOSEN)]
+            # 四区轮换 (跳过空区域): 我方待选 → 敌方待选 → 我方出战 → 敌方出战 → 循环
+            order = [(LEFT, POOL), (RIGHT, POOL), (LEFT, CHOSEN), (RIGHT, CHOSEN)]
             cur = order.index((self.side, self.region))
             for step in range(1, len(order) + 1):
                 side, region = order[(cur + step) % len(order)]
