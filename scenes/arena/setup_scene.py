@@ -23,6 +23,8 @@ from scenes.arena.roster import ENEMY_ROSTER, PLAYER_ROSTER
 LEFT, RIGHT = 0, 1
 POOL, CHOSEN = 0, 1
 COLS = 4  # 每个区域每行格数
+# 四区轮换顺序: 我方待选 → 敌方待选 → 我方出战 → 敌方出战 → 循环
+TAB_ORDER = [(LEFT, POOL), (RIGHT, POOL), (LEFT, CHOSEN), (RIGHT, CHOSEN)]
 
 
 # 我方待选区的固定排序 (角色移回待选时按此名册顺序归位)
@@ -86,10 +88,21 @@ class ArenaSetupScene(Scene):
 
     # ------- 生命周期 -------
     def on_enter(self) -> None:
+        self._focus_nonempty()      # 当前区为空则按 Tab 顺序跳到下一个非空区
         try:
             self.audio.play_bgm("INTRO_.WAV")
         except FileNotFoundError:
             pass
+
+    def _focus_nonempty(self) -> None:
+        """若当前焦点区为空, 沿 TAB_ORDER 移到第一个非空区 (全空则保持)."""
+        start = TAB_ORDER.index((self.side, self.region))
+        for step in range(len(TAB_ORDER)):
+            side, region = TAB_ORDER[(start + step) % len(TAB_ORDER)]
+            if self._list(side, region):
+                self.side, self.region = side, region
+                break
+        self._clamp_idx()
 
     # ------- 名单存取 -------
     def _list(self, side: int, region: int) -> list[str]:
@@ -122,8 +135,8 @@ class ArenaSetupScene(Scene):
             self._start_battle()
             return True
         if k == pygame.K_TAB:
-            # 四区轮换 (跳过空区域): 我方待选 → 敌方待选 → 我方出战 → 敌方出战 → 循环
-            order = [(LEFT, POOL), (RIGHT, POOL), (LEFT, CHOSEN), (RIGHT, CHOSEN)]
+            # 四区轮换 (跳过空区域)
+            order = TAB_ORDER
             cur = order.index((self.side, self.region))
             for step in range(1, len(order) + 1):
                 side, region = order[(cur + step) % len(order)]
