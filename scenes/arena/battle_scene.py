@@ -89,7 +89,8 @@ class ArenaBattleScene(BattleScene):
         self._console_small = self.small
 
     # 顶层命令: (标签, 类型)
-    _CONSOLE_TOP = [("增加敌人 ▸", "add_enemy"), ("关闭控制台", "close")]
+    _CONSOLE_TOP = [("增加敌人 ▸", "add_enemy"), ("退出战斗", "quit_battle"),
+                    ("关闭控制台", "close")]
 
     # ------- 输入 -------
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -130,6 +131,9 @@ class ArenaBattleScene(BattleScene):
             if kind == "add_enemy":
                 self._console_level = 1
                 self._console_idx = 0
+            elif kind == "quit_battle":
+                self._console_open = False
+                self.next_scene = self.return_scene   # 直接返回设置场景
             elif kind == "close":
                 self._console_open = False
         else:
