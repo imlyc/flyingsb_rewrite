@@ -208,6 +208,10 @@ def _tick_camera(scene: "BattleScene") -> None:
         int(round(u.render_x)), int(round(u.render_y)))
     scene._cam_x += (target_x - scene._cam_x) * scene.CAMERA_LERP
     scene._cam_y += (target_y - scene._cam_y) * scene.CAMERA_LERP
+    # 发布可见屏幕中心 (世界 px) 给满屏特效 (超亂舞) 当框中心
+    sw, sh = scene.surface.get_size()
+    scene.battle.view_center_world = (int(scene._cam_x) + sw // 2,
+                                      int(scene._cam_y) + sh // 2)
 
 
 def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:

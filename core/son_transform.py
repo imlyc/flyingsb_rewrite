@@ -293,6 +293,19 @@ def _victim_ground(victim) -> tuple[int, int]:
             (victim.y * TILE_H + TILE_H // 2) << 16)
 
 
+def _screen_center(battle, caster) -> tuple[int, int]:
+    """满屏/战场中心特效的本体位置 (x, y) 16.16.
+
+    优先用可见屏幕中心 (BattleScene 每帧发布的 battle.view_center_world). 否则施法者靠
+    地图/相机边缘时相机会 clamp, 施法者不在屏幕中心, 把神兽/特效锚在施法者格会让整体
+    偏到半屏 (超亂舞滑板/盘踞神兽等都有此问题). headless 无 UI 时回退到施法者格.
+    伤害目标由 _eson_collect_victims 按 caster+AOE 收集, 与本体位置无关, 故纯视觉安全."""
+    view = getattr(battle, 'view_center_world', None)
+    if view is not None:
+        return (view[0] << 16, view[1] << 16)
+    return _victim_ground(caster)
+
+
 def _eson_position_above(e: "Entity", victim) -> None:
     """把 eson01 放到 victim 正上方高空 (准备天降下落)."""
     e.x, e.y = _victim_ground(victim)
@@ -640,7 +653,7 @@ def spawn_sweep_beast(battle, caster, coord: "Entity", atlas: int, frame_count: 
     e.user_data['frame_count'] = max(1, frame_count)
     e.user_data['anim_tick'] = 0
     e.user_data['hold_tick'] = 0
-    e.x, e.y = _victim_ground(caster)        # AOE 中心 = caster tile
+    e.x, e.y = _screen_center(battle, caster)        # AOE 中心 = caster tile
     e.z = -ESON_SKY_HEIGHT_PX << 16
     e.state_code = _BEAST_DESCEND
 
@@ -753,7 +766,7 @@ def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['victims'] = victims
     e.user_data['anim_tick'] = 0
     e.user_data['rain_tick'] = 0
-    e.x, e.y = _victim_ground(caster)        # 战场中心 = caster tile
+    e.x, e.y = _screen_center(battle, caster)        # 战场中心 = caster tile
     e.z = -QL_DESCEND_HEIGHT << 16
     e.state_code = _QL_DESCEND
 
@@ -941,7 +954,7 @@ def spawn_baihu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['anim_tick'] = 0
     e.user_data['atk_tick'] = 0
     e.user_data['phase'] = 0.0
-    e.x, e.y = _victim_ground(caster)
+    e.x, e.y = _screen_center(battle, caster)
     e.z = -BH_DESCEND_HEIGHT << 16
     e.state_code = _BH_DESCEND
 
@@ -1025,7 +1038,7 @@ def zhuque_beast_think(e: "Entity", eng: "Engine") -> None:
         ud['fire_tick'] += 1
         t = ud['fire_tick']
         if t % ZHUQUE_FIRE_INTERVAL == 0 and t < ZHUQUE_FIRE_TICKS - ZHUQUE_FIRE_END_MARGIN:
-            cx, cy = _victim_ground(caster)         # 中心 = caster
+            cx, cy = _victim_ground(caster)         # 朱雀火雨以**施法者**为中心展开 (exe FUN_004f663a 用 DAT_00869c44 施法者坐标+随机偏移, 非屏幕中心)
             _spawn_fireball(battle, cx, cy)
         if t >= ZHUQUE_FIRE_TICKS:
             _aoe_hit_all(battle, caster, ud['victims'])   # 火雨止 → AOE 伤害
@@ -1057,7 +1070,7 @@ def spawn_zhuque_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
     e.user_data['victims'] = victims
-    e.x, e.y = _victim_ground(caster)
+    e.x, e.y = _screen_center(battle, caster)
     e.z = -(ZHUQUE_DESCEND_HEIGHT << 16)
     e.state_code = _ZQ_DESCEND
 
@@ -1209,7 +1222,7 @@ def spawn_xuanwu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['coord'] = coord
     e.user_data['victims'] = victims
     e.user_data['anim_tick'] = 0
-    e.x, e.y = _victim_ground(caster)         # 战场中心 = caster tile
+    e.x, e.y = _screen_center(battle, caster)         # 战场中心 = caster tile
     e.z = -XW_DESCEND_HEIGHT << 16
     e.state_code = _XW_DESCEND
 
@@ -1391,7 +1404,7 @@ def spawn_yuetu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['anim_tick'] = 0
     e.user_data['bursts'] = []                # 累积的命中特效, 末尾统一清除
     e.user_data['hit_anchor'] = {}            # 每敌的受击特效锚点偏移 (首组随机, 后续复用)
-    e.x, e.y = _victim_ground(caster)         # 战场中心 = caster tile
+    e.x, e.y = _screen_center(battle, caster)         # 战场中心 = caster tile
     e.z = -((YT_HOVER_HEIGHT + YT_DROP) << 16)   # 从高处落到悬空高度
     e.state_code = _YT_DESCEND
 
@@ -1525,7 +1538,7 @@ def mfeng_cloud_think(e: "Entity", eng: "Engine") -> None:
 
 def _spawn_mfeng_clouds(battle, caster, coord) -> None:
     """召唤 8 朵祥云 (位置固定/帧随机): 从同侧屏外飘入停在两侧, 悬停后**继续穿到对面**飘出."""
-    cx, cy = _victim_ground(caster)
+    cx, cy = _screen_center(battle, caster)
     for off, h, draw_order in MF_CLOUD_POSITIONS:
         side = 1 if off >= 0 else -1                  # 目标在右(+)/左(-)
         spawn_off = off + side * MF_CLOUD_SPAWN_EXTRA  # 同侧再外推 → 从同侧屏外飘入(不横穿)
@@ -1601,7 +1614,7 @@ def spawn_mfeng_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
     e.user_data['allies'] = allies
-    e.x, e.y = _victim_ground(caster)            # 中心 = caster tile
+    e.x, e.y = _screen_center(battle, caster)            # 中心 = caster tile
     e.z = -((MF_HOVER_HEIGHT + MF_DROP) << 16)   # 从高处降到悬停高度
     e.state_code = _MF_DESCEND
     coord.user_data['mf_leave'] = False
@@ -1651,7 +1664,7 @@ def spawn_kukumao_beast(battle, caster, coord: "Entity") -> None:
     coord.user_data['eson_done'] = False
     e = battle.engine.spawn(think_fn=kukumao_think)
     e.flags |= 0x40
-    e.x, e.y = _victim_ground(caster)             # 屏幕中心 = caster tile
+    e.x, e.y = _screen_center(battle, caster)             # 屏幕中心 = caster tile
     e.z = -(KUKUMAO_HEIGHT << 16)
     e.user_data['kind'] = 'hit_effect'
     e.user_data['draw_order'] = 10
@@ -1756,7 +1769,11 @@ def luanwu_coord_think(e: "Entity", eng: "Engine") -> None:
     battle, caster, coord = ud['battle'], ud['caster'], ud['coord']
     if not ud['spawned']:                                 # 起手 spawn 16 滑板
         ud['spawned'] = True
-        cx, cy = (coord.x >> 16), (coord.y >> 16)         # cursor 中心 (满屏飞的框中心)
+        # 框中心 = 可见屏幕中心 (满屏飞). 施法者靠地图/相机边缘时相机会 clamp, 此时
+        # 屏幕中心 ≠ 施法者格, 用施法者格当中心会让滑板整体偏到半屏 (bug). headless
+        # 无 UI 时回退到 cursor 格.
+        view = getattr(battle, 'view_center_world', None)
+        cx, cy = view if view is not None else ((coord.x >> 16), (coord.y >> 16))
         for i in range(LUANWU_COUNT):
             _spawn_skateboard(battle, cx, cy, coord, idx=i)
     ud['tick'] += 1

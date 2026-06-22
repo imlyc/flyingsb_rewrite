@@ -91,6 +91,9 @@ class TacticsBattle:
         # 屏幕震动偏移 (px): 玄武地震等由 engine entity 每 tick 写随机抖动, scene.draw 叠加到相机.
         # (0,0) = 不震. 见 core.son_transform earthquake_think (exe FUN_004d8b0c 抖相机原点).
         self.shake_offset: tuple[int, int] = (0, 0)
+        # 可见屏幕中心 (世界 px), 由 BattleScene 每帧发布. 满屏特效 (超亂舞滑板) 用它当
+        # 框中心, 避免施法者靠地图/相机边缘时特效整体偏到半屏. None = 无 UI (headless 测试).
+        self.view_center_world: tuple[int, int] | None = None
         self._SIG_IMPACT = SIG_IMPACT
         self._SIG_IMPACT_2 = SIG_IMPACT_2
         self._SIG_END = SIG_END
