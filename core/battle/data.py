@@ -112,6 +112,8 @@ class BattleUnit:
     # 翻跟头第 N 帧 (覆盖普通 sprite); cast_hidden → caster 完全不画 (神兽攻击阶段隐身).
     cast_flip_frame: int | None = None
     cast_hidden: bool = False
+    # 翻跟斗前的简短施法姿: ps_CSON102 帧索引 (非 None → render 显示该帧, 方向行×4+col).
+    cast_pose_frame: int | None = None
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,

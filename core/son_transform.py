@@ -38,7 +38,7 @@ SON_BEAST_CONFIG: dict[int, tuple] = {
     0x01: ('qinglong', 255),    # 青龙 eson02: 盘踞神兽 + 冰锥雨 (见 video 1:00:48)
     0x02: ('baihu', 256),       # 白虎 eson03: 盘踞神兽 + 旋风 (以风击退敌人, ehari00 旋涡)
     0x03: ('kukumao', 257),     # 酷酷猫 eson04a-e: 笑脸猫五段演出 + 解异常 (治疗类, 解异常暂占位)
-    0x04: ('aoe',),             # 分身术 (TODO 4 分身)
+    0x04: ('fenshen', 2),       # 分身术 eson: 孙悟空(cson_e0)分 4 身 上下左右各攻击, 末身结算 AOE
     0x05: ('zhuque', 262),      # 朱雀 eson05: 红凤凰悬空 + 火雨 ("以火攻击敌人")
     0x06: ('xuanwu', 263),      # 玄武 eson06: 盘踞神兽 + 地震 (屏幕震动) + 每敌冰柱 eba00/01
     0x07: ('yuetu', 264),       # 美丽月兔 eson07a/b: 召唤线条魔画 + 星光弹幕 (ds_chiri)
@@ -75,10 +75,21 @@ def _spawn_beast_attack(battle, caster, coord: "Entity") -> None:
         spawn_aoe_only(battle, caster, coord)
 
 # coordinator 状态码 (避开 20 = PROJ_STATE_DONE, units_animating 用它判投射物结束)
+_CAST = 90               # 翻跟斗前的简短施法姿 (ps_CSON102 最后两列)
 _FLIP_OUT = 100
 _TRANSFORM = 110
 _FLIP_IN = 120
 _DONE = 130
+
+# 施法姿: ps_CSON102 方向行 (0=上/背,1=下/正,2=左,3=右) 的最后两列 (col 2,3).
+CAST_POSE_COLS = (2, 3)
+CAST_POSE_FRAME_TICKS = 6      # 每帧 tick (简短)
+_FACING_TO_CSON_ROW = {(0, -1): 0, (0, 1): 1, (-1, 0): 2, (1, 0): 3}
+
+
+def _caster_cson_row(caster) -> int:
+    """caster 朝向 → ps_CSON102/cson 方向行."""
+    return _FACING_TO_CSON_ROW.get(tuple(getattr(caster, 'facing', (0, 1))), 1)
 
 FLIP_HOLD_TICKS = 3        # 翻跟头每帧 hold (8 帧 × 3 = 24 tick ≈ 720ms)
 TRANSFORM_TICKS = 40          # 变身形态攻击阶段时长 (占位, 后续 eson01 下落逐敌取代)
@@ -107,23 +118,28 @@ def _emong_seg(base: int) -> list[tuple]:
 EMONG_SEGS = [_emong_seg(0), _emong_seg(6), _emong_seg(12)]   # 3 段随机选
 
 
-def _spawn_smoke(battle, caster) -> None:
-    """在 caster 周围撒 SMOKE_COUNT 个随机 emong 烟雾粒子 (随机段 + 随机位置 + 向上飘)."""
-    from core.sprites.base import TILE_W, TILE_H
+def _spawn_smoke_at(battle, world_x: int, world_y: int, count: int = None) -> None:
+    """在像素坐标 (world_x, world_y) 周围撒 emong 烟雾粒子 (随机段 + 随机位置 + 向上飘)."""
+    from core.sprites.base import TILE_W
     from core.anim_engine.bytecode import tuple_to_bytecode
     rng = battle.rng
-    cx = caster.x * TILE_W + TILE_W // 2
-    cy = caster.y * TILE_H + TILE_H // 2
-    for _ in range(SMOKE_COUNT):
+    n = SMOKE_COUNT if count is None else count
+    for _ in range(n):
         seg = EMONG_SEGS[rng.randint(0, 2)]
-        ox = rng.randint(-TILE_W // 3, TILE_W // 3)   # caster 周围 ±~21px 散布
+        ox = rng.randint(-TILE_W // 3, TILE_W // 3)
         oy = rng.randint(-8, 8)
         e = battle.engine.spawn()
-        e.x = (cx + ox) << 16
-        e.y = (cy + oy) << 16
+        e.x = (world_x + ox) << 16
+        e.y = (world_y + oy) << 16
         e.z = -(EMONG_BODY_CENTER_PX + rng.randint(-12, 12)) << 16
         e.user_data['kind'] = 'hit_effect'
         battle.engine.attach_seq(e, tuple_to_bytecode(seg))
+
+
+def _spawn_smoke(battle, caster) -> None:
+    """在 caster 周围撒 SMOKE_COUNT 个随机 emong 烟雾粒子."""
+    from core.sprites.base import TILE_W, TILE_H
+    _spawn_smoke_at(battle, caster.x * TILE_W + TILE_W // 2, caster.y * TILE_H + TILE_H // 2)
 
 
 def son_transform_think(e: "Entity", eng: "Engine") -> None:
@@ -133,22 +149,56 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
     caster = e.user_data['caster']
     battle = e.user_data['battle']
 
-    if e.state_code == _FLIP_OUT:
+    if e.state_code == _CAST:
+        # 翻跟斗前简短施法姿: ps_CSON102 最后两列 (col 2 → 3), 各 CAST_POSE_FRAME_TICKS
+        e.user_data['flip_tick'] += 1
+        if e.user_data['flip_tick'] >= CAST_POSE_FRAME_TICKS:
+            e.user_data['flip_tick'] = 0
+            e.user_data['cast_pose_idx'] += 1
+            ci = e.user_data['cast_pose_idx']
+            if ci >= len(CAST_POSE_COLS):
+                # 施法完 → 起手翻跟头
+                caster.cast_pose_frame = None
+                caster.cast_flip_frame = 0
+                e.user_data['flip_idx'] = 0
+                e.state_code = _FLIP_OUT
+            else:
+                caster.cast_pose_frame = e.user_data['cast_row'] * 4 + CAST_POSE_COLS[ci]
+    elif e.state_code == _FLIP_OUT:
         e.user_data['flip_tick'] += 1
         if e.user_data['flip_tick'] >= FLIP_HOLD_TICKS:
             e.user_data['flip_tick'] = 0
             e.user_data['flip_idx'] += 1
             idx = e.user_data['flip_idx']
             if idx >= SOMERSAULT_N:
-                # 翻跟头消失完 → 落地噗烟 (exe state 0x14 在翻跟头 cast seq 之后撒) + 隐身
-                caster.cast_flip_frame = None
-                caster.cast_hidden = True
-                _spawn_smoke(battle, caster)
-                e.state_code = _TRANSFORM
-                _spawn_beast_attack(battle, caster, e)   # 按 skill 召唤对应神兽
+                if e.user_data['skill_id'] == 0x04:
+                    # 分身术: 孙悟空**原地翻跟斗不隐藏**, 对每敌召唤 4 分身围攻 (exe FUN_004f3ca3)
+                    e.user_data['flip_idx'] = 0
+                    e.user_data['flip_tick'] = 0
+                    caster.cast_flip_frame = 0
+                    spawn_fenshen(battle, caster, e)
+                    e.state_code = _TRANSFORM
+                else:
+                    # 翻跟头消失完 → 落地噗烟 (exe state 0x14 在翻跟头 cast seq 之后撒) + 隐身
+                    caster.cast_flip_frame = None
+                    caster.cast_hidden = True
+                    _spawn_smoke(battle, caster)
+                    e.state_code = _TRANSFORM
+                    _spawn_beast_attack(battle, caster, e)   # 按 skill 召唤对应神兽
             else:
                 caster.cast_flip_frame = idx
     elif e.state_code == _TRANSFORM:
+        if e.user_data['skill_id'] == 0x04:
+            # 分身术: 孙悟空原地**循环翻跟斗**, 等所有分身打完退场 (eson_done) → 收尾
+            e.user_data['flip_tick'] += 1
+            if e.user_data['flip_tick'] >= FLIP_HOLD_TICKS:
+                e.user_data['flip_tick'] = 0
+                e.user_data['flip_idx'] = (e.user_data['flip_idx'] + 1) % SOMERSAULT_N
+                caster.cast_flip_frame = e.user_data['flip_idx']
+            if e.user_data.get('eson_done'):
+                caster.cast_flip_frame = None
+                e.state_code = _DONE
+            return
         # eson01 神兽砸完所有 victim (eson_done) → caster 现身翻跟头出现
         if e.user_data.get('eson_done'):
             caster.cast_hidden = False
@@ -171,6 +221,7 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
     elif e.state_code == _DONE:
         # 收尾: 清状态 + post_attack (回合结束流程) + 销毁 coord
         caster.cast_flip_frame = None
+        caster.cast_pose_frame = None
         caster.cast_hidden = False
         caster.pending_caster_coord = None
         eng._signal(e, SIG_END)
@@ -1601,7 +1652,181 @@ def spawn_kukumao_beast(battle, caster, coord: "Entity") -> None:
     battle.engine.attach_seq(e, tuple_to_bytecode(KUKUMAO_SEQ))
 
 
-# ============ AOE 占位 (分身术/超亂舞, 待做专属演出) ============
+# ============ 分身术: 孙悟空原地翻跟斗 + 对每敌召唤 4 分身围攻 (exe FUN_004f3ca3/3c73/3bdf/3876/3693) ============
+# 原版: 孙悟空本体**原地翻跟斗不隐藏**; IMPACT 时 dispatcher **循环每个敌人** FUN_004f3c73(victim) 各建
+# coordinator → 每敌上方先冒烟 + 依次投放 4 分身(围着**那个敌人**上/下/左/右)落地攻击 → 依次退场.
+# 分身=复制孙悟空本体(cson_e0 atlas2): 落下→落地播方向攻击帧(dir*4..+3)→升空喷烟消失. **每敌的末身**
+# 退场时对**那个敌人**结算伤害 (exe -250). 每敌各伤害一次.
+FENSHEN_ATLAS = 0               # cson1_g0 = 孙悟空**普通攻击**图 (ATK_A, 16帧=四方向×4, dir N=帧N*4..+3).
+                                # ⚠不是 cson_e0(atlas2, 那是施法/特效图)! exe 攻击 seq 用 atlas slot 0.
+FENSHEN_FALL_SHEET = "ps_CSON102"   # 下落/站姿用 (4col×4row 64×96, 最后一列 col3=站姿)
+FENSHEN_PS_GRID = (4, 64, 96, 32, 84)   # (cols, fw, fh, anchor_x, anchor_y脚部)
+FENSHEN_SPAWN_INTERVAL = 16     # 每 N tick 给每敌投 1 分身 (exe frame & 0xf == 0)
+# 4 分身: (x偏移px, y偏移px, dir). exe FUN_004f3876 index→(pos, dir 0x110). cson_e0/ps_CSON102 同向: dir 行.
+FENSHEN_CLONES = [
+    (0, -32, 1),   # 上, dir1 (朝下/正面)
+    (0, 32, 0),    # 下, dir0 (朝上/背面)
+    (-40, 0, 3),   # 左, dir3 (朝右)
+    (40, 0, 2),    # 右, dir2 (朝左)
+]
+FENSHEN_DROP_HEIGHT = 64        # 分身从上方落下 px (exe spawn z+0x40)
+FENSHEN_FALL_VZ = 6             # 落下 px/tick
+FENSHEN_RISE_VZ = 7             # 升空回云 px/tick
+# 攻击 seq (exe PTR_DAT_00671a8c): 每个分身**连打 6 拳**, 节奏由慢加速 — 每拳后 HOLD 递减 24→12→6→3→3→3.
+# 单拳: 前冲 + frame0(3t) + 发 -200 敌人受击 + frame1(3t)+frame2(3t)+frame3(5t) + 后退.
+FENSHEN_ATK_COUNT = 6
+FENSHEN_HOLDS = (24, 12, 6, 3, 3, 3)              # 每拳后停留 tick (加速连打)
+FENSHEN_STRIKE_SCHED = ((0, 3), (1, 3), (2, 3), (3, 5))   # 单拳 (帧偏移, tick); frame0 完发受击
+FENSHEN_LUNGE_PX = 7           # 出拳时朝敌人前冲 px (收拳归位)
+_FS_FALL = 0
+_FS_ATTACK = 1
+_FS_RISE = 2
+
+
+def _fenshen_set_stand(e, d):
+    """分身切到 ps_CSON102 站姿 (下落/升空): 最后一列 col3 = 帧 d*4+3."""
+    e.user_data['ps_sheet'] = FENSHEN_FALL_SHEET
+    e.user_data['ps_grid'] = FENSHEN_PS_GRID
+    e.frame_idx = d * 4 + 3
+
+
+def _fenshen_lunge(e, ud, px: int):
+    """分身出拳朝敌人前冲 px (px=0 收拳归位). 方向 = 离敌偏移的反向 (朝敌)."""
+    e.x = ud['base_x'] + ((ud['lunge_dx'] * px) << 16)
+    e.y = ud['base_y'] + ((ud['lunge_dy'] * px) << 16)
+
+
+def _fenshen_hit(ud, deal_damage: bool) -> None:
+    """单拳命中敌人: 受击 (reaction+爆); deal_damage=True (末身末拳) 额外结算伤害数字."""
+    v = ud['victim']
+    if not v.alive:
+        return
+    if deal_damage:
+        from core.battle import combat
+        combat._roll_damage_one(ud['battle'], ud['caster'], v, face_attacker=False)
+    else:
+        _ql_rain_react(ud['battle'], ud['caster'], v)
+
+
+def fenshen_clone_think(e: "Entity", eng: "Engine") -> None:
+    """孙悟空分身: ps_CSON102 站姿落下 → 落地播 cson_e0 攻击帧(命中帧敌人受击) → 站姿升空回云喷烟消失.
+    每身命中都使敌人受击(reaction+爆); **末身**额外结算伤害一次 (exe -200受击/-250伤害)."""
+    ud = e.user_data
+    if 'clone' not in ud:
+        return
+    d = ud['dir']
+    v = ud['victim']
+    if e.state_code == _FS_FALL:                        # ps_CSON102 站姿下落
+        e.z += FENSHEN_FALL_VZ << 16
+        if e.z >= 0:
+            e.z = 0
+            ud['atk_num'] = 0                           # 第几拳 (0..5)
+            ud['strike_idx'] = 0                        # 单拳第几帧 (-1=拳间 hold)
+            ud['tick'] = 0
+            ud.pop('ps_sheet', None)                    # 切到 cson1_g0 普通攻击图
+            e.atlas_slot = FENSHEN_ATLAS
+            e.frame_idx = d * 4
+            e.state_code = _FS_ATTACK
+    elif e.state_code == _FS_ATTACK:                    # 连打 6 拳 (加速节奏) + 每拳敌人受击
+        ud['tick'] += 1
+        si = ud['strike_idx']
+        if si >= 0:                                     # 出拳中
+            frame_off, ticks = FENSHEN_STRIKE_SCHED[si]
+            e.frame_idx = d * 4 + frame_off
+            _fenshen_lunge(e, ud, FENSHEN_LUNGE_PX)     # 前冲
+            if ud['tick'] >= ticks:
+                ud['tick'] = 0
+                if si == 0:                             # frame0 完 → 敌人受击 (exe signal -200)
+                    _fenshen_hit(ud, deal_damage=(ud['is_last'] and ud['atk_num'] == FENSHEN_ATK_COUNT - 1))
+                ud['strike_idx'] += 1
+                if ud['strike_idx'] >= len(FENSHEN_STRIKE_SCHED):   # 单拳完 → 拳间 hold
+                    ud['strike_idx'] = -1
+                    e.frame_idx = d * 4
+                    _fenshen_lunge(e, ud, 0)            # 收拳归位
+        else:                                           # 拳间 hold (节奏递减)
+            if ud['tick'] >= FENSHEN_HOLDS[ud['atk_num']]:
+                ud['tick'] = 0
+                ud['atk_num'] += 1
+                if ud['atk_num'] >= FENSHEN_ATK_COUNT:  # 6 拳打完 → 升空
+                    _fenshen_set_stand(e, d)
+                    e.state_code = _FS_RISE
+                else:
+                    ud['strike_idx'] = 0                # 下一拳
+    elif e.state_code == _FS_RISE:                      # 站姿升空回云
+        e.z -= FENSHEN_RISE_VZ << 16
+        if (e.z >> 16) <= -FENSHEN_DROP_HEIGHT:         # 升到顶 → 喷烟 (回云中) 消失
+            _spawn_smoke_at(ud['battle'], e.x >> 16, e.y >> 16, count=6)
+            eng.destroy(e)
+
+
+def _spawn_clone(battle, caster, victim, idx: int) -> None:
+    """对 victim 身边 spawn 1 个分身 (idx 0-3 = 上/下/左/右, 朝向 victim), 落点带烟雾. idx==3 末身结算伤害."""
+    ox, oy, d = FENSHEN_CLONES[idx]
+    vx, vy = _victim_ground(victim)
+    e = battle.engine.spawn(think_fn=fenshen_clone_think)
+    e.flags |= 0x40
+    e.x = vx + (ox << 16)
+    e.y = vy + (oy << 16)
+    e.z = -(FENSHEN_DROP_HEIGHT << 16)
+    e.user_data['kind'] = 'hit_effect'
+    e.user_data['projectile'] = True
+    e.user_data['clone'] = True
+    e.user_data['shadow'] = True                       # 落地影子 → 接地 (否则看着浮空)
+    e.user_data['behind_units'] = (oy < 0)             # 敌人上方(身后)的分身 → 画在敌人身后
+    e.user_data['draw_order'] = 8
+    e.user_data['dir'] = d
+    e.user_data['is_last'] = (idx == 3)
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['victim'] = victim
+    e.user_data['base_x'] = e.x                         # 出拳前冲的归位基准
+    e.user_data['base_y'] = e.y
+    e.user_data['lunge_dx'] = 0 if ox == 0 else (-1 if ox > 0 else 1)   # 朝敌 = 离敌偏移的反向
+    e.user_data['lunge_dy'] = 0 if oy == 0 else (-1 if oy > 0 else 1)
+    _fenshen_set_stand(e, d)                            # 下落时 ps_CSON102 站姿 (最后一列)
+    e.state_code = _FS_FALL
+    _spawn_smoke_at(battle, (vx >> 16) + ox, (vy >> 16) + oy, count=6)  # 出现喷烟 (云)
+
+
+def fenshen_spawner_think(e: "Entity", eng: "Engine") -> None:
+    """分身术 spawner: 每 16tick 给**每个敌人**投放 1 分身 (共4轮), 全投完等所有分身退场 → 收尾.
+    (exe: 每敌一个 coordinator FUN_004f3bdf 各 spawn 4 分身; 这里合并为一个 spawner 并行处理所有敌人.)"""
+    ud = e.user_data
+    if 'fenshen' not in ud:
+        return
+    if ud['round'] < 4:
+        if ud['tick'] % FENSHEN_SPAWN_INTERVAL == 0:
+            for v in ud['victims']:
+                if v.alive:
+                    _spawn_clone(ud['battle'], ud['caster'], v, ud['round'])
+            ud['round'] += 1
+        ud['tick'] += 1
+    elif not any(c.user_data.get('clone') for c in eng.entities if (c.flags & 0x800)):
+        ud['coord'].user_data['eson_done'] = True
+        eng.destroy(e)
+
+
+def spawn_fenshen(battle, caster, coord: "Entity") -> None:
+    """分身术: 每敌上方先冒烟 + 依次投放 4 分身围攻 + 依次退场, 每敌末身各结算伤害."""
+    coord.user_data['eson_done'] = False
+    victims = _eson_collect_victims(battle, caster)
+    for v in victims:                                  # 每敌上方先冒一团烟
+        vx, vy = _victim_ground(v)
+        _spawn_smoke_at(battle, vx >> 16, (vy >> 16) - 36, count=8)
+    e = battle.engine.spawn(think_fn=fenshen_spawner_think)
+    e.flags = 0x800 | 0x10000                          # alive + think, 不渲染 (spawner 无视觉)
+    e.user_data['kind'] = 'son_aoe'
+    e.user_data['projectile'] = True
+    e.user_data['fenshen'] = True
+    e.user_data['battle'] = battle
+    e.user_data['caster'] = caster
+    e.user_data['coord'] = coord
+    e.user_data['victims'] = victims
+    e.user_data['round'] = 0
+    e.user_data['tick'] = 0
+
+
+# ============ AOE 占位 (超亂舞, 待做专属演出) ============
 _AOE_HOLD = 230
 
 
@@ -1652,9 +1877,16 @@ def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
     e.user_data['flip_idx'] = 0
     e.user_data['flip_tick'] = 0
     e.user_data['phase_ticks'] = 0
-    e.state_code = _FLIP_OUT
-    # caster 起手翻跟头 (烟雾在翻跟头落地后才撒, 见 FLIP_OUT 翻完处).
-    caster.cast_flip_frame = 0
+    # ⚠ ps_CSON102 简短施法姿**仅 0x04 分身术** (exe PTR_00671b0c=IDLE槽2). 其余技能用念咒(slot5)
+    # — 暂不在此演, 直接翻跟头 (维持原行为). 待接念咒时再按 skill 分派.
+    if skill_id == 0x04:
+        e.user_data['cast_row'] = _caster_cson_row(caster)
+        e.user_data['cast_pose_idx'] = 0
+        e.state_code = _CAST
+        caster.cast_pose_frame = e.user_data['cast_row'] * 4 + CAST_POSE_COLS[0]
+    else:
+        e.state_code = _FLIP_OUT
+        caster.cast_flip_frame = 0                # 起手翻跟头第 0 帧
     caster.pending_caster_coord = e
     return e
 

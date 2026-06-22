@@ -114,6 +114,18 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
     react_off = (0, 0)
     anchor: tuple[int, int] | None = None    # (feet_x, feet_y) within frame; None=用默认 bottom-center
     frame: pygame.Surface
+    # 孙悟空翻跟斗前的简短施法姿: cast_pose_frame 非 None → 显示 ps_CSON102 该帧 (方向行×4+col).
+    if getattr(u, 'cast_pose_frame', None) is not None:
+        from core.sprites.loaders import get_fm_surface
+        try:
+            sheet = get_fm_surface("ps_CSON102")
+            fi = u.cast_pose_frame
+            col, row = fi % 4, fi // 4
+            frame = sheet.subsurface(pygame.Rect(col * 64, row * 96, 64, 96))
+            blit_unit(scene.surface, frame, (32, 84), tile_center_x=cx, tile_center_y=cy)
+            return
+        except (FileNotFoundError, ValueError):
+            pass
     # 孙悟空召唤翻跟头: cast_flip_frame 非 None → 显示 ps_CSON105 第 N 帧 (覆盖一切, 方向无关).
     if getattr(u, 'cast_flip_frame', None) is not None:
         from core.sprites.loaders import get_somersault_frame, SOMERSAULT_ANCHOR

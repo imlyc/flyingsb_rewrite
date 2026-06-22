@@ -61,7 +61,8 @@ def test_dajingang_transform_choreography():
     b._pending_damage_range = {(8, 5), (7, 6)}   # 菱r2 内 2 敌人
 
     coord = start_son_transform(b, caster, (7, 5), 0x00)
-    assert caster.cast_flip_frame == 0           # 起手翻跟头第 0 帧
+    assert caster.cast_flip_frame == 0           # 大金刚等非分身: 起手直接翻跟头 (无 ps_CSON102 施法姿)
+    assert caster.cast_pose_frame is None
     assert coord.state_code == _FLIP_OUT
     assert caster.pending_caster_coord is coord
     # 起手只有翻跟头, 烟雾在翻跟头落地后才撒 (exe state 0x14)
@@ -499,9 +500,58 @@ def test_kukumao_smile_cat_performance():
     assert b._pending_turn_end is True
 
 
+def test_fenshen_clones_per_enemy_and_caster_somersault():
+    """分身术 0x04: 孙悟空原地翻跟斗(不隐藏) + 对**每个敌人**召唤 4 分身围攻, 每敌末身各结算伤害一次."""
+    from core.son_transform import start_son_transform, FENSHEN_ATLAS, FENSHEN_FALL_SHEET
+    b, caster, d1, d2 = _fixture()
+    caster.attack = 30
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x04
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+    start_son_transform(b, caster, (7, 5), 0x04)
+    from core.son_transform import FENSHEN_ATK_COUNT
+    assert caster.cast_pose_frame is not None, "分身术起手应先有 ps_CSON102 施法姿"
+    clone_ids = set()
+    saw_somersault = saw_fall_ps102 = saw_attack_cson = saw_react = saw_cast_pose = False
+    max_atk = 0
+    hp1 = [d1.hp]
+    hp2 = [d2.hp]
+    for _ in range(700):
+        b.engine.tick()
+        if caster.cast_flip_frame is not None and not caster.cast_hidden:
+            saw_somersault = True       # 孙悟空原地翻跟斗 (可见, 未隐藏)
+        if d1.reaction_seq is not None or d2.reaction_seq is not None:
+            saw_react = True            # 敌人受击 (每身命中)
+        for e in b.engine.entities:
+            if not e.user_data.get('clone'):
+                continue
+            clone_ids.add(id(e))
+            max_atk = max(max_atk, e.user_data.get('atk_num', 0))
+            if e.state_code == 0 and e.user_data.get('ps_sheet') == FENSHEN_FALL_SHEET:
+                saw_fall_ps102 = True   # 下落用 ps_CSON102 站姿
+            if e.state_code == 1 and e.user_data.get('ps_sheet') is None and e.atlas_slot == FENSHEN_ATLAS:
+                saw_attack_cson = True  # 落地用 cson1_g0 普通攻击图
+        if d1.hp != hp1[-1]:
+            hp1.append(d1.hp)
+        if d2.hp != hp2[-1]:
+            hp2.append(d2.hp)
+        if b._pending_turn_end:
+            break
+    assert saw_somersault, "孙悟空本体应原地翻跟斗 (可见不隐藏)"
+    assert len(clone_ids) == 8, f"2 敌各 4 分身 = 8, 实际 {len(clone_ids)}"
+    assert saw_fall_ps102, "分身下落应用 ps_CSON102 站姿"
+    assert saw_attack_cson, "分身落地应用 cson1_g0 普通攻击图"
+    assert saw_react, "每身命中应使敌人受击 (reaction)"
+    assert max_atk >= FENSHEN_ATK_COUNT, f"每分身应连打 {FENSHEN_ATK_COUNT} 拳, 实际最多 {max_atk}"
+    assert len(hp1) == 2 and len(hp2) == 2, f"每敌应只结算一次伤害 (各自末身), 实际 {hp1} {hp2}"
+    assert d1.hp < 50 and d2.hp < 50, "分身术应伤到两敌"
+    assert b._pending_turn_end is True
+
+
 def test_son_aoe_placeholder_skills_damage():
-    """分身术/超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
-    for sid in (0x04, 0x08):
+    """超亂舞 (占位 AOE): 范围伤害 + 收尾 (暂无神兽视觉)."""
+    for sid in (0x08,):
         b, caster, d1, d2, seen = _run_son_skill(sid)
         assert d1.hp < 50 and d2.hp < 50
         assert b._pending_turn_end is True

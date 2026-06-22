@@ -196,6 +196,8 @@ class BattleScene(Scene):
         self.world_map.draw_terrain(self.surface, cam_x, cam_y)
         # 2) 移动 / 攻击高亮
         self._draw_overlays(cam_x, cam_y)
+        # 2.5) 敌人身后的命中特效 (分身上方那只 = 站敌人身后, 应被敌人挡) → 单位之前画
+        draw_hit_effects(self, cam_x, cam_y, behind=True)
         # 3) 单位 (含影子, HP 数字)
         units_mod.draw_units(self, cam_x, cam_y)
         # 4) 行动菜单 (ESC 弹出)
