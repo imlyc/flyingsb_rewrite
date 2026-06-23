@@ -349,11 +349,13 @@ def spawn_huolong_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
 # 真实物理 (FUN_004c3211 mode 0x31): "toward target" 模式
 #   每 tick: 如果 entity.x < target_x → vx += step; 否则 vx -= step. 然后 x += vx.
 #   = "spring" 般往目标收敛 + 初始随机速度 = 散射后回旋.
+# 天字: 生长 (帧 0-8) 后**停在帧 8 保持**, 直到挥刀 impact 才被斩开销毁 (exe: secondary
+# entity 长成后 idle, dispatcher -100 时才销毁 + spawn 两半). 故末尾长 hold 帧 8, 不 exit.
+POTIAN_SECONDARY_HOLD = 600
 POTIAN_SECONDARY_SEQ: list[tuple] = [
     ('fm', 279, 0, 5), ('fm', 279, 1, 4), ('fm', 279, 2, 3), ('fm', 279, 3, 3),
     ('fm', 279, 4, 3), ('fm', 279, 5, 3), ('fm', 279, 6, 3), ('fm', 279, 7, 3),
-    ('fm', 279, 8, 3),
-    ('exit',),
+    ('fm', 279, 8, POTIAN_SECONDARY_HOLD),
 ]
 
 # cdit1_g0 dash + strike seq (exe @0x6767d0, 4 方向). dispatcher case -150 第一次时
@@ -445,9 +447,12 @@ POTIAN_TRAJ_SEQ: list[tuple] = [
     ('exit',),
 ]
 SECONDARY_PHASE_TICKS = 29
-SCATTER_PHASE_TICKS = 38
-SCATTER_INITIAL_OFFSET_PX = 600     # exe 0x2580000 = 600 << 16
-SCATTER_TOWARD_STEP_PX = 1          # spring step size (per-tick velocity delta)
+# scatter (天字斩开两半) 寿命: exe FUN_00504eaa state0 漂移到内部 tick>0x20(32), state1 闪烁到 >0x30(48).
+SCATTER_DRIFT_TICKS = 32
+SCATTER_BLINK_TICKS = 16
+SCATTER_PHASE_TICKS = SCATTER_DRIFT_TICKS + SCATTER_BLINK_TICKS   # coordinator 等 scatter 跑完再结算
+SCATTER_SPLIT_VX = int(1.2 * FP_ONE)    # 两半水平分开速度 (px/tick), 直线匀速 (无重力/无下落)
+POTIAN_EXPLODE_Y_PX = 36                 # 爆炸/天字/斩开 抬到敌人 sprite 中心 (像素, 脚上方)
 
 # Coordinator state codes (复用 PROJ_STATE_* 命名空间)
 _POTIAN_PHASE_SECONDARY = 30        # spawn N secondaries, 等 29 ticks
@@ -457,29 +462,33 @@ _POTIAN_PHASE_DAMAGE = 33           # 发 SIG_IMPACT_2 → 默认伤害路径
 
 
 def potian_passive_effect_think(e: "Entity", eng: "Engine") -> None:
-    """secondary / trajectory / scatter effect 共用: seq 完即销毁, 无副作用."""
+    """trajectory effect: seq 完即销毁, 无副作用."""
     if e.state_code == PROJ_STATE_EXPLODING and not e.is_playing():
         eng.destroy(e)
         e.state_code = PROJ_STATE_DONE
 
 
+def potian_secondary_think(e: "Entity", eng: "Engine") -> None:
+    """天字: 生长后停在帧 8 持续显示, 不自毁. 由 coordinator 在斩开阶段统一销毁."""
+    pass
+
+
 def potian_scatter_think(e: "Entity", eng: "Engine") -> None:
-    """scatter effect: exe mode 0x31 物理 (toward-target spring) + seq 同步播.
-    target 在 user_data, step_x/step_y 是 spring 加速度."""
-    if e.state_code == PROJ_STATE_EXPLODING:
-        if not e.is_playing():
-            eng.destroy(e)
-            e.state_code = PROJ_STATE_DONE
-            return
-        # spring 物理: vx += sign(target.x - x) * step_x; x += vx
-        target_x = e.user_data.get('target_x', e.x)
-        target_y = e.user_data.get('target_y', e.y)
-        step_x = e.user_data.get('step_x', SCATTER_TOWARD_STEP_PX * FP_ONE)
-        step_y = e.user_data.get('step_y', SCATTER_TOWARD_STEP_PX * FP_ONE)
-        e.vx += step_x if e.x < target_x else -step_x
-        e.vy += step_y if e.y < target_y else -step_y
-        e.x += e.vx
-        e.y += e.vy
+    """天字被斩开的两个半片 (atlas 279 帧 9/10): 轻微漂移分开 → 后段闪烁 → 消失.
+    exe FUN_00504eaa: state0 飞行到内部 tick>0x20, state1 每 tick toggle 可见位(闪) 到 >0x30 销毁."""
+    if e.state_code != PROJ_STATE_EXPLODING:
+        return
+    t = e.user_data.get('scatter_tick', 0) + 1
+    e.user_data['scatter_tick'] = t
+    e.x += e.vx
+    e.y += e.vy                                          # 直线匀速 (无重力)
+    if t <= SCATTER_DRIFT_TICKS:
+        e.user_data['projectile'] = True
+    elif t <= SCATTER_DRIFT_TICKS + SCATTER_BLINK_TICKS:
+        e.user_data['projectile'] = (t % 2 == 0)        # 后段闪烁 (渲染按 projectile 标志)
+    else:
+        eng.destroy(e)
+        e.state_code = PROJ_STATE_DONE
 
 
 def potian_coordinator_think(e: "Entity", eng: "Engine") -> None:
@@ -502,7 +511,9 @@ def potian_coordinator_think(e: "Entity", eng: "Engine") -> None:
             caster = e.user_data.get('caster')
             if caster is not None and caster.pending_caster_coord is e:
                 caster.pending_caster_coord = None
-            eng._signal(e, SIG_IMPACT_2)
+            eng._signal(e, SIG_IMPACT_2)            # → 伤害结算 (suppress_hit_fx 生效, 不放红刺/斩击)
+            if caster is not None:
+                caster.suppress_hit_fx = False       # 结算后恢复, 不影响后续普攻
             eng._signal(e, SIG_END)
             eng.destroy(e)
             e.state_code = _POTIAN_PHASE_DAMAGE
@@ -516,10 +527,14 @@ def _potian_enter_caster_dash(coord: "Entity", eng: "Engine") -> None:
     caster = coord.user_data.get('caster')
     if caster is None or caster.entity is None:
         # caster 没了 (测试 stub?) → 直接跳到 SCATTER
+        if caster is not None:
+            caster.cast_anim_key = None
         _potian_spawn_scatter_phase(coord, eng)
         coord.user_data['phase_ticks'] = 0
         coord.state_code = _POTIAN_PHASE_SCATTER
         return
+    # 天字长成 → 解除施法姿, 开始挥刀
+    caster.cast_anim_key = None
     # 标 coord, 让 tactics._on_anim_signal 知道 caster 在 potian dash 期间, 把 IMPACT/END 转发到 coord
     caster.pending_caster_coord = coord
     coord.user_data['on_caster_impact'] = _on_caster_impact
@@ -543,7 +558,7 @@ def _spawn_potian_secondary(battle, tile_xy: tuple[int, int]) -> "Entity":
     from core.sprites.base import TILE_W, TILE_H
     from core.anim_engine.bytecode import tuple_to_bytecode
     eng = battle.engine
-    e = eng.spawn(think_fn=potian_passive_effect_think)
+    e = eng.spawn(think_fn=potian_secondary_think)
     tx, ty = tile_xy
     e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
     e.y = (ty * TILE_H + TILE_H // 2) * FP_ONE
@@ -559,40 +574,25 @@ def _spawn_potian_secondary(battle, tile_xy: tuple[int, int]) -> "Entity":
 
 
 def _spawn_potian_scatter_one(battle, victim_tile: tuple[int, int],
-                              vx_sign: int, vy_sign: int, frame_idx: int) -> "Entity":
-    """scatter effect: 从 victim+offset 飞向 victim, 初速度随机, atlas 279 frame 9 或 10."""
+                              vx: int, vy: int, frame_idx: int) -> "Entity":
+    """天字被斩开的一个半片 (atlas 279 frame 9 或 10): 在天字位置生成 + 漂移分开 (静态帧, 无 seq)."""
     from core.sprites.base import TILE_W, TILE_H
-    from core.anim_engine.bytecode import tuple_to_bytecode
     eng = battle.engine
-    rng = battle.rng
-
     tx, ty = victim_tile
-    target_x = (tx * TILE_W + TILE_W // 2) * FP_ONE
-    target_y = (ty * TILE_H + TILE_H // 2) * FP_ONE
-
-    # 起始 = target + offset 600px on x AND y (exe spawn_fn A 的 +0x2580000)
     e = eng.spawn(think_fn=potian_scatter_think)
-    e.x = target_x + SCATTER_INITIAL_OFFSET_PX * FP_ONE * vx_sign
-    e.y = target_y + SCATTER_INITIAL_OFFSET_PX * FP_ONE * vy_sign
+    e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
+    e.y = (ty * TILE_H + TILE_H // 2) * FP_ONE
     e.z = 0
-    # 初速度 = -(random+1) * vx_sign * 0x10000 (exe: (rand >> 10 + 1) * sign_step,
-    # rand & 0x3ff ∈ [0,1023] 取 >> 10 = 0, 所以基本就是 ±0x10000 = ±1 px/tick).
-    # 我们用 1..3 px/tick 随机, 视觉散布感更明显.
-    e.vx = -vx_sign * rng.randint(1, 3) * FP_ONE
-    e.vy = -vy_sign * rng.randint(1, 3) * FP_ONE
+    e.vx = vx
+    e.vy = vy
     e.vz = 0
     e.atlas_slot = 279
     e.frame_idx = frame_idx
     e.flags |= 0x40
     e.user_data['kind'] = 'hit_effect'
-    e.user_data['projectile'] = True
-    e.user_data['target_x'] = target_x
-    e.user_data['target_y'] = target_y
-    e.user_data['step_x'] = SCATTER_TOWARD_STEP_PX * FP_ONE
-    e.user_data['step_y'] = SCATTER_TOWARD_STEP_PX * FP_ONE
+    e.user_data['projectile'] = True       # 静态帧靠 projectile 标志渲染 (无 seq)
+    e.user_data['scatter_tick'] = 0
     e.state_code = PROJ_STATE_EXPLODING
-    # 单帧 hold 整个生命周期 — exe 里 scatter effect 不播 seq, 静态 frame.
-    eng.attach_seq(e, tuple_to_bytecode([('fm', 279, frame_idx, SCATTER_PHASE_TICKS), ('exit',)]))
     return e
 
 
@@ -604,7 +604,7 @@ def _spawn_potian_trajectory(battle, victim_tile: tuple[int, int]) -> "Entity":
     e = eng.spawn(think_fn=potian_passive_effect_think)
     tx, ty = victim_tile
     e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
-    e.y = (ty * TILE_H + TILE_H // 2) * FP_ONE
+    e.y = (ty * TILE_H + TILE_H // 2 - POTIAN_EXPLODE_Y_PX) * FP_ONE   # 抬到敌人 sprite 中心
     e.z = 0
     e.atlas_slot = 292
     e.frame_idx = 0
@@ -617,14 +617,19 @@ def _spawn_potian_trajectory(battle, victim_tile: tuple[int, int]) -> "Entity":
 
 
 def _potian_spawn_scatter_phase(coord: "Entity", eng: "Engine") -> None:
-    """coordinator 进 PHASE_SCATTER 时调: per victim spawn 2 scatter + 1 trajectory."""
+    """coordinator 进 PHASE_SCATTER 时调 (= 挥刀 impact): 销毁天字 + per victim spawn 2 半片 + 1 trajectory."""
     battle = coord.user_data['battle']
     victims = coord.user_data['victim_tiles']
+    # 天字被斩开: 销毁 secondary 天字实体 (即刻被两半替换, 无缝衔接)
+    for sec in coord.user_data.get('secondaries', []):
+        if sec.state_code != PROJ_STATE_DONE:
+            eng.destroy(sec)
+            sec.state_code = PROJ_STATE_DONE
     for vt in victims:
-        # 2 个 scatter: 一个从 (-x, +y) 方向, 一个从 (+x, +y) 方向 (exe 第二个 spawn vx_sign=+)
-        _spawn_potian_scatter_one(battle, vt, vx_sign=-1, vy_sign=+1, frame_idx=9)
-        _spawn_potian_scatter_one(battle, vt, vx_sign=+1, vy_sign=+1, frame_idx=10)
-        # 1 个 trajectory at victim
+        # 天字斩成两半: 帧 9 左下、帧 10 右下, 沿 ~45° 斜下直线匀速分开 (|vx|=|vy|, 无重力)
+        _spawn_potian_scatter_one(battle, vt, -SCATTER_SPLIT_VX, SCATTER_SPLIT_VX, frame_idx=9)
+        _spawn_potian_scatter_one(battle, vt, +SCATTER_SPLIT_VX, SCATTER_SPLIT_VX, frame_idx=10)
+        # 1 个 trajectory (atlas 292) = 斩击/爆炸特效
         _spawn_potian_trajectory(battle, vt)
 
 
@@ -653,9 +658,8 @@ def spawn_potian_effects(battle, attacker, target_tile: tuple[int, int]) -> "Ent
 
     eng = battle.engine
 
-    # Per victim 立即 spawn secondary
-    for vt in victims:
-        _spawn_potian_secondary(battle, vt)
+    # Per victim 立即 spawn 天字 secondary (生长后保持, 直到斩开)
+    secondaries = [_spawn_potian_secondary(battle, vt) for vt in victims]
 
     # Coordinator: 无 atlas / 无 seq, 只跑 think_fn 推进阶段计时.
     coord = eng.spawn(think_fn=potian_coordinator_think)
@@ -670,6 +674,14 @@ def spawn_potian_effects(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     coord.user_data['battle'] = battle
     coord.user_data['caster'] = attacker
     coord.user_data['victim_tiles'] = victims
+    coord.user_data['secondaries'] = secondaries
     coord.user_data['phase_ticks'] = 0
+    # 天字生长期间施法者播施法姿 = ps_ atlas 2 (ps_CDIT100 → ps_CDIT102) 的 col0→col1 起手后定格;
+    # 挥刀时清除. 重置 idle 计时让 0→1 起手从头开始.
+    if attacker.sprite_key:
+        attacker.cast_anim_key = attacker.sprite_key[:-1] + '2'
+        attacker.anim.idle_time_ms = 0
+    # 破天舞命中不放 ef010/et00 受击特效 (视觉只有天字斩开+爆炸); 结算后清除
+    attacker.suppress_hit_fx = True
     coord.state_code = _POTIAN_PHASE_SECONDARY
     return coord

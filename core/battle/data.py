@@ -114,6 +114,11 @@ class BattleUnit:
     cast_hidden: bool = False
     # 翻跟斗前的简短施法姿: ps_CSON102 帧索引 (非 None → render 显示该帧, 方向行×4+col).
     cast_pose_frame: int | None = None
+    # 施法姿 (破天舞): 非 None = ps_ atlas 资源名 (如 'ps_CDIT102'), render 循环其**前两列**
+    # (col 0↔1, 朝 facing) = 蒙面人披风下施法手势 (看着静止其实有细微动作). exe mode2 ps_ 路径.
+    cast_anim_key: str | None = None
+    # True → 本次攻击命中不放受击特效 (ef010 红刺 / et00 斩击). 破天舞: 视觉只有天字斩开+爆炸.
+    suppress_hit_fx: bool = False
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,

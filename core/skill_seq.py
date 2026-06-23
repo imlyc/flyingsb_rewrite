@@ -244,6 +244,17 @@ SKILL_CAST_CDIT1_M1 = [
 ]
 
 
+# 0x23 破天舞 专属 cast seq. exe dispatcher FUN_005052aa case 10 不播 cast 动画, 而是把施法者
+# 设成 cdit1_m1 的**静态施法姿** (帧 base+1) 并一直**保持**, 直到天字长成才挂 cdit1_g0 挥刀
+# (case -150). 所以这里: 抬刀 (帧 0,1) → IMPACT (spawn 天字+coordinator) → 长 hold 施法姿帧
+# (base+1), **不 exit** (避免掉回站立 idle). coordinator 之后 attach cdit1_g0 覆盖此 hold.
+# exe FUN_005052aa case 10 设施法姿用 **mode 2 (ps_ 渲染路径)** = 施法者**自身 ps_ 精灵**, 不是 fm
+# 攻击 atlas (cdit1_m1). 游戏内天字阶段蒙面人就是**站立披风姿** (= ps_ idle). 故 cast seq 不播任何
+# fm 帧, IMPACT 触发 (spawn 天字+coordinator) 后立即 EXIT → 施法者回到 ps_ 站姿 (units 渲染默认),
+# 一直站到天字长成, coordinator 再挂 cdit1_g0 挥刀. 4 方向同一套 (无 fm 帧, 方向由 ps_ idle 决定).
+SKILL_CAST_POTIAN = [[('impact',), ('exit',)] for _ in range(4)]
+
+
 # ============================================================
 # 三藏法师 5 技能 (skill_id 0x14..0x18). exe dispatcher + seq table dump @ sam_seqs.txt.
 # ============================================================
@@ -806,7 +817,7 @@ SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x20: SKILL_VERTICAL_SLASH,       # 蒙面人 垂直斬
     0x21: SKILL_CAST_CDIT1_M1,        # 赤雲波 (B 类, IMPACT 时 spawn projectile, 不直接掉血)
     0x22: SKILL_CAST_CDIT1_M1,        # 火龍斬 (B 类, 共享 cast seq, IMPACT 时 spawn effect)
-    0x23: SKILL_CAST_CDIT1_M1,        # 破天舞 (B 类, 共享 cast seq, IMPACT 时 spawn 多 effect)
+    0x23: SKILL_CAST_POTIAN,          # 破天舞 (B 类, 抬刀施法姿保持到天字长成, 再 cdit1_g0 挥刀)
     0x24: SKILL_INFINITE_BLADE,       # 無限刀 (5 IMPACT, 切 atlas 终结)
 }
 

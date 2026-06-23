@@ -25,6 +25,10 @@ from scenes.unit_render import blit_shadow, blit_unit, pick_locomotion_frame
 if TYPE_CHECKING:
     from scenes.battle.scene import BattleScene
 
+# 施法姿 (破天舞): exe dispatcher 只定格一个静态帧 (ps_CDIT102 col 1). 纯静态, 无起手无循环.
+# (=0 → 全程 col1; >0 → 前这么多 ms 显 col0 起手再定格 col1.)
+CAST_INTRO_MS = 0
+
 
 def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     """主单位渲染. Y-排序 + 视椎裁剪 + (shadow + sprite) blit.
@@ -167,6 +171,15 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
     #       frame_idx 直接当 atlas 内索引 (敌方 seq 不需要 phase 数学)
     elif u.is_attacking:
         frame, anchor = _resolve_attack_frame(scene, u, cs)
+    elif u.cast_anim_key:
+        # 施法姿 (破天舞): ps_ atlas 循环前两列 (col 0↔1), 朝 facing. 细微施法手势.
+        try:
+            cast_cs = get_character_sprite(u.cast_anim_key)
+            col = 0 if u.anim.idle_time_ms < CAST_INTRO_MS else 1   # 一次性 0→1, 之后定格
+            frame = cast_cs.frame_for_facing(u.facing, col)
+            anchor = cast_cs.feet_for_facing(u.facing)
+        except FileNotFoundError:
+            frame, anchor = cs.frame_for_facing(u.facing, 0), cs.feet_for_facing(u.facing)
     else:
         # 通用 locomotion: 走路 / 待机 / (HP<40%) 虚弱, 用共享 picker
         flying = is_flying_sprite(u.sprite_key)

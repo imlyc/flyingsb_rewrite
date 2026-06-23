@@ -73,6 +73,8 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
     技能攻击 (pending_skill_id != None) 额外 spawn 1 个特效 (= 技能 dispatcher 在 IMPACT
     时主动调 FUN_004d0c90 加挂的, 见 SKILL_IMPACT_EXTRA).
     """
+    if getattr(attacker, 'suppress_hit_fx', False):
+        return    # 破天舞等: 命中不放 ef010 红刺 / et00 斩击 (视觉由技能自身特效负责)
     from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
     from core.skill_seq import has_skill_impact_extra, skill_impact_extra_seq
     from core.sprites.base import TILE_W, TILE_H
