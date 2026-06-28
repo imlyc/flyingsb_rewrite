@@ -119,6 +119,11 @@ class BattleUnit:
     cast_anim_key: str | None = None
     # True → 本次攻击命中不放受击特效 (ef010 红刺 / et00 斩击). 破天舞: 视觉只有天字斩开+爆炸.
     suppress_hit_fx: bool = False
+    # 普攻音效 (本次攻击): 挥砍/斩击音(seq jump -1001 时播) + 命中音(jump -1000 设 swing, IMPACT 播).
+    # exe 玩家攻击 wrapper 按 char_id 配; 见 combat.PLAYER_ATTACK_SOUNDS. -1 = 无.
+    pending_draw_sound: int = -1
+    pending_swing_sound: int = -1
+    pending_draw_signal: int = -1000   # 起手音触发的 seq 信号 (cid<8 组=-1000, cid>=8 组=-1001)
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,

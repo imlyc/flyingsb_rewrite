@@ -7,15 +7,19 @@ from pathlib import Path
 import pygame
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "audio"
+SFX_DIR = Path(__file__).resolve().parent.parent / "assets" / "audio_extracted"
 
 
 class AudioManager:
-    def __init__(self, assets_dir: Path = ASSETS_DIR) -> None:
+    def __init__(self, assets_dir: Path = ASSETS_DIR, sfx_dir: Path = SFX_DIR) -> None:
         if not pygame.mixer.get_init():
             pygame.mixer.init()
         self.assets_dir = assets_dir
+        self.sfx_dir = sfx_dir
         self._sfx_cache: dict[str, pygame.mixer.Sound] = {}
+        self._sfx_id_cache: dict[int, "pygame.mixer.Sound | None"] = {}
         self._current_bgm: str | None = None
+        self._volume = 1.0
 
     def _resolve(self, filename: str) -> Path:
         """支持大小写无关查找 (原版文件名混用大写/小写)."""
@@ -47,9 +51,33 @@ class AudioManager:
             self._sfx_cache[filename] = pygame.mixer.Sound(str(self._resolve(filename)))
         self._sfx_cache[filename].play()
 
+    def play_sfx_id(self, sound_id: int) -> None:
+        """按全局 sound_id 播放战斗音效 (anim seq 'sound' op / 技能 dispatcher 用).
+        映射见 core.sound_table; 缺失/加载失败静默忽略 (不阻断游戏)."""
+        snd = self._sfx_id_cache.get(sound_id, False)
+        if snd is False:                       # 未尝试加载过
+            snd = None
+            from core.sound_table import sound_file
+            fn = sound_file(sound_id)
+            if fn:
+                p = self.sfx_dir / fn
+                if p.exists():
+                    try:
+                        snd = pygame.mixer.Sound(str(p))
+                        snd.set_volume(self._volume)
+                    except (pygame.error, FileNotFoundError):
+                        snd = None
+            self._sfx_id_cache[sound_id] = snd
+        if snd is not None:
+            snd.play()
+
     def set_volume(self, volume: float) -> None:
         """统一设置 BGM + SFX 音量, 0.0 ~ 1.0."""
         volume = max(0.0, min(1.0, volume))
+        self._volume = volume
         pygame.mixer.music.set_volume(volume)
         for s in self._sfx_cache.values():
             s.set_volume(volume)
+        for s in self._sfx_id_cache.values():
+            if s is not None:
+                s.set_volume(volume)

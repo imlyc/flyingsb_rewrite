@@ -19,6 +19,18 @@ from core.battle.data import (
 if TYPE_CHECKING:
     from core.battle.tactics import TacticsBattle
 
+# 玩家普攻音效 (char_id → (起手/挥舞音, 命中音/swing); exe 玩家攻击 wrapper FUN_004f3230..975c).
+# 起手音在挥舞帧 (近似在攻击开始播); 命中音在 IMPACT 播 (= DAT_006566c0). 全局 sound_id.
+PLAYER_ATTACK_SOUNDS: dict[int, tuple[int, int]] = {
+    0: (0xb9, 0xbd), 1: (0xb9, 0xbf), 2: (0xb9, 0xbf),          # 孙悟空 3 形态 (命中 0xbf=191)
+    3: (0xd5, 0xbd), 4: (0xd5, 0xbd), 5: (0xd5, 0xbd), 6: (0xd5, 0xbd), 7: (0xd5, 0xbd),
+    # cid 8 蒙面人: 改用他的**刀刃音**(技能里用的 0x104 挥砍 E092 + 0x105 命中 E093), 不用 wrapper
+    # 默认 0xd3(211 闷响). = "武器攻击音" 思路 (用户). 其它 cid 暂留 wrapper 默认, 待逐个校.
+    8: (0x104, 0x105), 9: (0xd3, 0xbd), 10: (0xd3, 0xbd), 11: (0xd3, 0xbd),
+    12: (0xd3, 0xbd), 13: (0xd3, 0xbd), 14: (0xd3, 0xbd), 15: (0xd3, 0xbd),
+}
+PLAYER_MELEE_SWING_SOUND = 0xbd  # 189, char_id 不明时的默认命中音
+
 
 def miss_chance(attacker: BattleUnit, defender: BattleUnit) -> float:
     diff = defender.agile - attacker.agile
@@ -160,6 +172,21 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     """
     from core.attack_seq import attack_seq_for
     from core.anim_engine.bytecode import tuple_to_bytecode
+    # 普攻音效: exe 玩家攻击 wrapper 按 char_id 配 (PLAYER_ATTACK_SOUNDS). 命中音(swing)在攻击开始
+    # 设、IMPACT 播; 挥砍/斩击音在挥刀帧的 seq 信号播 (与挥刀同步) —— 该信号因 char_id 组而异:
+    # cid 0-7 组=jump -1000, cid 8-15 组=jump -1001 (exe wrapper FUN_004f3230 vs 94a0). 见 tactics 信号路由.
+    # 技能/敌人不在这里设 (swing 复位 -1).
+    attacker.pending_draw_sound = -1
+    if skill_id is None and attacker.is_player:
+        from core.character_sprites import char_id_for
+        cid = char_id_for(attacker.name)
+        draw, swing = PLAYER_ATTACK_SOUNDS.get(
+            cid if cid is not None else -1, (-1, PLAYER_MELEE_SWING_SOUND))
+        battle.engine.swing_sound = swing
+        attacker.pending_draw_sound = draw if draw is not None else -1
+        attacker.pending_draw_signal = -1000 if (cid is not None and cid < 8) else -1001
+    else:
+        battle.engine.swing_sound = -1
     attacker.pending_attack_target = defender
     attacker.pending_attack_skill = skill_id is not None
     attacker.pending_skill_id = skill_id

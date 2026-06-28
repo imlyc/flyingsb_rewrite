@@ -137,6 +137,12 @@ class TacticsBattle:
             return
         if sig == self._SIG_IMPACT:
             combat.apply_pending_attack(self, unit)
+            # 命中音 (swing sound): exe melee IMPACT `if(-1<DAT_006566c0) FUN_00416311(它)`.
+            if self.engine.swing_sound >= 0:
+                self.engine._emit('sound_play', source_entity, self.engine.swing_sound)
+        elif sig == unit.pending_draw_signal:    # 挥砍/斩击音 (与挥刀帧同步; 信号因 char_id 组而异)
+            if unit.pending_draw_sound >= 0:
+                self.engine._emit('sound_play', source_entity, unit.pending_draw_sound)
         elif sig == self._SIG_END:
             self.post_attack_anim(unit)
 

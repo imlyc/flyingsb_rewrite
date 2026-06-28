@@ -126,6 +126,8 @@ class BattleScene(Scene):
         self.battle.engine.on('frame_change', self._on_engine_frame_change)
         # MOVE op 触发时记录其自己的 ticks + 起点 (ticks=0 = 瞬移不 lerp; ticks>0 = lerp 那段时长)
         self.battle.engine.on('move', self._on_engine_move)
+        # anim seq 'sound' op (0x0411 PLAY) → 按全局 sound_id 播战斗音效
+        self.battle.engine.on('sound_play', lambda ent, sid: self.audio.play_sfx_id(sid))
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False
