@@ -71,6 +71,12 @@ class AudioManager:
         if snd is not None:
             snd.play()
 
+    def stop_sfx_id(self, sound_id: int) -> None:
+        """停掉指定 sound_id 的音效 (exe FUN_00416388, 技能收尾切断循环/长音用)."""
+        snd = self._sfx_id_cache.get(sound_id)
+        if snd:
+            snd.stop()
+
     def set_volume(self, volume: float) -> None:
         """统一设置 BGM + SFX 音量, 0.0 ~ 1.0."""
         volume = max(0.0, min(1.0, volume))

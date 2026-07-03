@@ -128,6 +128,8 @@ class BattleScene(Scene):
         self.battle.engine.on('move', self._on_engine_move)
         # anim seq 'sound' op (0x0411 PLAY) → 按全局 sound_id 播战斗音效
         self.battle.engine.on('sound_play', lambda ent, sid: self.audio.play_sfx_id(sid))
+        # 'sound' op (0x0412 STOP) / 技能收尾 → 切断还在播的长音 (exe FUN_00416388)
+        self.battle.engine.on('sound_stop', lambda ent, sid: self.audio.stop_sfx_id(sid))
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False

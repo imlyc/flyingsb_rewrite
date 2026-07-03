@@ -89,6 +89,42 @@ def test_dajingang_transform_choreography():
     assert b._pending_turn_end is True
 
 
+def test_dajingang_sounds():
+    """大金刚音效时序 (exe FUN_004f460a): 烟雾 0x129 隐身/现身各一次;
+    神兽 spawn 播 0x107 + 收尾切断 (sound_stop); 每敌砸中播 0xec."""
+    from core.son_transform import (start_son_transform, SFX_FLIP, SFX_SMOKE,
+                                    SFX_ESON_BEAST, SFX_ESON_SLAM)
+
+    b, caster, d1, d2 = _fixture()
+    caster.pending_attack_target = d1
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x00
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+
+    played, stopped = [], []
+    b.engine.on('sound_play', lambda ent, sid: played.append(sid))
+    b.engine.on('sound_stop', lambda ent, sid: stopped.append(sid))
+
+    start_son_transform(b, caster, (7, 5), 0x00)
+    for _ in range(600):
+        b.engine.tick()
+        if b._pending_turn_end:
+            break
+    assert b._pending_turn_end
+
+    assert played.count(SFX_FLIP) == 2, "隐身/现身两次翻跟头各播 0x127 (seq 0x670dc4 首 op)"
+    assert played[0] == SFX_FLIP, "起手第一个音 = 翻跟头 0x127"
+    assert played.count(SFX_SMOKE) == 2, "隐身/现身两次烟雾各播 0x129"
+    assert played.count(SFX_ESON_BEAST) == 1, "神兽 spawn 播一次 0x107"
+    assert played.count(SFX_ESON_SLAM) == 2, "2 个敌人各砸中一次播 0xec"
+    assert stopped == [SFX_ESON_BEAST], "收尾切断神兽长音 0x107"
+    # 时序: 0x107 在第一次烟雾之后、第一次砸中之前
+    assert played.index(SFX_ESON_BEAST) > played.index(SFX_SMOKE)
+    assert played.index(SFX_ESON_BEAST) < played.index(SFX_ESON_SLAM)
+
+
 def test_dajingang_aoe_deferred_simultaneous_settle():
     """两阶段: 造成伤害依次 (逐个扣血+settle_pending 抑制), 伤害结算同时 (统一释放).
     敌人被砸致死后, 在 eson 还在砸其他敌人期间应保持 settle_pending (不进死亡动画);

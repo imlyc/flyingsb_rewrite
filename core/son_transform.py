@@ -136,9 +136,28 @@ def _spawn_smoke_at(battle, world_x: int, world_y: int, count: int = None) -> No
         battle.engine.attach_seq(e, tuple_to_bytecode(seg))
 
 
+SFX_FLIP = 0x127              # 翻跟头音 (E127): 内嵌在 cast seq 0x670dc4 首个 op (11 04 27 01),
+                              # 隐身/现身两次 attach 各播一次. 我们手动驱动翻帧, 在翻跟头起手补 emit
+SFX_SMOKE = 0x129             # 变身烟雾音 (E129): exe 各 dispatcher 在两处 FUN_004f3635 烟雾旁都播
+SFX_ESON_BEAST = 0x107        # 大金刚神兽音 (E095, 3.2s): case 0x1e spawn 时播, case 0x28 收尾切断
+SFX_ESON_SLAM = 0xec          # 大金刚每敌砸中音 (E068): case -250 受击特效旁播
+
+
+def _sfx(battle, sound_id: int) -> None:
+    """播全局 sound_id 音效 (= exe FUN_00416311, 技能 dispatcher 显式调用)."""
+    battle.engine._emit('sound_play', None, sound_id)
+
+
+def _sfx_stop(battle, sound_id: int) -> None:
+    """切断指定音效 (= exe FUN_00416388, 技能收尾切断长音)."""
+    battle.engine._emit('sound_stop', None, sound_id)
+
+
 def _spawn_smoke(battle, caster) -> None:
-    """在 caster 周围撒 SMOKE_COUNT 个随机 emong 烟雾粒子."""
+    """在 caster 周围撒 SMOKE_COUNT 个随机 emong 烟雾粒子 + 烟雾音 0x129.
+    exe 各 dispatcher 隐身/现身两处 FUN_004f3635 前都 FUN_00416311(0x129), 与本 fn 调用点一一对应."""
     from core.sprites.base import TILE_W, TILE_H
+    _sfx(battle, SFX_SMOKE)
     _spawn_smoke_at(battle, caster.x * TILE_W + TILE_W // 2, caster.y * TILE_H + TILE_H // 2)
 
 
@@ -213,11 +232,15 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
             return
         # eson01 神兽砸完所有 victim (eson_done) → caster 现身翻跟头出现
         if e.user_data.get('eson_done'):
+            if e.user_data.get('beast_sound') is not None:
+                # exe case 0x28: FUN_00416388 切断神兽长音 (没播完也停, 如大金刚 0x107)
+                _sfx_stop(battle, e.user_data.pop('beast_sound'))
             caster.cast_hidden = False
             caster.cast_flip_frame = 0
             e.user_data['flip_idx'] = 0
             e.user_data['flip_tick'] = 0
             _spawn_smoke(battle, caster)
+            _sfx(battle, SFX_FLIP)   # exe case 0x28 重新 attach 0x670dc4 → seq 首 op 再播 0x127
             e.state_code = _FLIP_IN
     elif e.state_code == _FLIP_IN:
         e.user_data['flip_tick'] += 1
@@ -320,6 +343,7 @@ def _eson_hit(battle, caster, victim) -> None:
         return
     from core.battle import combat
     combat._roll_damage_one(battle, caster, victim, face_attacker=False)
+    _sfx(battle, SFX_ESON_SLAM)   # exe case -250: 受击特效旁播砸中音 0xec
     # apply_damage 已设 settle_pending + shown_hp_override (逻辑 hp 即扣, 显示/视觉延迟).
     # 额外标 settle_batch: 不在自己飘字 flash 时结算, 等全砸完批量统一结算 (= 最后一个敌人受击结束).
     victim.settle_pending = True
@@ -416,6 +440,9 @@ def spawn_eson01_attack(battle, caster, coord: "Entity") -> None:
     if not victims:
         coord.user_data['eson_done'] = True   # 无敌人, 直接跳过
         return
+    # exe case 0x1e: spawn 神兽时播 0x107 (E095 长音), 收尾 case 0x28 切断 → 记在 coord 上
+    _sfx(battle, SFX_ESON_BEAST)
+    coord.user_data['beast_sound'] = SFX_ESON_BEAST
     e = battle.engine.spawn(think_fn=eson01_attack_think)
     e.atlas_slot = ESON01_ATLAS
     e.frame_idx = 1                           # 天降即砸地姿
@@ -2041,6 +2068,7 @@ def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
     else:
         e.state_code = _FLIP_OUT
         caster.cast_flip_frame = 0                # 起手翻跟头第 0 帧
+        _sfx(battle, SFX_FLIP)                    # exe case 10 attach 0x670dc4, seq 首 op 播 0x127
     caster.pending_caster_coord = e
     return e
 
