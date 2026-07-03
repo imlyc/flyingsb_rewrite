@@ -552,8 +552,12 @@ def test_fenshen_clones_per_enemy_and_caster_somersault():
     caster.pending_skill_id = 0x04
     caster.pending_impact_total = 1
     b._pending_damage_range = {(8, 5), (7, 6)}
+    from core.son_transform import (FENSHEN_ATK_COUNT, SFX_FENSHEN_CHATTER,
+                                    SFX_FENSHEN_PUNCH, SFX_FLIP)
+    played, stopped = [], []
+    b.engine.on('sound_play', lambda ent, sid: played.append(sid))
+    b.engine.on('sound_stop', lambda ent, sid: stopped.append(sid))
     start_son_transform(b, caster, (7, 5), 0x04)
-    from core.son_transform import FENSHEN_ATK_COUNT
     assert caster.cast_pose_frame is not None, "分身术起手应先有 ps_CSON102 施法姿"
     clone_ids = set()
     saw_somersault = saw_fall_ps102 = saw_attack_cson = saw_react = saw_cast_pose = False
@@ -591,6 +595,13 @@ def test_fenshen_clones_per_enemy_and_caster_somersault():
     assert len(hp1) == 2 and len(hp2) == 2, f"每敌应只结算一次伤害 (各自末身), 实际 {hp1} {hp2}"
     assert d1.hp < 50 and d2.hp < 50, "分身术应伤到两敌"
     assert b._pending_turn_end is True
+    # 音效: 吱吱叫 0x106 spawn 播一次 + 末身结算切断; 首敌分身 4 身 × 6 拳 = 24 次随机拳击音;
+    # 翻跟斗循环 seq 每圈重播 0x127
+    assert played.count(SFX_FENSHEN_CHATTER) == 1, "分身 spawn 播一次吱吱叫"
+    assert SFX_FENSHEN_CHATTER in stopped, "末身结算应切断吱吱叫"
+    punches = [s for s in played if s in SFX_FENSHEN_PUNCH]
+    assert len(punches) == 24, f"首敌 4 分身 × 6 拳 = 24 拳击音, 实际 {len(punches)}"
+    assert played.count(SFX_FLIP) >= 2, "翻跟斗循环 seq 每圈重播起跳音"
 
 
 def test_luanwu_skateboards():

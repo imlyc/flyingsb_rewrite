@@ -1869,6 +1869,11 @@ FENSHEN_ATK_COUNT = 6
 FENSHEN_HOLDS = (24, 12, 6, 3, 3, 3)              # 每拳后停留 tick (加速连打)
 FENSHEN_STRIKE_SCHED = ((0, 3), (1, 3), (2, 3), (3, 5))   # 单拳 (帧偏移, tick); frame0 完发受击
 FENSHEN_LUNGE_PX = 7           # 出拳时朝敌人前冲 px (收拳归位)
+# 音效 (exe dispatcher FUN_004f3ca3): -100 分身 spawn 播 0x106 (E094 猴子吱吱叫 4.6s 长音,
+# 单次非循环), -250 末身结算时 FUN_00416388 切断; -200 每拳命中 rng&3 随机拳击音,
+# ⚠只在**第一个敌人** (victim 数组 local_c==0) 的分身出拳时播 (防多敌同拳音效轰炸).
+SFX_FENSHEN_CHATTER = 0x106
+SFX_FENSHEN_PUNCH = (0xea, 0xbd, 0xcd, 0xcc)      # exe switch case 0..3 顺序
 _FS_FALL = 0
 _FS_ATTACK = 1
 _FS_RISE = 2
@@ -1890,13 +1895,18 @@ def _fenshen_lunge(e, ud, px: int):
 def _fenshen_hit(ud, deal_damage: bool) -> None:
     """单拳命中敌人: 受击 (reaction+爆); deal_damage=True (末身末拳) 额外结算伤害数字."""
     v = ud['victim']
+    battle = ud['battle']
     if not v.alive:
         return
+    if ud.get('primary'):
+        # exe -200: 首敌 (local_c==0) 的分身每拳随机播四选一拳击音
+        _sfx(battle, SFX_FENSHEN_PUNCH[battle.rng.randint(0, 3)])
     if deal_damage:
         from core.battle import combat
-        combat._roll_damage_one(ud['battle'], ud['caster'], v, face_attacker=False)
+        combat._roll_damage_one(battle, ud['caster'], v, face_attacker=False)
+        _sfx_stop(battle, SFX_FENSHEN_CHATTER)   # exe -250 结算: 切断吱吱叫长音
     else:
-        _ql_rain_react(ud['battle'], ud['caster'], v)
+        _ql_rain_react(battle, ud['caster'], v)
 
 
 def fenshen_clone_think(e: "Entity", eng: "Engine") -> None:
@@ -1950,8 +1960,9 @@ def fenshen_clone_think(e: "Entity", eng: "Engine") -> None:
             eng.destroy(e)
 
 
-def _spawn_clone(battle, caster, victim, idx: int) -> None:
-    """对 victim 身边 spawn 1 个分身 (idx 0-3 = 上/下/左/右, 朝向 victim), 落点带烟雾. idx==3 末身结算伤害."""
+def _spawn_clone(battle, caster, victim, idx: int, primary: bool = False) -> None:
+    """对 victim 身边 spawn 1 个分身 (idx 0-3 = 上/下/左/右, 朝向 victim), 落点带烟雾. idx==3 末身结算伤害.
+    primary=True (victim 是首敌): 该分身出拳带随机拳击音 (exe local_c==0 限定)."""
     ox, oy, d = FENSHEN_CLONES[idx]
     vx, vy = _victim_ground(victim)
     e = battle.engine.spawn(think_fn=fenshen_clone_think)
@@ -1967,6 +1978,7 @@ def _spawn_clone(battle, caster, victim, idx: int) -> None:
     e.user_data['draw_order'] = 8
     e.user_data['dir'] = d
     e.user_data['is_last'] = (idx == 3)
+    e.user_data['primary'] = primary
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['victim'] = victim
@@ -1989,7 +2001,8 @@ def fenshen_spawner_think(e: "Entity", eng: "Engine") -> None:
         if ud['tick'] % FENSHEN_SPAWN_INTERVAL == 0:
             for v in ud['victims']:
                 if v.alive:
-                    _spawn_clone(ud['battle'], ud['caster'], v, ud['round'])
+                    _spawn_clone(ud['battle'], ud['caster'], v, ud['round'],
+                                 primary=(v is ud['victims'][0]))
             ud['round'] += 1
         ud['tick'] += 1
     elif not any(c.user_data.get('clone') for c in eng.entities if (c.flags & 0x800)):
@@ -2001,6 +2014,8 @@ def spawn_fenshen(battle, caster, coord: "Entity") -> None:
     """分身术: 每敌上方先冒烟 + 依次投放 4 分身围攻 + 依次退场, 每敌末身各结算伤害."""
     coord.user_data['eson_done'] = False
     victims = _eson_collect_victims(battle, caster)
+    if victims:
+        _sfx(battle, SFX_FENSHEN_CHATTER)   # exe -100: 分身 spawn 播吱吱叫长音 (结算时切断)
     for v in victims:                                  # 每敌上方先冒一团烟
         vx, vy = _victim_ground(v)
         _spawn_smoke_at(battle, vx >> 16, (vy >> 16) - 36, count=8)
