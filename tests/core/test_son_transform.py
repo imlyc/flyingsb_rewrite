@@ -61,7 +61,8 @@ def test_dajingang_transform_choreography():
     b._pending_damage_range = {(8, 5), (7, 6)}   # 菱r2 内 2 敌人
 
     coord = start_son_transform(b, caster, (7, 5), 0x00)
-    assert caster.cast_flip_frame == 0           # 大金刚等非分身: 起手直接翻跟头 (无 ps_CSON102 施法姿)
+    # 大金刚等非分身: 起手直接翻跟头 = attach seq @0x670dc4 → mode2 idle 槽5 (ps_CSON105)
+    assert caster.is_attacking and caster.entity.atlas_slot == (5 | 0x20000)
     assert caster.cast_pose_frame is None
     assert coord.state_code == _FLIP_OUT
     assert caster.pending_caster_coord is coord
@@ -71,8 +72,11 @@ def test_dajingang_transform_choreography():
     hp1_0, hp2_0 = d1.hp, d2.hp
     smoke_seen = False
     hidden_seen = False
+    min_z = 0
     for _ in range(300):
         b.engine.tick()
+        if caster.is_attacking:
+            min_z = min(min_z, caster.entity.z)
         if caster.cast_hidden:
             hidden_seen = True
             if [e for e in b.engine.entities if e.user_data.get('kind') == 'hit_effect']:
@@ -82,9 +86,12 @@ def test_dajingang_transform_choreography():
 
     assert hidden_seen, "神兽阶段 caster 应隐身过"
     assert smoke_seen, "翻跟头落地隐身后应撒烟雾"
+    # 翻跟头 seq 内嵌 MOVE dz 小跳弧: 峰值 -14px (负 z = 上), 播完落回 0
+    assert min_z == -14 << 16, f"翻跟头应有 14px 跳弧, min_z={min_z >> 16}px"
+    assert caster.entity.z == 0, "翻完 z 应落回 0"
     assert d1.hp < hp1_0 and d2.hp < hp2_0, "AOE 应伤到菱r2 内两个敌人"
-    # 收尾: caster 状态复位
-    assert caster.cast_flip_frame is None
+    # 收尾: caster 状态复位 (翻跟头 seq 已停)
+    assert not caster.is_attacking
     assert caster.cast_hidden is False
     assert b._pending_turn_end is True
 
@@ -203,7 +210,7 @@ def test_son_sweep_beasts_spawn_and_damage():
         b, caster, d1, d2, seen = _run_son_skill(sid)
         assert atlas in seen, f"skill 0x{sid:02x} 应召唤 atlas {atlas}, 实际 {seen}"
         assert d1.hp < 50 and d2.hp < 50, f"skill 0x{sid:02x} 应伤到两敌"
-        assert caster.cast_flip_frame is None and not caster.cast_hidden
+        assert not caster.is_attacking and not caster.cast_hidden
         assert b._pending_turn_end is True
 
 
@@ -555,8 +562,9 @@ def test_fenshen_clones_per_enemy_and_caster_somersault():
     hp2 = [d2.hp]
     for _ in range(700):
         b.engine.tick()
-        if caster.cast_flip_frame is not None and not caster.cast_hidden:
-            saw_somersault = True       # 孙悟空原地翻跟斗 (可见, 未隐藏)
+        if (caster.is_attacking and not caster.cast_hidden
+                and caster.entity.atlas_slot == (5 | 0x20000)):
+            saw_somersault = True       # 孙悟空原地翻跟斗 (循环 seq 可见, 未隐藏)
         if d1.reaction_seq is not None or d2.reaction_seq is not None:
             saw_react = True            # 敌人受击 (每身命中)
         for e in b.engine.entities:

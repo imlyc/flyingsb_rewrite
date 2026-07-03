@@ -9,9 +9,9 @@ exe dispatcher (e.g. 大金刚 FUN_004f460a) 是多阶段变身演出, 我们用
   FLIP_IN:  caster 现身 + 翻跟头 (0..7) + emong → 翻完
   DONE:     post_attack_anim 收尾 + 销毁 coordinator
 
-caster 变身期间不走标准 attack seq (caster.entity 不 attach skill seq), 全由 coordinator
-控制 cast_flip_frame / cast_hidden. coordinator 标 projectile=True 让 units_animating 看到,
-防回合提前结束.
+翻跟头走真 attach_seq (caster.entity 挂 exe @0x670dc4 转写字节码, 内嵌音效/跳弧自动生效,
+units.py mode2 分支渲染 ps_XXX105); 隐身/施法姿等仍由 coordinator 控制 cast_hidden /
+cast_pose_frame. coordinator 标 projectile=True 让 units_animating 看到, 防回合提前结束.
 """
 
 from __future__ import annotations
@@ -91,9 +91,51 @@ def _caster_cson_row(caster) -> int:
     """caster 朝向 → ps_CSON102/cson 方向行."""
     return _FACING_TO_CSON_ROW.get(tuple(getattr(caster, 'facing', (0, 1))), 1)
 
-FLIP_HOLD_TICKS = 3        # 翻跟头每帧 hold (8 帧 × 3 = 24 tick ≈ 720ms)
 TRANSFORM_TICKS = 40          # 变身形态攻击阶段时长 (占位, 后续 eson01 下落逐敌取代)
-SOMERSAULT_N = 8           # ps_CSON105 8 帧
+
+# ============ 翻跟头 seq (exe @0x670dc4 / @0x670d24 逐字节转写) ============
+# 结构: sound 0x127(起跳) → 8 帧 idle slot5 (= ps_XXX105 翻跟头) 各 2 tick, 帧间 MOVE dz
+# 小跳弧 (exe z+ = 上, 升 8+4+2=14px 再 -2-4-4-4 落回; 我们负 z = 上 → 符号翻转) →
+# sound 0x128(翻完落地) → exit. 循环版 @0x670d24 内容全同, 结尾 op 0x01 loop (分身 TRANSFORM 期,
+# 每圈重播两声 = exe 行为). attach 到 caster.entity 播放, 内嵌 sound/move op 自动生效,
+# units.py mode2 (atlas_slot|0x20000) 分支按 per-unit ps_ 家族 (slot N → ps_XXX10N) 渲染.
+SFX_FLIP = 0x127              # 翻跟头起跳音 (E127, seq 首 op)
+SFX_FLIP_END = 0x128          # 翻跟头收尾音 (E128, seq 末 op)
+_FLIP_BODY: list[tuple] = [
+    ('sound', SFX_FLIP, 0x0411),
+    ('idle', 5, 0, 2), ('move', 0, 0, -8, 0),
+    ('idle', 5, 1, 2), ('move', 0, 0, -4, 0),
+    ('idle', 5, 2, 2), ('move', 0, 0, -2, 0),
+    ('idle', 5, 3, 2),
+    ('idle', 5, 4, 2), ('move', 0, 0, 2, 0),
+    ('idle', 5, 5, 2), ('move', 0, 0, 4, 0),
+    ('idle', 5, 6, 2), ('move', 0, 0, 4, 0),
+    ('idle', 5, 7, 2), ('move', 0, 0, 4, 0),
+    ('sound', SFX_FLIP_END, 0x0411),
+]
+FLIP_SEQ = _FLIP_BODY + [('exit',)]        # @0x670dc4 单次 (隐身/现身各 attach 一次)
+FLIP_LOOP_SEQ = _FLIP_BODY + [('loop',)]   # @0x670d24 循环 (分身原地连续翻)
+
+
+def _flip_attach(battle, caster, loop: bool = False) -> None:
+    """把翻跟头 seq attach 到 caster.entity (= exe FUN_00438d40 attach 0x670dc4/0x670d24).
+    播放期 caster.is_attacking=True, units.py 走 mode2 渲染 ps_XXX105; seq 内嵌音效/跳弧自动生效."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    if caster.entity is None:
+        caster.entity = battle.engine.spawn()
+    ent = caster.entity
+    ent.x = ent.y = ent.z = 0
+    ent.user_data = {'unit': caster}
+    battle.engine.attach_seq(ent, tuple_to_bytecode(FLIP_LOOP_SEQ if loop else FLIP_SEQ))
+
+
+def _flip_stop(caster) -> None:
+    """终止翻跟头 (循环版没有 exit, 收尾手动清; 单次版播完自清, 调用无害)."""
+    ent = caster.entity
+    if ent is not None:
+        ent.flags &= ~0x20000
+        ent.seq = b''
+        ent.x = ent.y = ent.z = 0
 
 # emong 烟雾 (atlas 248). 真实用法 (exe 0x670ff0[0..2] + FUN_004f3558/34f6):
 # 不是单个大烟雾, 而是撒 N 个随机小烟雾粒子, 每个随机选 3 段之一 (frames 0-5/6-11/12-17),
@@ -136,8 +178,6 @@ def _spawn_smoke_at(battle, world_x: int, world_y: int, count: int = None) -> No
         battle.engine.attach_seq(e, tuple_to_bytecode(seg))
 
 
-SFX_FLIP = 0x127              # 翻跟头音 (E127): 内嵌在 cast seq 0x670dc4 首个 op (11 04 27 01),
-                              # 隐身/现身两次 attach 各播一次. 我们手动驱动翻帧, 在翻跟头起手补 emit
 SFX_SMOKE = 0x129             # 变身烟雾音 (E129): exe 各 dispatcher 在两处 FUN_004f3635 烟雾旁都播
 SFX_ESON_BEAST = 0x107        # 大金刚神兽音 (E095, 3.2s): case 0x1e spawn 时播, case 0x28 收尾切断
 SFX_ESON_SLAM = 0xec          # 大金刚每敌砸中音 (E068): case -250 受击特效旁播
@@ -182,36 +222,22 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
                     spawn_luanwu(battle, caster, e)
                     e.state_code = _TRANSFORM
                 else:
-                    # 0x04 分身: 施法完 → 起手翻跟头
+                    # 0x04 分身: 施法完 → 原地**循环翻跟斗** (exe case20 attach 0x670d24 loop,
+                    # 无单次翻出段; 每圈重播 0x127/0x128) + 对每敌召唤 4 分身围攻 (FUN_004f3ca3)
                     caster.cast_pose_frame = None
-                    caster.cast_flip_frame = 0
-                    e.user_data['flip_idx'] = 0
-                    e.state_code = _FLIP_OUT
+                    _flip_attach(battle, caster, loop=True)
+                    spawn_fenshen(battle, caster, e)
+                    e.state_code = _TRANSFORM
             else:
                 caster.cast_pose_frame = e.user_data['cast_row'] * 4 + CAST_POSE_COLS[ci]
     elif e.state_code == _FLIP_OUT:
-        e.user_data['flip_tick'] += 1
-        if e.user_data['flip_tick'] >= FLIP_HOLD_TICKS:
-            e.user_data['flip_tick'] = 0
-            e.user_data['flip_idx'] += 1
-            idx = e.user_data['flip_idx']
-            if idx >= SOMERSAULT_N:
-                if e.user_data['skill_id'] == 0x04:
-                    # 分身术: 孙悟空**原地翻跟斗不隐藏**, 对每敌召唤 4 分身围攻 (exe FUN_004f3ca3)
-                    e.user_data['flip_idx'] = 0
-                    e.user_data['flip_tick'] = 0
-                    caster.cast_flip_frame = 0
-                    spawn_fenshen(battle, caster, e)
-                    e.state_code = _TRANSFORM
-                else:
-                    # 翻跟头消失完 → 落地噗烟 (exe state 0x14 在翻跟头 cast seq 之后撒) + 隐身
-                    caster.cast_flip_frame = None
-                    caster.cast_hidden = True
-                    _spawn_smoke(battle, caster)
-                    e.state_code = _TRANSFORM
-                    _spawn_beast_attack(battle, caster, e)   # 按 skill 召唤对应神兽
-            else:
-                caster.cast_flip_frame = idx
+        # 翻跟头 seq (attach @start_son_transform) 播完 (exit op 清 playing) → 隐身变身
+        if not caster.is_attacking:
+            # 翻跟头消失完 → 落地噗烟 (exe state 0x14 在翻跟头 cast seq 之后撒) + 隐身
+            caster.cast_hidden = True
+            _spawn_smoke(battle, caster)
+            e.state_code = _TRANSFORM
+            _spawn_beast_attack(battle, caster, e)   # 按 skill 召唤对应神兽
     elif e.state_code == _TRANSFORM:
         if e.user_data['skill_id'] == 0x08:
             # 超亂舞: 孙悟空保持施法姿, 等滑板打完 (eson_done) → 收尾 (不翻跟斗/不隐身)
@@ -220,14 +246,9 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
                 e.state_code = _DONE
             return
         if e.user_data['skill_id'] == 0x04:
-            # 分身术: 孙悟空原地**循环翻跟斗**, 等所有分身打完退场 (eson_done) → 收尾
-            e.user_data['flip_tick'] += 1
-            if e.user_data['flip_tick'] >= FLIP_HOLD_TICKS:
-                e.user_data['flip_tick'] = 0
-                e.user_data['flip_idx'] = (e.user_data['flip_idx'] + 1) % SOMERSAULT_N
-                caster.cast_flip_frame = e.user_data['flip_idx']
+            # 分身术: 循环翻跟头 seq 自播 (loop op), 等所有分身打完退场 (eson_done) → 手动停 + 收尾
             if e.user_data.get('eson_done'):
-                caster.cast_flip_frame = None
+                _flip_stop(caster)
                 e.state_code = _DONE
             return
         # eson01 神兽砸完所有 victim (eson_done) → caster 现身翻跟头出现
@@ -236,26 +257,15 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
                 # exe case 0x28: FUN_00416388 切断神兽长音 (没播完也停, 如大金刚 0x107)
                 _sfx_stop(battle, e.user_data.pop('beast_sound'))
             caster.cast_hidden = False
-            caster.cast_flip_frame = 0
-            e.user_data['flip_idx'] = 0
-            e.user_data['flip_tick'] = 0
             _spawn_smoke(battle, caster)
-            _sfx(battle, SFX_FLIP)   # exe case 0x28 重新 attach 0x670dc4 → seq 首 op 再播 0x127
+            _flip_attach(battle, caster)   # exe case 0x28 重新 attach 0x670dc4 (0x127/0x128 随 seq 播)
             e.state_code = _FLIP_IN
     elif e.state_code == _FLIP_IN:
-        e.user_data['flip_tick'] += 1
-        if e.user_data['flip_tick'] >= FLIP_HOLD_TICKS:
-            e.user_data['flip_tick'] = 0
-            e.user_data['flip_idx'] += 1
-            idx = e.user_data['flip_idx']
-            if idx >= SOMERSAULT_N:
-                caster.cast_flip_frame = None
-                e.state_code = _DONE
-            else:
-                caster.cast_flip_frame = idx
+        if not caster.is_attacking:        # 翻跟头 seq 播完
+            e.state_code = _DONE
     elif e.state_code == _DONE:
         # 收尾: 清状态 + post_attack (回合结束流程) + 销毁 coord
-        caster.cast_flip_frame = None
+        _flip_stop(caster)
         caster.cast_pose_frame = None
         caster.cast_hidden = False
         caster.pending_caster_coord = None
@@ -2055,8 +2065,7 @@ def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['skill_id'] = skill_id
-    e.user_data['flip_idx'] = 0
-    e.user_data['flip_tick'] = 0
+    e.user_data['flip_tick'] = 0        # _CAST 施法姿帧计时 (翻跟头本身已改走 attach_seq)
     e.user_data['phase_ticks'] = 0
     # ps_CSON102 简短施法姿: **0x04 分身 (PTR_00671b0c) + 0x08 超亂舞 (PTR_00671db0, 同位帧2/6)**.
     # 其余技能 cast = 翻跟斗本身 (槽5=ps_CSON105), 直接进 FLIP_OUT.
@@ -2067,8 +2076,7 @@ def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
         caster.cast_pose_frame = e.user_data['cast_row'] * 4 + CAST_POSE_COLS[0]
     else:
         e.state_code = _FLIP_OUT
-        caster.cast_flip_frame = 0                # 起手翻跟头第 0 帧
-        _sfx(battle, SFX_FLIP)                    # exe case 10 attach 0x670dc4, seq 首 op 播 0x127
+        _flip_attach(battle, caster)              # exe case 10 attach 0x670dc4 (音效/跳弧内嵌 seq)
     caster.pending_caster_coord = e
     return e
 

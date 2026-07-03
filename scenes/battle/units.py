@@ -130,16 +130,6 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
             return
         except (FileNotFoundError, ValueError):
             pass
-    # 孙悟空召唤翻跟头: cast_flip_frame 非 None → 显示 ps_CSON105 第 N 帧 (覆盖一切, 方向无关).
-    if getattr(u, 'cast_flip_frame', None) is not None:
-        from core.sprites.loaders import get_somersault_frame, SOMERSAULT_ANCHOR
-        try:
-            frame = get_somersault_frame(u.cast_flip_frame)
-            blit_unit(scene.surface, frame, SOMERSAULT_ANCHOR,
-                      tile_center_x=cx, tile_center_y=cy)
-            return
-        except (FileNotFoundError, ValueError):
-            pass  # 加载失败退回正常 render
     # 白虎旋风吹起: 显示 idle atlas06 row4(重击姿) 循环 4 列(朝向) = 绕中轴线旋转 (覆盖 reaction/locomotion)
     if u.wind_spin_col >= 0:
         try:
@@ -224,6 +214,7 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
         else:
             ax = ent.x >> 16
             ay = ent.y >> 16
+        ay += ent.z >> 16      # z 高度偏移 (负 z = 上空, 如翻跟头 seq 的 dz 小跳弧)
     if anchor is None:
         # 兜底: bottom-center 当 anchor (frame 底中心)
         fw, fh = frame.get_size()
@@ -250,6 +241,19 @@ def _resolve_attack_frame(scene: "BattleScene", u, cs):
     fm_name = None
     ent = u.entity
     slot_lo = ent.atlas_slot & 0xffff
+    # mode2/IDLE 路径 (op 0x06, atlas_slot | 0x20000): slot = per-unit ps_ atlas 家族编号
+    # (exe per-unit remap: slot N → ps_XXX10N, 如孙悟空槽 5 = ps_CSON105 翻跟头, 槽 2 = ps_CSON102
+    # 施法姿). ps_ 战斗精灵统一 64×96 网格, 脚锚 (32, 84). frame_idx 顺序编号 col=i%cols, row=i//cols.
+    if ent.atlas_slot & 0x20000:
+        key = u.sprite_key[:-2] + f"{slot_lo:02d}"
+        try:
+            sheet = get_fm_surface(key)
+            cols = max(1, sheet.get_width() // 64)
+            col, row = ent.frame_idx % cols, ent.frame_idx // cols
+            frame = sheet.subsurface(pygame.Rect(col * 64, row * 96, 64, 96))
+            return frame, (32, 84)
+        except (FileNotFoundError, ValueError):
+            pass    # 该角色无此 ps_ atlas → 退回下方 fm/兜底路径
     fm_frame_idx = ent.frame_idx if slot_lo != 0 or ent.frame_idx != 0 else None
     # 路径选择: 抽象槽 {0,1,5} (= ATK_A/B/C 普攻, 走 per-character atlas remap), 其余都是
     # 真实全局 atlas idx (技能 seq + 敌人 + 三藏 SAM_ATK_B). 注意 csam_g0=7 < 8 也是真实 atlas,

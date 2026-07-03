@@ -158,23 +158,8 @@ def get_fm_surface(resource_name: str) -> pygame.Surface:
     return _FM_SURF_CACHE[resource_name]
 
 
-# 孙悟空翻跟头 ps_CSON105: 256×192 = 4 cols × 2 rows, 每帧 64×96, 8 帧 (蹲→跳→空翻→蜷→倒→球→落→站).
-# 方向无关 (所有方向共用). anchor = (32, 84) 脚部 (跟孙悟空 idle feet 一致, 让翻跟头大致原地).
-SOMERSAULT_ATLAS = "ps_CSON105"
-SOMERSAULT_FRAME_W = 64
-SOMERSAULT_FRAME_H = 96
-SOMERSAULT_COLS = 4
-SOMERSAULT_FRAMES = 8
-SOMERSAULT_ANCHOR = (32, 84)
-
-
-def get_somersault_frame(idx: int) -> pygame.Surface:
-    """孙悟空翻跟头第 idx 帧 (0..7). 用于召唤技能 cast 隐现演出."""
-    surf = get_fm_surface(SOMERSAULT_ATLAS)
-    col = idx % SOMERSAULT_COLS
-    row = idx // SOMERSAULT_COLS
-    return surf.subsurface(pygame.Rect(col * SOMERSAULT_FRAME_W, row * SOMERSAULT_FRAME_H,
-                                       SOMERSAULT_FRAME_W, SOMERSAULT_FRAME_H))
+# (孙悟空翻跟头 ps_CSON105 (4×2 网格 64×96, 8 帧, 脚锚 32,84) 现由 units.py mode2 通用
+#  ps_ 网格分支渲染 (slot 5 → ps_XXX105), 专用 get_somersault_frame loader 已删.)
 
 
 # ---------- SBTLFONT 伤害/MISS 数字字体 ----------

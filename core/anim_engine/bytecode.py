@@ -54,6 +54,9 @@ def tuple_to_bytecode(tuple_seq: list) -> bytes:
         elif kind == 'exit':
             # 实测 EXIT op 是 2B (`00 02`), 不是 ANIM_ENGINE_SPEC 早期写的 4B
             out += bytes([0x00, 0x02])
+        elif kind == 'loop':
+            # op 0x01 RESET_OFFSET: 跳回 seq 开头无限循环 (exe 实测 2B, 如翻跟头循环 @0x670d24 末尾)
+            out += bytes([0x01, 0x02])
         elif kind == 'raw':
             # 10B raw op: [op_low, 0x0a, a, b, c, d] (4 × i16)
             _, op_hex, a, b, c, d = t

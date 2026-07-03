@@ -108,9 +108,8 @@ class BattleUnit:
     # 腾空旋转: 显示 idle atlas06 row4(重击姿) 的列号 = 朝向, 循环 UP→RIGHT→DOWN→LEFT 切帧
     # = 绕自身中轴线转 (原版 seq 0x656ef8 = 帧16/19/17/18). -1 = 不旋转.
     wind_spin_col: int = -1
-    # 孙悟空召唤演出: caster 翻跟头隐现 (ps_CSON105). cast_flip_frame 非 None → render 显示
-    # 翻跟头第 N 帧 (覆盖普通 sprite); cast_hidden → caster 完全不画 (神兽攻击阶段隐身).
-    cast_flip_frame: int | None = None
+    # 孙悟空召唤演出: cast_hidden → caster 完全不画 (神兽攻击阶段隐身).
+    # (翻跟头本身走 attach_seq @0x670dc4 + units.py mode2 渲染 ps_XXX105, 无专用字段.)
     cast_hidden: bool = False
     # 翻跟斗前的简短施法姿: ps_CSON102 帧索引 (非 None → render 显示该帧, 方向行×4+col).
     cast_pose_frame: int | None = None
