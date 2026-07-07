@@ -92,6 +92,9 @@ def _caster_cson_row(caster) -> int:
     return _FACING_TO_CSON_ROW.get(tuple(getattr(caster, 'facing', (0, 1))), 1)
 
 TRANSFORM_TICKS = 40          # 变身形态攻击阶段时长 (占位, 后续 eson01 下落逐敌取代)
+# 隐身烟雾 → 神兽 spawn 的间隔 (exe 各 dispatcher case 0x14 设 +0x16c = now+0x20, case 0x1e 到时
+# 才播技能音 + spawn 神兽). 烟雾散去后停 1.28s 再召唤, 所有孙悟空神兽技能一致.
+BEAST_SPAWN_DELAY_TICKS = 32
 
 # ============ 翻跟头 seq (exe @0x670dc4 / @0x670d24 逐字节转写) ============
 # 结构: sound 0x127(起跳) → 8 帧 idle slot5 (= ps_XXX105 翻跟头) 各 2 tick, 帧间 MOVE dz
@@ -183,9 +186,10 @@ SFX_ESON_BEAST = 0x107        # 大金刚神兽音 (E095, 3.2s): case 0x1e spawn
 SFX_ESON_SLAM = 0xec          # 大金刚每敌砸中音 (E068): case -250 受击特效旁播
 
 
-def _sfx(battle, sound_id: int) -> None:
-    """播全局 sound_id 音效 (= exe FUN_00416311, 技能 dispatcher 显式调用)."""
-    battle.engine._emit('sound_play', None, sound_id)
+def _sfx(battle, sound_id: int, solo: bool = False) -> None:
+    """播全局 sound_id 音效 (= exe FUN_00416311, 技能 dispatcher 显式调用).
+    solo=True: 同 id 播放中跳过 (exe 每 id 单 DirectSound buffer 听感), 密集连发音用."""
+    battle.engine._emit('sound_play_solo' if solo else 'sound_play', None, sound_id)
 
 
 def _sfx_stop(battle, sound_id: int) -> None:
@@ -233,11 +237,12 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
     elif e.state_code == _FLIP_OUT:
         # 翻跟头 seq (attach @start_son_transform) 播完 (exit op 清 playing) → 隐身变身
         if not caster.is_attacking:
-            # 翻跟头消失完 → 落地噗烟 (exe state 0x14 在翻跟头 cast seq 之后撒) + 隐身
+            # 翻跟头消失完 → 落地噗烟 (exe state 0x14 在翻跟头 cast seq 之后撒) + 隐身;
+            # 神兽延迟 32 tick 再召唤 (exe case 0x1e)
             caster.cast_hidden = True
             _spawn_smoke(battle, caster)
+            e.user_data['beast_delay'] = BEAST_SPAWN_DELAY_TICKS
             e.state_code = _TRANSFORM
-            _spawn_beast_attack(battle, caster, e)   # 按 skill 召唤对应神兽
     elif e.state_code == _TRANSFORM:
         if e.user_data['skill_id'] == 0x08:
             # 超亂舞: 孙悟空保持施法姿, 等滑板打完 (eson_done) → 收尾 (不翻跟斗/不隐身)
@@ -250,6 +255,15 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
             if e.user_data.get('eson_done'):
                 _flip_stop(caster)
                 e.state_code = _DONE
+            return
+        # 烟雾后延迟 32 tick 才召唤神兽 (exe case 0x14 → 0x1e 的 +0x20 等待)
+        bd = e.user_data.get('beast_delay')
+        if bd is not None:
+            if bd > 0:
+                e.user_data['beast_delay'] = bd - 1
+            else:
+                e.user_data.pop('beast_delay')
+                _spawn_beast_attack(battle, caster, e)   # 按 skill 召唤对应神兽
             return
         # eson01 神兽砸完所有 victim (eson_done) → caster 现身翻跟头出现
         if e.user_data.get('eson_done'):
@@ -536,9 +550,9 @@ EICE_CONE_SMALL = (0, 1, 2, 3)          # 小冰锥 (雨)
 EICE_CONE_BIG = (28, 31, 34)            # 大冰锥 (主, exe DAT_00656bb8)
 EICE_SHATTER = tuple(range(12, 24))     # 碎裂小冰块 (exe rand%0xc+0xc)
 ICE_SHARD_HEIGHT = 128                  # 小冰锥起始高度 (exe 0x800000=128px)
-ICE_SHARD_VZ = 22                       # 小冰锥下落 px/tick (exe vz≈-24)
-ICE_CONE_HEIGHT = 340                   # 大冰锥起始高度 (exe 0x1f40000=500px, 略降以多在屏内)
-ICE_CONE_VZ = 30                        # 大冰锥下落 px/tick (exe vz≈-48)
+ICE_SHARD_VZ = 24                       # 小冰锥下落 px/tick (exe +0x174=0xffe80000=-24)
+ICE_CONE_HEIGHT = 500                   # 大冰锥起始高度 (exe 0x1f40000=500px)
+ICE_CONE_VZ = 48                        # 大冰锥下落 px/tick (exe +0x174=0xffd00000=-48, ~10t 落地)
 ICE_SHATTER_TICKS = 12                  # 碎块停留 tick (exe think ~0x10)
 _ICE_FALL = 0
 _ICE_SHATTER = 1
@@ -602,6 +616,10 @@ def ice_cone_think(e: "Entity", eng: "Engine") -> None:
 
 
 def _spawn_ice_cone(battle, x, y, height_px, frame, big, victim=None, caster=None) -> None:
+    # exe 冰锥 spawn fn 末尾各播一声: 小冰锥 FUN_004d6f6a→0xad / 大冰锥 FUN_004d70fc→0xae.
+    # 小冰锥雨每 2 tick/敌 一颗, 但 exe 每 id 单 buffer → 播放中重触发不叠放, 听感 = 一段段
+    # (0.56s/段, 100 tick 雨约 5-7 段, 用户确认原版是段落感非糊成一片) → solo 通道.
+    _sfx(battle, SFX_QL_ICE_BIG if big else SFX_QL_ICE_SMALL, solo=not big)
     e = battle.engine.spawn(think_fn=ice_cone_think)
     e.atlas_slot = EICE_ATLAS
     e.frame_idx = frame
@@ -701,14 +719,24 @@ def spawn_sweep_beast(battle, caster, coord: "Entity", atlas: int, frame_count: 
 QL_ATLAS = 255
 QL_COIL_FRAMES = (0, 1, 2, 1)   # 盘踞动画 (exe seq 0x671b1c 循环)
 QL_COIL_TICKS = 3
-QL_DESCEND_HEIGHT = 220         # 神兽进场高度 (较矮, 偏盘踞而非天降)
-QL_DESCEND_VZ = 22
+# 进出场 (exe spawn FUN_004f4d4e + think FUN_004f4c62): 下落 = 初速 60px/tick 每 tick 减速 2
+# (ease-out, 30 tick 降 930px), **减速到 0 = 落定 → 发 -100 才开雨** (出现到下雨有明显飘落间隔);
+# 升空对称 ease-in (vz 从 0 每 tick +2, 30 tick 升 930px).
+QL_DESCEND_VZ0 = 60             # 下落初速 (exe +0x174 = -60)
+QL_DESCEND_DECEL = 2            # 每 tick 减速 (exe +0x180 = 0x20000)
+QL_SKY_PX = 930                 # 起始高度 = sum(60,58,...,2)
 # 严格还原 exe dispatcher state 0x28: 神兽落地 → 冰锥雨 100 tick, 每 2 tick 对**每个**敌人撒 1
 # 小冰锥, 每 20 tick 对每个敌人触发受击反应 (-250); 雨止后 40 tick 每敌大冰锥落地 + 伤害.
 QL_RAIN_TICKS = 100            # 冰锥雨持续 (exe +0x16c = +0x64)
 QL_RAIN_INTERVAL = 2          # 每 2 tick 一波 (exe tick%2==0)
 QL_REACT_INTERVAL = 20        # 每 20 tick 受击反应 (exe tick%0x14==0)
 QL_FINALE_TICKS = 40          # 雨止后到大冰锥 (exe +0x28) + 落地缓冲
+# 音效 (dispatcher FUN_004f4e37 + 冰锥 spawn fn): case 0x1e 神兽 spawn 播 0x147 (E159 龙吟 2.5s,
+# 单次无 stop); 小冰锥 spawn 各播 0xad (E005) / 大冰锥 spawn 各播 0xae (E006); 受击 -250 无音
+# (与大金刚 0xec 不同), 落地/碎裂也无音.
+SFX_QL_BEAST = 0x147
+SFX_QL_ICE_SMALL = 0xad
+SFX_QL_ICE_BIG = 0xae
 _QL_DESCEND = 0
 _QL_RAIN = 1
 _QL_FINALE = 2
@@ -737,9 +765,11 @@ def qinglong_beast_think(e: "Entity", eng: "Engine") -> None:
         return
     battle, caster = ud['battle'], ud['caster']
     if e.state_code == _QL_DESCEND:
-        e.z += QL_DESCEND_VZ << 16
+        # ease-out 飘落 (exe: vz -60 每 tick +2 减速, vz>=0 即落定发 -100 开雨)
+        e.z += ud['vz'] << 16
+        ud['vz'] -= QL_DESCEND_DECEL
         _ql_coil(e)
-        if e.z >= 0:
+        if ud['vz'] <= 0:
             e.z = 0
             ud['rain_tick'] = 0
             e.state_code = _QL_RAIN
@@ -777,11 +807,14 @@ def qinglong_beast_think(e: "Entity", eng: "Engine") -> None:
                                     EICE_CONE_BIG[battle.rng.randint(0, 2)], big=True,
                                     victim=v, caster=caster)
         if ud['finale_tick'] >= QL_FINALE_TICKS + 18:   # 等大冰锥落地结算后升空
+            ud['vz'] = 0
             e.state_code = _QL_RISE
     elif e.state_code == _QL_RISE:
-        e.z -= QL_DESCEND_VZ << 16
+        # ease-in 升空 (exe -100 后: vz 从 0 每 tick +2 加速, 升过 930px 发 -150 自毁)
+        ud['vz'] += QL_DESCEND_DECEL
+        e.z -= ud['vz'] << 16
         _ql_coil(e)
-        if (e.z >> 16) <= -QL_DESCEND_HEIGHT:
+        if (e.z >> 16) <= -QL_SKY_PX:
             ud['coord'].user_data['eson_done'] = True
             eng.destroy(e)
 
@@ -789,6 +822,7 @@ def qinglong_beast_think(e: "Entity", eng: "Engine") -> None:
 def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     """青龙: 神兽落到中心盘踞 + 持续冰锥雨 + 末尾大冰锥伤害."""
     coord.user_data['eson_done'] = False
+    _sfx(battle, SFX_QL_BEAST)   # exe case 0x1e: 神兽 spawn 播龙吟 0x147 (单次, 无 stop)
     victims = _eson_collect_victims(battle, caster)
     e = battle.engine.spawn(think_fn=qinglong_beast_think)
     e.atlas_slot = atlas
@@ -804,7 +838,8 @@ def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.user_data['anim_tick'] = 0
     e.user_data['rain_tick'] = 0
     e.x, e.y = _screen_center(battle, caster)        # 战场中心 = caster tile
-    e.z = -QL_DESCEND_HEIGHT << 16
+    e.z = -QL_SKY_PX << 16
+    e.user_data['vz'] = QL_DESCEND_VZ0
     e.state_code = _QL_DESCEND
 
 

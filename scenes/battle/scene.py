@@ -130,6 +130,8 @@ class BattleScene(Scene):
         self.battle.engine.on('sound_play', lambda ent, sid: self.audio.play_sfx_id(sid))
         # 'sound' op (0x0412 STOP) / 技能收尾 → 切断还在播的长音 (exe FUN_00416388)
         self.battle.engine.on('sound_stop', lambda ent, sid: self.audio.stop_sfx_id(sid))
+        # 密集技能音 (青龙冰锥雨等): 同 id 单通道不叠放 (exe 单 DirectSound buffer 语义)
+        self.battle.engine.on('sound_play_solo', lambda ent, sid: self.audio.play_sfx_id(sid, solo=True))
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False

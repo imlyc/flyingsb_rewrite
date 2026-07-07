@@ -38,10 +38,51 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
 
     if not units_animating(scene):
         scene.battle.advance_turn_when_ready()
+        scene._anim_block_since = None
+    else:
+        _watchdog_animating(scene, now)
 
     _tick_camera(scene)
     _tick_phase_transitions(scene, now)
     _tick_menu_anim(scene, dt_ms)
+
+
+def _watchdog_animating(scene: "BattleScene", now: int) -> None:
+    """卡死诊断: units_animating 连续阻塞 >15s (远超任何正常演出) → 终端打印阻塞原因.
+    每个阻塞事件只打一次 (打完 since 前移 60s 防刷屏). 排查'演出完但不能操作'类问题."""
+    since = getattr(scene, '_anim_block_since', None)
+    if since is None:
+        scene._anim_block_since = now
+        return
+    if now - since < 15000:
+        return
+    scene._anim_block_since = now + 60000       # 下一轮 60s 后才再报
+    print(f"[watchdog] units_animating 已阻塞 >15s, phase={scene.battle.phase.name}, 阻塞原因:")
+    for f in scene._floats:
+        if not f.flash_started_at(now):
+            print(f"  - 飘字未进 flash: target={getattr(f.target_unit, 'name', None)}")
+    for u in scene.battle.all_units:
+        if u.hp <= 0 and (u.death_anim_time_ms < 0
+                          or (not u.is_player and u.death_anim_time_ms < scene.ENEMY_DEATH_TOTAL_MS)
+                          or (u.is_player and u.death_anim_time_ms < scene.DEATH_FALL_TOTAL_MS)):
+            print(f"  - {u.name} 死亡动画未完: death_anim={u.death_anim_time_ms}"
+                  f" settle={u.settle_pending} batch={u.settle_batch} react={u.reaction_seq is not None}")
+        elif u.hp > 0:
+            if (abs(u.render_x - u.x) > scene.ANIM_EPSILON
+                    or abs(u.render_y - u.y) > scene.ANIM_EPSILON):
+                print(f"  - {u.name} render lerp 未到位: render=({u.render_x:.2f},{u.render_y:.2f})"
+                      f" 逻辑=({u.x},{u.y}) path={u.move_path}")
+            if u.is_attacking:
+                ent = u.entity
+                print(f"  - {u.name} is_attacking: atlas={ent.atlas_slot:#x} frame={ent.frame_idx}"
+                      f" ticks={ent.ticks} seq_len={len(ent.seq)} offset={ent.offset}")
+            if u.reaction_seq is not None:
+                print(f"  - {u.name} reaction 未结束: step={u.reaction_step_idx}/{len(u.reaction_seq)}")
+    for e in scene.battle.engine.entities:
+        if e.user_data.get('projectile') and e.state_code != 20:
+            print(f"  - projectile ent id={e.id} state={e.state_code}"
+                  f" think={getattr(e.think_fn, '__name__', None)} kind={e.user_data.get('kind')}"
+                  f" ud_keys={list(e.user_data.keys())[:10]}")
 
 
 def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:

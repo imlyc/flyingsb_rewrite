@@ -223,9 +223,15 @@ def test_qinglong_ice_cone_shatter_sequence():
     caster.pending_skill_id = 0x01
     caster.pending_impact_total = 1
     b._pending_damage_range = {(8, 5), (7, 6)}
-    from core.son_transform import start_son_transform
+    from core.son_transform import (start_son_transform, SFX_QL_BEAST,
+                                    SFX_QL_ICE_SMALL, SFX_QL_ICE_BIG)
     from core.fm_frames import FM_FRAMES
     from core.raw_attack_seqs import atlas_resource
+    played, played_solo = [], []
+    tick = [0]
+    ev = []                                   # (tick, sid) 全部音效带时刻
+    b.engine.on('sound_play', lambda ent, sid: (played.append(sid), ev.append((tick[0], sid))))
+    b.engine.on('sound_play_solo', lambda ent, sid: (played_solo.append(sid), ev.append((tick[0], sid))))
     start_son_transform(b, caster, (7, 5), 0x01)
 
     def render_frame(e):
@@ -242,6 +248,7 @@ def test_qinglong_ice_cone_shatter_sequence():
     saw_cone = saw_big = saw_shatter = 0
     d1_react_ticks = 0
     for _ in range(600):
+        tick[0] += 1
         b.engine.tick()
         if d1.reaction_seq is not None:      # 雨期受击反应 (用户问题1)
             d1_react_ticks += 1
@@ -259,6 +266,20 @@ def test_qinglong_ice_cone_shatter_sequence():
     assert saw_big > 0, "应有大冰锥收尾 (frames 28/31/34)"
     assert saw_shatter > 0, "冰锥落地应碎裂为小冰块 (frames 12-23)"
     assert d1_react_ticks > 30, f"冰锥雨期敌人应持续受击动画, 实际 {d1_react_ticks} tick"
+    # 音效: 龙吟 0x147 一次; 小冰锥每颗 emit 0xad (= exe FUN_00416311 调用 100 次), 但走 **solo
+    # 通道** (同 id 播放中跳过, audio 层节流成 0.56s 一段的段落感); 大冰锥每敌 0xae (普通通道)
+    assert played.count(SFX_QL_BEAST) == 1, "神兽 spawn 播一次龙吟 0x147"
+    assert played_solo.count(SFX_QL_ICE_SMALL) == 100, \
+        f"冰锥雨 50 波 × 2 敌 = 100 次 solo emit, 实际 {played_solo.count(SFX_QL_ICE_SMALL)}"
+    assert SFX_QL_ICE_SMALL not in played, "小冰锥必须走 solo 通道 (否则 100 声叠成糊)"
+    assert played.count(SFX_QL_ICE_BIG) == 2, "大冰锥每敌一声 0xae"
+    # 时序 (exe): 龙吟+spawn → ease-out 飘落 30 tick → 雨; 雨末 → +40 tick 空档 → 0xae
+    t_beast = next(t for t, s in ev if s == SFX_QL_BEAST)
+    t_rain0 = next(t for t, s in ev if s == SFX_QL_ICE_SMALL)
+    t_rain_last = max(t for t, s in ev if s == SFX_QL_ICE_SMALL)
+    t_big = next(t for t, s in ev if s == SFX_QL_ICE_BIG)
+    assert t_rain0 - t_beast >= 30, f"神兽出现到开雨应有 ~30 tick 飘落, 实际 {t_rain0 - t_beast}"
+    assert 38 <= t_big - t_rain_last <= 44, f"雨停到大冰锥应 ~40 tick 空档, 实际 {t_big - t_rain_last}"
 
 
 def test_baihu_whirlwind_attack():
