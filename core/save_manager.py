@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 import struct
 import sys
 from dataclasses import dataclass, field
@@ -105,8 +106,11 @@ def print_save(save: SaveData) -> None:
 
 
 # ---------- 测试入口 ----------
-DEFAULT_TEST_SAVE = (
-    "/Users/imlyc/Work/flyingsb/origin/flyingsb/工具大全/存档/全剧情存档/0/Save1.dat"
+# 原版全剧情存档 (repo 上一级 origin/, 可用 FLYINGSB_SAVE 环境变量覆盖), __main__ 自测用
+DEFAULT_TEST_SAVE = os.environ.get(
+    "FLYINGSB_SAVE",
+    str(Path(__file__).resolve().parents[2] / "origin" / "flyingsb"
+        / "工具大全" / "存档" / "全剧情存档" / "0" / "Save1.dat"),
 )
 
 

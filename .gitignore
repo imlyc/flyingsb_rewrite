@@ -2,3 +2,5 @@ __pycache__
 assets
 .DS_Store
 /data/
+venv/
+_audio_clips/

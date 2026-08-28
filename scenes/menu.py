@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pygame
@@ -17,9 +18,12 @@ CHINESE_FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
 ]
 
-DEFAULT_SAVE = Path(
-    "/Users/imlyc/Work/flyingsb/origin/flyingsb/工具大全/存档/全剧情存档/0/Save1.dat"
-)
+# 原版存档: 默认 repo 上一级 origin/ 里的全剧情存档, 可用 FLYINGSB_SAVE 环境变量覆盖
+DEFAULT_SAVE = Path(os.environ.get(
+    "FLYINGSB_SAVE",
+    Path(__file__).resolve().parents[2] / "origin" / "flyingsb"
+    / "工具大全" / "存档" / "全剧情存档" / "0" / "Save1.dat",
+))
 
 
 def load_chinese_font(size: int) -> pygame.font.Font:

@@ -19,8 +19,9 @@ import os
 import sys
 from pathlib import Path
 
-ORIGIN = Path("/Users/imlyc/Work/flyingsb/origin/flyingsb")
 ROOT = Path(__file__).resolve().parent.parent
+# 原版游戏目录: 默认 repo 上一级的 origin/flyingsb, 可用 FLYINGSB_ORIGIN 环境变量覆盖
+ORIGIN = Path(os.environ.get("FLYINGSB_ORIGIN", ROOT.parent / "origin" / "flyingsb"))
 ASSETS = ROOT / "assets"
 
 # DLL → 输出子目录 (相对 ASSETS)

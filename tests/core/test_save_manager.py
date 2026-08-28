@@ -15,9 +15,9 @@ from core.save_manager import (
 )
 
 
-_DEFAULT_SAVE = pathlib.Path(
-    "/Users/imlyc/Work/flyingsb/origin/flyingsb/工具大全/存档/全剧情存档/0/Save1.dat"
-)
+from core.save_manager import DEFAULT_TEST_SAVE
+
+_DEFAULT_SAVE = pathlib.Path(DEFAULT_TEST_SAVE)
 
 
 @pytest.fixture(scope="module")
