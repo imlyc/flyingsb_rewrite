@@ -134,6 +134,37 @@ def extract():
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     print(f"\n→ 共 {len(manifest)} 项  manifest: {manifest_path.relative_to(ROOT)}")
 
+    _link_bgm()
+
+
+def _link_bgm():
+    """assets/audio → 原版 Data/ (BGM WAV) 符号链接. 用绝对路径 (相对链接按链接所在
+    目录解析, 易断链); 符号链接失败 (如 Windows 无权限) 回退为复制 .wav."""
+    import shutil
+    bgm_src = ORIGIN / "Data"
+    link = ASSETS / "audio"
+    if not bgm_src.is_dir():
+        print(f"[skip] BGM 目录不存在: {bgm_src}")
+        return
+    if link.is_symlink() or link.exists():
+        if link.is_symlink() and link.resolve() == bgm_src.resolve():
+            print(f"→ BGM 链接已就位: {link.relative_to(ROOT)} → {bgm_src}")
+            return
+        print(f"[skip] {link.relative_to(ROOT)} 已存在且非指向 {bgm_src}, 不动它")
+        return
+    try:
+        link.symlink_to(bgm_src.resolve())
+        print(f"→ BGM 链接: {link.relative_to(ROOT)} → {bgm_src}")
+    except OSError as e:
+        print(f"符号链接失败 ({e}), 改为复制 .wav ...")
+        link.mkdir(parents=True)
+        n = 0
+        for wav in bgm_src.iterdir():
+            if wav.suffix.lower() == ".wav":
+                shutil.copy2(wav, link / wav.name)
+                n += 1
+        print(f"→ 复制 {n} 个 BGM 到 {link.relative_to(ROOT)}")
+
 
 if __name__ == "__main__":
     sys.exit(extract())

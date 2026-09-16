@@ -42,23 +42,15 @@ export FLYINGSB_ORIGIN=/path/to/flyingsb
 
 ### 3. 提取资源
 
-从原版 6 个 DLL 里把 sprite / 地图 / UI / 音效批量 dump 到 `assets/`：
+从原版 6 个 DLL 里把 sprite / 地图 / UI / 音效批量 dump 到 `assets/`，
+并自动把 BGM（`assets/audio`）符号链接到原版 `Data/` 目录（无符号链接权限时
+自动回退为复制 `.wav`）：
 
 ```sh
 venv/bin/python -m tools.extract_dll
 ```
 
-### 4. 链接 BGM
-
-BGM 直接使用原版 `Data/` 目录下的 WAV（不复制）：
-
-```sh
-ln -s "$FLYINGSB_ORIGIN/Data" assets/audio     # 未设环境变量则用 ../origin/flyingsb/Data
-```
-
-（Windows 无符号链接权限时，把 `Data/` 里的 `.wav` 复制到 `assets/audio/` 也可。）
-
-### 5. 启动
+### 4. 启动
 
 ```sh
 venv/bin/python main.py
