@@ -11,12 +11,34 @@ from core.audio_manager import AudioManager
 from core.save_manager import load_save
 from scenes.base import Scene
 
+# 各平台常见中文字体, 按优先级找第一个存在的 (只列 macOS 路径会让 Windows/Linux
+# 全部 miss → 落到无中文字形的默认字体 → 全是豆腐框).
 CHINESE_FONT_CANDIDATES = [
+    # macOS
     "/System/Library/Fonts/STHeiti Medium.ttc",
     "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/Supplemental/Songti.ttc",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    # Windows
+    "C:/Windows/Fonts/msyh.ttc",       # 微软雅黑 (Vista+ 简中)
+    "C:/Windows/Fonts/msyh.ttf",
+    "C:/Windows/Fonts/simhei.ttf",     # 黑体
+    "C:/Windows/Fonts/msjh.ttc",       # 微软正黑 (繁中)
+    "C:/Windows/Fonts/simsun.ttc",     # 宋体
+    "C:/Windows/Fonts/mingliu.ttc",    # 细明体
+    # Linux
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 ]
+# 路径全 miss 时按字体名匹配系统字体 (pygame.font.SysFont 接受逗号分隔的候选名单)
+CHINESE_SYSFONT_NAMES = (
+    "microsoftyahei,msyh,simhei,simsun,pingfangsc,heitisc,"
+    "notosanscjksc,notosanscjk,wenquanyimicrohei,arialunicodems"
+)
+
+_FONT_PATH_CACHE: str | None | bool = False   # False=未探测; None=无路径命中(用 SysFont)
 
 # 原版存档: 默认 repo 上一级 origin/ 里的全剧情存档, 可用 FLYINGSB_SAVE 环境变量覆盖
 DEFAULT_SAVE = Path(os.environ.get(
@@ -27,12 +49,17 @@ DEFAULT_SAVE = Path(os.environ.get(
 
 
 def load_chinese_font(size: int) -> pygame.font.Font:
-    for p in CHINESE_FONT_CANDIDATES:
+    global _FONT_PATH_CACHE
+    if _FONT_PATH_CACHE is False:                 # 首次: 探测一次, 结果缓存
+        _FONT_PATH_CACHE = next(
+            (p for p in CHINESE_FONT_CANDIDATES if Path(p).exists()), None)
+    if _FONT_PATH_CACHE is not None:
         try:
-            return pygame.font.Font(p, size)
-        except (FileNotFoundError, OSError):
-            continue
-    return pygame.font.SysFont(None, size)
+            return pygame.font.Font(_FONT_PATH_CACHE, size)
+        except OSError:
+            _FONT_PATH_CACHE = None
+    # 无路径命中 → 按字体名匹配系统字体; 再不行 SysFont 落默认 (可能无中文字形)
+    return pygame.font.SysFont(CHINESE_SYSFONT_NAMES, size)
 
 
 class TitleScene(Scene):
