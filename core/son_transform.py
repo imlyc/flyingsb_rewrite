@@ -731,6 +731,7 @@ QL_RAIN_TICKS = 100            # 冰锥雨持续 (exe +0x16c = +0x64)
 QL_RAIN_INTERVAL = 2          # 每 2 tick 一波 (exe tick%2==0)
 QL_REACT_INTERVAL = 20        # 每 20 tick 受击反应 (exe tick%0x14==0)
 QL_FINALE_TICKS = 40          # 雨止后到大冰锥 (exe +0x28) + 落地缓冲
+QL_RETURN_TICKS = 31          # 大冰锥音 → 孙悟空现身翻跟头 (wine sfx_trace 实测 770ms/24.5ms)
 # 音效 (dispatcher FUN_004f4e37 + 冰锥 spawn fn): case 0x1e 神兽 spawn 播 0x147 (E159 龙吟 2.5s,
 # 单次无 stop); 小冰锥 spawn 各播 0xad (E005) / 大冰锥 spawn 各播 0xae (E006); 受击 -250 无音
 # (与大金刚 0xec 不同), 落地/碎裂也无音.
@@ -811,9 +812,12 @@ def qinglong_beast_think(e: "Entity", eng: "Engine") -> None:
             e.state_code = _QL_RISE
     elif e.state_code == _QL_RISE:
         # ease-in 升空 (exe -100 后: vz 从 0 每 tick +2 加速, 升过 930px 发 -150 自毁)
+        ud['finale_tick'] += 1
         ud['vz'] += QL_DESCEND_DECEL
         e.z -= ud['vz'] << 16
         _ql_coil(e)
+        if ud['finale_tick'] == QL_FINALE_TICKS + QL_RETURN_TICKS:
+            ud['coord'].user_data['eson_done'] = True   # 龙还在升空, 人先翻回来 (原版实录)
         if (e.z >> 16) <= -QL_SKY_PX:
             ud['coord'].user_data['eson_done'] = True
             eng.destroy(e)
