@@ -165,31 +165,3 @@ def test_chest_reachability_not_worse_than_baseline():
     assert ok / tot >= 0.90, f"宝箱可达率跌破护栏: {ok}/{tot} = {ok / tot:.1%}"
 
 
-def test_void_tiles_calibrated_by_official_data():
-    """空瓦片豁免名单: 文件在、非空, 且确实生效 (被豁免的瓦片不再算空)。
-
-    名单由 `tools/calibrate_void_tiles.py` 生成: 证据 = 该瓦片被原版 door / spawn / pcpos /
-    权威宝箱表当作可站格用过。这条测试防止名单丢失或 `real_map` 忘了应用。
-    """
-    p = ASSETS / "void_tiles.json"
-    assert p.exists(), "缺 assets/void_tiles.json (跑 tools/calibrate_void_tiles.py 生成)"
-    data = json.loads(p.read_text(encoding="utf-8"))
-    exempt = {k: set(v) for k, v in (data.get("exempt") or {}).items()}
-    assert len(exempt) >= 20 and sum(len(v) for v in exempt.values()) >= 50
-
-    from core.real_map import _void_exemptions
-    assert _void_exemptions() == {k: frozenset(v) for k, v in exempt.items()}
-    # 抽查: 图集名同名的地图, 其豁免瓦片必须已从 _void/_black 里剔除
-    checked = 0
-    for ts_name, tiles in exempt.items():
-        if not (ASSETS / "maps" / f"{ts_name}.map").exists():
-            continue
-        m = realm.load(ts_name)
-        if m.ts_name != ts_name:
-            continue
-        for t in tiles:
-            assert t not in m._void and t not in m._black, f"{ts_name} tile {t} 仍在空集合里"
-        checked += 1
-        if checked >= 8:
-            break
-    assert checked, "没有任何可抽查的图集 (名单/base 名对不上?)"

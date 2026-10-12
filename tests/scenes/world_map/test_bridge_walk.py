@@ -17,24 +17,46 @@ def _pygame():
     yield
 
 
+def _bfs(m, start, layer):
+    """按 RealMap.step 做层感知 BFS → {(x, y, layer)}."""
+    from collections import deque
+    seen, q = {(start[0], start[1], layer)}, deque([(start[0], start[1], layer)])
+    while q:
+        x, y, z = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ok, nz, nx, ny = m.move(x, y, dx, dy, z)
+            if ok and (nx, ny, nz) not in seen:
+                seen.add((nx, ny, nz)); q.append((nx, ny, nz))
+    return seen
+
+
+def _open_spawn(m, cands):
+    """第一个 可站 且 有可站邻格 的出生点 (港口到达点那种四面实心的格不算)."""
+    for c in cands:
+        if not c:
+            continue
+        z = m.layer_at(*c)
+        if m.passable(*c, z) and any(m.passable(c[0] + dx, c[1] + dy, z)
+                                     for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+            return c, z
+    return None, 0
+
+
 def test_wooden_bridge_is_walkable(_pygame):
-    """木梯/桥在属性层与屋顶同码 (type3 level3), 靠 _WALK_OVER_TILES 白名单放行."""
+    """五指村木梯 (exe 真值): 梯身 (22..23, 20..26) 在第 1 层, 梯口 (22,19)/(23,19) 是坡格 (bit12,
+    朝向=下): 从北边草地 (第 0 层) 往下走上梯口 → 切到第 1 层 → 沿梯子下到东南红土台地."""
     m = realm.load("TFI0___P")
     for (x, y) in [(22, 20), (22, 22), (22, 24), (22, 26), (23, 24), (23, 21)]:
-        assert m.passable(x, y), f"木梯 ({x},{y}) 走不上去"
-    # 从玩家报的位置能走到梯子两侧、梯顶与右侧草地
-    sp = (21, 24)
-    seen, q = {sp}, deque([sp])
-    while q:
-        x, y = q.popleft()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if (nx, ny) in seen or not m.in_bounds(nx, ny):
-                continue
-            if m.passable(nx, ny):
-                seen.add((nx, ny)); q.append((nx, ny))
-    for tgt in [(22, 24), (23, 24), (22, 18), (24, 24), (22, 26)]:
-        assert tgt in seen, f"从 {sp} 走不到 {tgt}"
+        assert m.passable(x, y, 1), f"梯身 ({x},{y}) 第 1 层走不上去"
+    assert not m.passable(22, 20, 0) and not m.passable(23, 21, 0)   # 压在石墙上的两行, 第 0 层实心
+    assert m.cell(22, 19) & realm.CELL_RAMP and m.cell(23, 19) & realm.CELL_RAMP
+    ok, z = m.step(22, 18, 0, 1, 0)          # 草地 → 梯口: 切到第 1 层
+    assert ok and z == 1
+    ok, z = m.step(22, 20, 0, -1, 1)         # 梯身往上 → 梯口: 回第 0 层
+    assert ok and z == 0
+    seen = _bfs(m, (22, 18), 0)
+    for tgt in [(22, 24, 1), (23, 24, 1), (22, 26, 1), (22, 36, 1)]:   # 梯子 + 台地上的房门
+        assert tgt in seen, f"从草地走不到 {tgt}"
 
 
 def test_doors_stay_reachable(_pygame):
@@ -58,26 +80,17 @@ def test_doors_stay_reachable(_pygame):
             m = realm.load(base)
         except Exception:
             continue
-        sp = wg.spawn(base) or m.start_pos()
-        if not m.passable(*sp):
-            sp = m.start_pos()
-        seen = set()
-        if m.passable(*sp):
-            seen = {sp}
-            q = deque([sp])
-            while q:
-                x, y = q.popleft()
-                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                    nx, ny = x + dx, y + dy
-                    if (nx, ny) in seen or not m.in_bounds(nx, ny):
-                        continue
-                    if (nx, ny) in tr or m.passable(nx, ny):
-                        seen.add((nx, ny)); q.append((nx, ny))
+        sp, z = _open_spawn(m, [wg.spawn(base), m.start_pos()] + [(x, y) for x, y, _ in m.pcpos])
+        seen = {(x, y) for (x, y, _z) in _bfs(m, sp, z)} if sp else set()
+        seen |= {p for p in tr if any((p[0] + dx, p[1] + dy) in seen
+                                     for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
         for pos in tr:
             total += 1
             if pos not in seen:
                 unreachable += 1
-    assert unreachable <= 60, f"太多传送门走不到: {unreachable}/{total} (通行规则又改坏了?)"
+    # exe 真值规则下基线 145: 剩下的几乎全是"一张图装多个独立房间" (TTD6/TMO17/TARB_09/TMT18/TDD0...),
+    # 每个房间只能从别的图进, 本来就互不连通.
+    assert unreachable <= 160, f"太多传送门走不到: {unreachable}/{total} (通行规则又改坏了?)"
 
 
 def test_town_streets_stay_connected(_pygame):
@@ -106,3 +119,12 @@ def test_walls_and_roofs_still_solid(_pygame):
     solid = [(x, y) for y in range(m.h) for x in range(m.w)
              if not m.passable(x, y)]
     assert len(solid) > 200, "可走区域异常膨胀 (疑似把墙放开了)"
+
+
+def test_asram_raised_district_via_stairs(_pygame):
+    """雅士蘭东北高台 (第 1 层) 的四个门, 要靠 (25,36) 斜梯 → (26,35) 坡口 切层才到得了."""
+    m = realm.load("TAS0___P")
+    seen = _bfs(m, (20, 43), 0)
+    for door in [(28, 26), (34, 30), (35, 22), (31, 14)]:
+        assert any((door[0] + dx, door[1] + dy, 1) in seen
+                   for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0))), f"高台门 {door} 走不到"

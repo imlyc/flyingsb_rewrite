@@ -1,33 +1,37 @@
-"""原版真实地图 (.map + tileset .pcx) 加载 / 渲染 / 通行判定.
+"""原版真实地图 (.map + tileset .pcx/.mat) 加载 / 渲染 / 通行判定 —— 全部按 exe 真值.
 
-地图格式 (逆向自 mapset.dll 资源; 见 tools/extract_maps.py 顶部注释):
-  .map = 120 个 u32 头部 + 2 张 W×H 的 u32 网格
-    u[6]=宽W, u[7]=高H, u[8]/u[9]=tileset 网格列/行
-    网格 A = 可视瓦片索引 (行优先); 网格 B = 属性/覆盖层 (flag 非 0 = 墙/障碍)
-    尾部    = 可选 8 字节/格的 object/event 数据 (城镇/迷宫才有)
-  .mfo = 文本元数据 (mapname / pcpos)
-  .pcx = tileset 图集, 单格 64×48 (= core.sprites.base.TILE_W/TILE_H)
+地图格式 (逆向自 map.cpp: 加载 FUN_004b5ac3 / 表 FUN_004b851c, 2026-10-12):
+  .map = 0x1E0 字节头 + **两层** [tiles(W×H u32) + attrs(W×H u32)]
+    头部每层 0x30 字节 (12 u32): u[6]=W, u[7]=H (第二层在 u[12+6]/u[12+7], 0×0 = 无第二层);
+    全部 487 张图都满足 len == 0x1E0 + 8·W0·H0 + 8·W1·H1.
+    第 0 层 = 地面 (P), 第 1 层 = 高处 (S: 桥 / 城墙顶 / 二楼), 各自有瓦片与属性.
+  attrs 每格: 低 16 位 = exe 表 ATTR_TABLE[0x104] (VA 0x6521D4) 的下标, 高 16 位 = type(2b)+level(3b):
+    cell = ATTR_TABLE[idx] & ~0x1F | (attr>>16)%4 | ((attr>>18)&7)<<2
+    bit 9      = 实心 (不可进入)                         —— FUN_004b4e6b / FUN_0049e2b5
+    bit 5..8   = 从本格**出去**时被挡的方向 (上/下/左/右)  —— 栅栏 / 悬崖边
+    bit 19..20 = 事件类型 (1 = 传送/触发), bit 21..25 = 事件(jmp)下标, bit 26..28 = 朝向
+  **地图 ↔ 图集** 不是同名关系: exe 里有一张 500 项地图表 (VA 0x6474D0, 位置 ID 为下标),
+    每项给出 map 资源名 + tileset 资源名 (487 张里 425 张用别人的图集) → assets/map_table.json
+    (tools/extract_map_table.py). 图集 = <tileset>P.pcx (地面层) / <tileset>S.pcx (高层),
+    配套 .mat = 每个瓦片一个 u32: 0 = 空 (不画), 0x200 = 画在角色下, 0x100 = 画在角色上.
+  .mfo = 文本元数据 (mapname / pcpos / jmp ...), 由 tools/extract_events.py 解析.
 
 本类同时实现 BattleScene / WorldMapScene 期望的 "地形提供者" 接口:
-  w / h / draw_terrain(surface, cam_x, cam_y) / _camera_offset() / passable(x, y)
-  build_battle_map()
+  w / h / draw_terrain(surface, cam_x, cam_y, rows) / draw_overlay(...) / _camera_offset()
+  passable(x, y) / can_move(x, y, dx, dy) / build_battle_map()
 
-通行规则 (实测校准):
-  不可通行 = 出界 OR "空" 瓦片 (色键/纯黑/蓝水) OR 属性层 flag 不在 WALK_FLAGS 内
-  flag = 网格B 高 16 位 (低 16 位是**屋顶覆盖层**的瓦片号, 与通行无关):
-    0  = 地面 (可走)
-    3  = 门 / 门槛 / 台阶      —— 可走
-    7  = 楼梯踏步 / 低矮可跨结构 —— 可走
-    11 / 13 / 15 / 19 / 23 = 墙体·屋顶·树篱·家具 (实心)
-  实证 (2026-09-28): 雅士兰 TAS0___P 右下拱门旁那道斜向石阶, 踏步格 flag=7 (最下一级 3),
-  周围灰石墙 flag=11/15; 五指村的木梯是 flag=0; 房子**立面那一行本身是 flag=0**
-  (玩家要走到门口), 屋顶/屋檐才是 11/13/15。此前只认 flag==0, 导致楼梯上不去。
-  门的落点/触发仍由上层 WorldMapScene 按传送点坐标处理 (见 passable_at)。
+通行: 原版玩家的判定是 FUN_0049e2b5(x, y, dir, 0x32):
+  目标格 bit9 实心 → 不能走; 本格 bit(5+dir) → 不能朝该方向出去. 没有别的规则.
+  层: 原版玩家带一个"层号" (pcpos 的 z); 两层 = 两个海拔区域 (五指村: 草地=0, 东南红土台地=1,
+  木梯连接; 山地图 TOH0_* 出生在第 1 层, 第 0 层根本没碰撞). 切层 (FUN_004b4f56):
+  目标格 bit12 = 坡/梯口, 朝向 = bit26..28: 沿该朝向走上去 → 到第 1 层, 逆向走上去 → 回第 0 层.
+  (bit17 的另一种切层 433 格 / 38 张图 尚未实现.)
 """
 
 from __future__ import annotations
 
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -36,123 +40,47 @@ import pygame
 from core.battle.data import BattleMap
 from core.sprites.base import TILE_W, TILE_H
 
-MAPS_DIR = Path(__file__).resolve().parent.parent / "assets" / "maps"
-HEADER_U32 = 120
+ROOT = Path(__file__).resolve().parent.parent
+MAPS_DIR = ROOT / "assets" / "maps"
+MAP_TABLE_PATH = ROOT / "assets" / "map_table.json"
+ATTR_TABLE_PATH = ROOT / "assets" / "map_attr_table.json"
+
+HEADER_BYTES = 0x1E0
+LAYER_HDR_U32 = 12
 
 # 竞技场默认用的地图 (TARA = 竞技场 hall)
 DEFAULT_ARENA_MAP = "TARA_00P"
 # 世界地图默认用的地图 (T_LOC0 = 东海之滨)
 DEFAULT_WORLD_MAP = "T_LOC0_P"
 
-# 地图外框厚度 (原版这些图的黑边; 近黑瓦片只在这里判空, 见 passable)
-FRAME = 1
+CELL_SOLID = 1 << 9
+CELL_EDGE_SHIFT = 5          # bit5..8: 上/下/左/右
+DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT = 0, 1, 2, 3
+DIR_OF_DELTA = {(0, -1): DIR_UP, (0, 1): DIR_DOWN, (-1, 0): DIR_LEFT, (1, 0): DIR_RIGHT}
 
-# 覆盖层里确认画不对的瓦片 (按图集): TFI0 的 4/5/6/7/9 = **45° 过渡三角瓦片**
-# (土/草、石/草的斜接角, 共 65 格, 分布在房门口/屋角/路边), 100 = 底行 y=39 的房墙斜角条
-# (4 格连续同瓦, 疑似截断房屋)。原版对过渡瓦做翻转/混合处理 (机制未逆向), 直接画就是
-# 散落三角碎片 + 底边乱条 (2026-09-29 用户两次截图) → 跳过不画 (宁缺勿错, 已两次验证)。
-_OVERLAY_TILE_SKIP: dict[str, frozenset[int]] = {"TFI0___P": frozenset({4, 5, 6, 7, 9, 100})}
+MAT_EMPTY, MAT_OVER, MAT_UNDER = 0, 0x100, 0x200
+CELL_RAMP = 1 << 12          # 坡/梯口: 进入时按朝向切层
+CELL_STAIR = 1 << 17         # 崖梯: 朝实心格走时跨 2 格 (FUN_004b4f56 返回 flag 2)
+CELL_STAIR_DIRECTED = 1 << 10  # 崖梯只允许 bit26..28 的朝向
+# 斜梯 (属性下标 0x32..0x3B, exe 表 50..59): (下标区间, 按键方向, 附加 dy, 斜向方向码)
+_DIAG = ((0x32, 0x35, DIR_RIGHT, -1, 4), (0x33, 0x36, DIR_LEFT, 1, 5),
+         (0x37, 0x3A, DIR_RIGHT, 1, 7), (0x38, 0x3B, DIR_LEFT, -1, 6))
+# 移动方向码 (FUN_004b4f56 返回值高字节): 0 上 1 下 2 左 3 右, 斜梯上 4 右上 5 左下 6 左上 7 右下
+OPPOSITE = {DIR_UP: DIR_DOWN, DIR_DOWN: DIR_UP, DIR_LEFT: DIR_RIGHT, DIR_RIGHT: DIR_LEFT,
+            4: 5, 5: 4, 6: 7, 7: 6}
+COLORKEY_INDEX = 0           # 8bpp PCX 调色板 0 号 (黑) = 透明 (S 层图集全靠它)
 
-_VOID_EXEMPT: dict[str, frozenset[int]] | None = None
-
-
-_WALK_OVER: dict[str, frozenset[int]] | None = None
-
-
-def _walk_over_tiles() -> dict[str, frozenset[int]]:
-    """`assets/void_tiles.json` 的 `walk_over`: **原版其实能跨过去的结构瓦片**白名单。
-
-    有些门洞/门槛在图里画成结构图样 (flag type3 level≥2, 属性层与墙同码)，提取数据分不出来。
-    这张表由 `tools/calibrate_void_tiles.py` 推出来: 取其"挡住权威宝箱唯一通路"的瓦片号
-    (并加安全阀: 单个瓦片全游戏放开 > 200 格就丢弃, 防把普通墙当闸门)。
-    与手写的 `_WALK_OVER_TILES` 同机制, 只是数据驱动。
-    """
-    global _WALK_OVER
-    if _WALK_OVER is None:
-        _WALK_OVER = {}
-        try:
-            p = Path(__file__).resolve().parent.parent / "assets" / "void_tiles.json"
-            data = json.loads(p.read_text(encoding="utf-8"))
-            _WALK_OVER = {k: frozenset(v) for k, v in (data.get("walk_over") or {}).items()}
-        except Exception:
-            pass
-    return _WALK_OVER
-
-
-def _void_exemptions() -> dict[str, frozenset[int]]:
-    """`assets/void_tiles.json`: **被原版数据当"可站格"用过的瓦片**, 一律从空瓦片集合里豁免。
-
-    由 `tools/calibrate_void_tiles.py` 生成 —— 证据 = 瓦片出现在 door / spawn / .mfo pcpos /
-    权威宝箱表的格子上 (这些格原版必须能站)。修掉"启发式把真地板当空"导致的
-    门/宝箱走不到 (实测: 门不可达 160 -> 72, 宝箱可达 79.7% -> 87.8%)。
-    """
-    global _VOID_EXEMPT
-    if _VOID_EXEMPT is None:
-        _VOID_EXEMPT = {}
-        try:
-            p = Path(__file__).resolve().parent.parent / "assets" / "void_tiles.json"
-            data = json.loads(p.read_text(encoding="utf-8"))
-            _VOID_EXEMPT = {k: frozenset(v) for k, v in (data.get("exempt") or {}).items()}
-        except Exception:      # 缺文件/坏文件 -> 退化为纯启发式, 不影响运行
-            pass
-    return _VOID_EXEMPT
-
-# 属性层 (网格B) 高 16 位 = **type + 4 * level** (type 0..3, level 0..7; 全局取值全落在此式上):
-#   type 0=地面/地板   1=地面系特殊格   2=地面系特殊格   3=结构(墙/屋顶/台阶/桥), level = 抬高高度
-# 通行按 type/level 组合判 (2026-09-29 用原版自己的数据校准):
-#   type != 3                              -> 可走 (含 2/5/6/9/10/13/14)
-#   type == 3 且 level <= 1 (即 flag 3/7)  -> 可走 (门·门槛 / 台阶·矮梯)
-#   type == 3 且 level >= 2 (11,15,19,23,27,31) -> 实心
-# 实证 (权威全宝箱表 1022 箱 + 486 个官方出生点):
-#   · 排除门格后, 官方出生点的 flag 全落在 {0, 3} —— 没有任何一个在 11/13/15 上 (门格由传送放行);
-#   · 宝箱落在 flag 0(719) / 11(99) / 15(89) / 7(47) / 13(31) / 3(24) / 5(6) / 19(4) / 9(2) / 27(1);
-#   · 其中 **flag=13 (type1 level3) 上有 46 个官方出生点 + 31 个宝箱** —— 旧规则只认 {0,3,7} 会把它当墙 ✗;
-#   · BFS 连通性对比 (从各图出生点出发, 宝箱格或紧邻格可达算覆盖):
-#       旧 {0,3,7} = 90.1%   新 type/level = 91.3%  (101 -> 89 个不可达)
-WALK_FLAGS = frozenset({0, 3, 7})   # 保留：{0,3,7} 的等价集合, 供老代码/测试引用
+# 兼容旧代码/测试引用 (旧的"高 16 位 flag"启发式, 已被 exe 真值取代, 仅保留符号)
+WALK_FLAGS = frozenset({0, 3, 7})
 
 
 def flag_walkable(f: int) -> bool:
-    """属性层高 16 位 -> 是否可走 (type/level 规则, 见上)."""
     return (f & 3) != 3 or (f >> 2) <= 1
 
-# 抬高的"桥 / 楼梯"瓦片白名单: 键 = **图集名**, 值 = 该图集里属于桥·梯的瓦片号。
-# 这类格在属性层与屋顶/墙同码 (type=3, level>=2), 靠码值分不出来; 但同一图集内**瓦片号含义固定**,
-# 所以按美术白名单放行 (玩家能踩上台阶/桥)。实证: 五指村 TFI0___P 那道带栏杆的木梯/桥(过石墙)。
-_WALK_OVER_TILES: dict[str, frozenset[int]] = {
-    "TFI0___P": frozenset({16, 17, 36, 37,                              # 梯顶
-                           56, 57, 76, 77, 38, 39, 58, 59, 78, 79, 92, 75}),  # 梯身
-}
-
-# 按**地图**放行的格子: 屋内隔墙上的门 (拱形木门) 通向另一侧, 但门后的格子属性层标成了墙。
-# 数据里墙与地面同码, 只能按位置特判。键 = 地图名。
-# 小森林 TBB0 的宝箱在两个树墙凹槽里, 原版有**两条林间隧道**通向它们 —— 即从清洁区穿 7 格
-# 树墙直下到凹槽 (x=5 与 x=17 两列, 行 11..17)。原版碰撞是**逐格**的 (树墙里有可穿的具体格子),
-# 我们没提取到原版碰撞表, 这里用最短穿墙路径算出的具体格精确模拟。
-# 2026-09-29 用户三轮实测定稿: ①不能整片可走 ("大多数树穿不了") ②不能贴地图外框绕
-# ③"有的树可以穿" = 这两条隧道。✅ 凹槽宝箱连通, 全图可走 138/621 (树冠全放开 621 被否决)。
-_EXTRA_WALKABLE: dict[str, set[tuple[int, int]]] = {
-    "TFI0_04P": {(4, 9), (4, 8)},        # (4,10) 的门 → 通向里面卧室
-    "TBB0___P": {
-        (5, 11), (5, 12), (5, 13), (5, 14), (5, 15), (5, 16), (5, 17),
-        (17, 11), (17, 12), (17, 13), (17, 14), (17, 15), (17, 16), (17, 17),
-    },
-}
-
-# 按**图集**封禁的"假可走"瓦片: 属性层 flag=3/7 (门/台阶) 但美术是纯物体 (树桩/木桶堆/柴堆/
-# 水桶/原木/房墙), 原版靠 tile 级碰撞表挡人 (提取数据里分不出, 见 project_map_collision.md)。
-# 2026-09-29 用户实测: 五指村能站上木桶堆/大原木/房墙。加进前先跑使用统计 (门/箱/出生点零冲突)。
-_SOLID_TILES: dict[str, frozenset[int]] = {
-    "TFI0___P": frozenset({
-        388, 329, 349,            # 木桶堆/盘圈 (宝箱台下与柴堆间)
-        327, 347, 328, 348,       # 斧头树桩 / 大树桩 / 柴堆
-        369, 260, 276,            # 水桶 / 立式原木
-        261, 280, 281, 341,       # 房子石墙·窗 (flag 3/7 但显然是墙; 门在 (7,30) 传送点, 不受影响)
-    }),
-}
 
 _inst_cache: dict[str, "RealMap"] = {}
-_ts_index: dict[tuple[int, int], list[str]] | None = None
+_map_table: dict[str, dict] | None = None
+_attr_table: list[int] | None = None
 
 
 # ---------------- 资源探测 ----------------
@@ -170,235 +98,136 @@ def is_available(base: str) -> bool:
     return (MAPS_DIR / f"{base}.map").exists()
 
 
-def _image_size(path: Path) -> tuple[int, int]:
-    return pygame.image.load(str(path)).get_size()
+def map_table() -> dict[str, dict]:
+    """{map 资源名: {id, tileset, bgm, name, ...}} (assets/map_table.json); 缺文件 → {}."""
+    global _map_table
+    if _map_table is None:
+        _map_table = {}
+        if MAP_TABLE_PATH.exists():
+            for row in json.loads(MAP_TABLE_PATH.read_text(encoding="utf-8")):
+                _map_table[row["map"]] = row
+    return _map_table
 
 
-def _tileset_index() -> dict[tuple[int, int], list[str]]:
-    """所有 P 面 tileset 按网格尺寸 (cols, rows) 建索引."""
-    global _ts_index
-    if _ts_index is None:
-        idx: dict[tuple[int, int], list[str]] = {}
-        if MAPS_DIR.is_dir():
-            for p in MAPS_DIR.glob("*.pcx"):
-                if not p.stem.endswith("P"):
-                    continue
-                w, h = _image_size(p)
-                idx.setdefault((w // TILE_W, h // TILE_H), []).append(p.stem)
-            for v in idx.values():
-                v.sort()
-        _ts_index = idx
-    return _ts_index
+def attr_table() -> list[int] | None:
+    global _attr_table
+    if _attr_table is None and ATTR_TABLE_PATH.exists():
+        _attr_table = json.loads(ATTR_TABLE_PATH.read_text(encoding="utf-8"))
+    return _attr_table
 
 
-def _load_tileset_surface(name: str) -> pygame.Surface:
+def decode_cell(attr: int, table: list[int] | None) -> int:
+    """.map 属性 u32 → exe 运行时 cell 值 (FUN_004b5ac3 的换算)."""
+    idx = attr & 0xFFFF
+    if table is None:
+        # 没有 exe 表时退化: 只认 type==3 且 level>=2 为实心 (旧启发式)
+        return 0 if flag_walkable(attr >> 16) else CELL_SOLID
+    if idx >= len(table):
+        return 0
+    return (table[idx] & ~0x1F) | ((attr >> 16) % 4) | (((attr >> 18) & 7) << 2)
+
+
+def _load_surface(name: str) -> pygame.Surface | None:
     path = MAPS_DIR / f"{name}.pcx"
+    if not path.exists():
+        return None
     surf = pygame.image.load(str(path))
+    if surf.get_bitsize() == 8:
+        key = surf.get_palette_at(COLORKEY_INDEX)
+    else:
+        key = surf.get_at((0, 0))
+    surf.set_colorkey(key)
     if pygame.display.get_surface() is not None:
         surf = surf.convert()
+        surf.set_colorkey(key)
     return surf
+
+
+def _load_mat(name: str) -> list[int] | None:
+    path = MAPS_DIR / f"{name}.mat"
+    if not path.exists():
+        return None
+    raw = path.read_bytes()
+    u = struct.unpack("<%dI" % (len(raw) // 4), raw[: len(raw) // 4 * 4])
+    return list(u[LAYER_HDR_U32:])
 
 
 # ---------------- RealMap ----------------
 class RealMap:
-    """一张原版地图 (可视层 + 通行). 兼作 BattleScene 的地形提供者."""
+    """一张原版地图 (两层可视 + 通行). 兼作 BattleScene 的地形提供者."""
 
     def __init__(self, base: str) -> None:
         self.base = base
         raw = (MAPS_DIR / f"{base}.map").read_bytes()
-        u = list(struct.unpack("<%dI" % (len(raw) // 4), raw[: len(raw) // 4 * 4]))
-        self.w, self.h = u[6], u[7]
-        self.ts_cols, self.ts_rows = u[8], u[9]
-        if len(u) < HEADER_U32 + 2 * self.w * self.h:
-            raise ValueError(f"{base}.map 尺寸不符 ({len(u)} u32, 期望 >= "
-                             f"{HEADER_U32 + 2 * self.w * self.h})")
-        cells = self.w * self.h
-        self.grid = u[HEADER_U32:HEADER_U32 + cells]              # 可视瓦片
-        self.attr = u[HEADER_U32 + cells:HEADER_U32 + 2 * cells]  # 属性/覆盖层
+        hdr = struct.unpack_from("<%dI" % (2 * LAYER_HDR_U32), raw, 0)
+        self.w, self.h = hdr[6], hdr[7]
+        self.w1, self.h1 = hdr[LAYER_HDR_U32 + 6], hdr[LAYER_HDR_U32 + 7]
+        n0, n1 = self.w * self.h, self.w1 * self.h1
+        if len(raw) < HEADER_BYTES + 8 * (n0 + n1):
+            raise ValueError(f"{base}.map 尺寸不符 ({len(raw)} B, 期望 {HEADER_BYTES + 8 * (n0 + n1)})")
+        off = HEADER_BYTES
+        self.grid = list(struct.unpack_from(f"<{n0}I", raw, off)); off += n0 * 4
+        self.attr = list(struct.unpack_from(f"<{n0}I", raw, off)); off += n0 * 4
+        self.grid1 = list(struct.unpack_from(f"<{n1}I", raw, off)); off += n1 * 4
+        self.attr1 = list(struct.unpack_from(f"<{n1}I", raw, off))
 
-        # ---- 第三层: .map 文件尾部通常有 8 字节/格的 object/event 数据 ----
-        # 对城镇/迷宫这是宝箱/NPC/建筑对象层; 目前只用它做通行辅助,
-        # 真正的对象语义 (哪些对象阻挡、宝箱内容) 仍需 exe/数据表逆向.
-        self.tail: list[tuple[int, int]] = [(0, 0)] * cells
-        self._parse_tail(raw, cells)
+        table = attr_table()
+        self.cells = [decode_cell(a, table) for a in self.attr]
+        self.cells1 = [decode_cell(a, table) for a in self.attr1]
+        # 第 1 层只有与第 0 层同尺寸时才参与通行并集 (高处桥/城墙顶)
+        self._layer1 = n1 == n0 and n1 > 0
+        # 兼容旧接口: tail[i] = (第 1 层瓦片, 第 1 层属性)
+        self.tail: list[tuple[int, int]] = (
+            list(zip(self.grid1, self.attr1)) if self._layer1 else [(0, 0)] * n0)
 
-        # tileset: 同名优先, 否则同页/尺寸匹配 (声明尺寸 u[8]/u[9] 只用来"找"图集)
         self.ts_name = self._resolve_tileset()
-        self.tileset = _load_tileset_surface(self.ts_name)
-        # ⚠ 网格几何必须以**图集实际尺寸**为准, 不能用地图声明的 u[8]/u[9]:
-        #   声明值常是脏数据 (如 TFI0_04P 写 16x21, 而它实际用的 TFI0_00P 是 16x16),
-        #   按声明算 cell_h = 768//21 = 36 (应为 48) → 每格取错源矩形 → **整图花屏**(横条纹/盘子)。
+        self.tileset = _load_surface(self.ts_name)
+        if self.tileset is None:
+            raise FileNotFoundError(f"{base}: 图集 {self.ts_name}.pcx 不存在")
         tw, th = self.tileset.get_size()
         self.ts_cols, self.ts_rows = tw // TILE_W, th // TILE_H
         self.cell_w, self.cell_h = TILE_W, TILE_H
-        self._colorkey, self._water = self._detect_void_tiles()
-        self._black = self._detect_black_tiles()        # 近黑瓦片 (外框判空用, 阈值严)
-        self._blank = self._detect_blank_tiles()        # 空块瓦片 (渲染跳过用, 阈值宽)
-        # ⚠ 近黑**不并入** _void: 室内图用近黑瓦片画暗门/阴影/暗地板, 老的"近黑=空"会把
-        #   玩家挡在房内暗处、也堵住部分门口 (全游戏 139/1146 个门走不到)。实测放行后仅 92。
-        self._void = self._colorkey | self._water
-        # 渲染用的原始空块集合: 豁免**只放宽通行**, 不改渲染 —— 免得把色键/水画出来(旧行为最稳)
-        self._void_render = self._void
-        _ex = _void_exemptions().get(self.ts_name)           # 原版数据校准过的豁免瓦片
-        if _ex:
-            self._void = self._void - _ex
-            self._black = self._black - _ex
-        self._walk_over = _walk_over_tiles().get(self.ts_name, frozenset())   # 门洞/门槛白名单
+        self.mat = _load_mat(self.ts_name)
+        s_name = self.ts_name[:-1] + "S"
+        self.tileset_s = _load_surface(s_name) if self._layer1 else None
+        self.mat_s = _load_mat(s_name) if self.tileset_s is not None else None
+        if self.tileset_s is not None:
+            sw, sh = self.tileset_s.get_size()
+            self.ts_cols_s, self.ts_rows_s = sw // TILE_W, sh // TILE_H
+        else:
+            self.ts_cols_s = self.ts_rows_s = 0
         self.pcpos = self._read_pcpos()
+        # 默认通行层: 出生点所在层 (有第 1 层数据时才允许 1); 场景按玩家当前层传 layer 参数
+        self.layer = 1 if (self._layer1 and self.pcpos and self.pcpos[0][2] == 1) else 0
+        self.cells_active = self.cells1 if self.layer == 1 else self.cells
 
     # ---- 资源解析 ----
     def _resolve_tileset(self) -> str:
-        """找出本图该用的 tileset (.pcx).
-
-        ⚠ mapset.dll 里 **只有 192 个 PCX 却有 487 张 MAP** —— 同一"页"(前 5 字符, 如
-        `TFI0_`)的屋子共用一张图集。且部分 .map 头部的 `u[8]/u[9]`(声明尺寸) 是**脏数据**
-        (如 `TFI0_04P` 声明 16x21, 但它实际只用到瓦片号 ≤255 = 16x16 就够),
-        若按尺寸匹配会挑到毫不相干的图集 (曾把雅士兰的 `TAS0_01P` 配给五指村的屋子 →
-        整个地板变成盘子/碗)。故:
-          1) 同名 .pcx 直接用;
-          2) 否则**先按"同页前缀"挑**, 且该图集必须能覆盖本图用到的最大瓦片号;
-          3) 再不行才退回按声明尺寸匹配 (旧行为), 最后兜底任意能覆盖的图集。
-        """
-        if (MAPS_DIR / f"{self.base}.pcx").exists() and self.base.endswith("P"):
+        row = map_table().get(self.base)
+        if row and (MAPS_DIR / f"{row['tileset']}.pcx").exists():
+            return row["tileset"]
+        # 没有 exe 地图表时的退化: 同名 → 同页前缀 → 任意
+        if (MAPS_DIR / f"{self.base}.pcx").exists():
             return self.base
-        need = (max(self.grid) + 1) if self.grid else 1     # 需覆盖的瓦片数
-        page = self.base[:5]
-        pool = _tileset_index()                             # (cols, rows) -> [name]
-
-        # 1) 同页前缀 + 能覆盖瓦片号 (同页里选瓦片数最接近 need 的, 避免撑大图集后取错区域)
-        same_page: list[tuple[str, int]] = []
-        for (c, r), names in pool.items():
-            if c * r < need:
-                continue
-            for n in names:
-                if n[:5] == page:
-                    same_page.append((n, c * r))
-        if same_page:
-            same_page.sort(key=lambda t: (t[1] - need, t[0]))
-            return same_page[0][0]
-
-        # 2) 退回按声明尺寸匹配 (同页优先)
-        cands = pool.get((self.ts_cols, self.ts_rows))
-        if cands:
-            pick = next((c for c in cands if c[:5] == page), None)
-            return pick or cands[0]
-
-        # 3) 任意能覆盖 need 的图集 (选最接近的)
-        cover = [(n, c * r) for (c, r), names in pool.items() if c * r >= need for n in names]
-        if cover:
-            cover.sort(key=lambda t: (t[1] - need, t[0]))
-            return cover[0][0]
-        if not pool:
+        cands = sorted(p.stem for p in MAPS_DIR.glob("*P.pcx"))
+        page = [c for c in cands if c[:5] == self.base[:5]]
+        if page:
+            return page[0]
+        if not cands:
             raise FileNotFoundError(f"{self.base}: 没有任何 tileset")
-        return sorted(pool.values())[0][0]
+        return cands[0]
 
-    def _detect_void_tiles(self) -> tuple[set[int], set[int]]:
-        """(色键瓦片, 水域瓦片). 两者**任何位置**都不可走 (防止人站色键/水里)."""
-        colorkey: set[int] = set()
-        water: set[int] = set()
-        n = self.ts_cols * self.ts_rows
-        for i in range(n):
-            cw, ch = self.cell_w, self.cell_h
-            x0, y0 = (i % self.ts_cols) * cw, (i // self.ts_cols) * ch
-            pts = [(x0 + cw // 4, y0 + ch // 4), (x0 + 3 * cw // 4, y0 + ch // 4),
-                   (x0 + cw // 4, y0 + 3 * ch // 4), (x0 + 3 * cw // 4, y0 + 3 * ch // 4),
-                   (x0 + cw // 2, y0 + ch // 2)]
-            try:
-                cols = [self.tileset.get_at(p)[:3] for p in pts]
-            except IndexError:
-                continue
-            uniform = cols[0] == cols[1] == cols[2] == cols[3] == cols[4]
-            r, g, b = cols[0]
-            ar = sum(c[0] for c in cols) / len(cols)
-            ag = sum(c[1] for c in cols) / len(cols)
-            ab = sum(c[2] for c in cols) / len(cols)
-            if uniform and r > 200 and g < 80 and b > 200:
-                colorkey.add(i)                   # 品红 = 色键
-            elif ab - ar > 40 and ab - ag > 25 and ab > 90:
-                water.add(i)                      # 蓝色水域
-        return colorkey, water
-
-    def _detect_black_tiles(self) -> set[int]:
-        """均匀近黑瓦片 (纯黑/近黑). 只在**地图外框**上判空, 见 `passable`.
-
-        室内图也拿这类瓦片画**暗门/门洞/阴影/暗色地板** —— 一律判空会把玩家挡在房内暗处
-        (2026-09-28 用户实测: "这块是个门/阴影, 应该能进去, 却被挡住")。
-        """
-        black: set[int] = set()
-        n = self.ts_cols * self.ts_rows
-        for i in range(n):
-            cw, ch = self.cell_w, self.cell_h
-            x0, y0 = (i % self.ts_cols) * cw, (i // self.ts_cols) * ch
-            pts = [(x0 + cw // 4, y0 + ch // 4), (x0 + 3 * cw // 4, y0 + ch // 4),
-                   (x0 + cw // 4, y0 + 3 * ch // 4), (x0 + 3 * cw // 4, y0 + 3 * ch // 4),
-                   (x0 + cw // 2, y0 + ch // 2)]
-            try:
-                cols = [self.tileset.get_at(p)[:3] for p in pts]
-            except IndexError:
-                continue
-            if all(c == cols[0] for c in cols) and max(cols[0]) < 12:
-                black.add(i)
-        return black
-
-    def _detect_blank_tiles(self) -> set[int]:
-        """"空块"瓦片 = **整体很暗**的瓦片 (纯黑/近黑/深灰, 实测 (0,0,0)/(15,15,15)/带杂点) ——
-        **只用于渲染跳过** (覆盖层里的空块画出来就是满地图黑框/黑条)。
-
-        ⚠ 别并进 `_black`: `_black` 参与通行(外框判空), 放宽阈值会多挡门 (实测)。
-        用**密集采样 + 平均亮度**判定 (只按 5 点会漏掉"暗但不完全均匀"的瓦片)。
-        """
-        blank: set[int] = set()
-        n = self.ts_cols * self.ts_rows
-        cw, ch = self.cell_w, self.cell_h
-        for i in range(n):
-            x0, y0 = (i % self.ts_cols) * cw, (i // self.ts_cols) * ch
-            tot = 0
-            cnt = 0
-            for gy in range(6):
-                for gx in range(8):
-                    p = (x0 + (gx * 2 + 1) * cw // 16, y0 + (gy * 2 + 1) * ch // 12)
-                    try:
-                        r, g, b = self.tileset.get_at(p)[:3]
-                    except IndexError:
-                        continue
-                    tot += max(r, g, b)
-                    cnt += 1
-            if cnt and tot / cnt < 46:          # 平均亮度很低 → 空块
-                blank.add(i)
-        return blank
-
-    def _in_frame(self, x: int, y: int) -> bool:
-        """是否在地图外框 (原版这些图的黑边; 厚度 FRAME)."""
-        return (x < FRAME or y < FRAME
-                or x >= self.w - FRAME or y >= self.h - FRAME)
-
-    def _read_pcpos(self) -> list[tuple[int, int]]:
-        p = MAPS_DIR / f"{self.base}.mfo"
-        out: list[tuple[int, int]] = []
-        if not p.exists():
-            return out
-        try:
-            text = p.read_bytes().decode("gbk", "replace")
-        except Exception:
-            return out
-        for line in text.splitlines():
-            s = line.strip()
-            if s.startswith("pcpos"):
-                rhs = s.split("=", 1)[1].split("//")[0]
-                nums = [int(x) for x in rhs.replace(",", " ").split() if x.lstrip("-").isdigit()]
-                if len(nums) >= 2:
-                    out.append((nums[0], nums[1]))
+    def _read_pcpos(self) -> list[tuple[int, int, int]]:
+        """.mfo 的 pcpos 行 → [(x, y, z)]."""
+        path = MAPS_DIR / f"{self.base}.mfo"
+        if not path.exists():
+            return []
+        out = []
+        for line in path.read_text(encoding="cp949", errors="replace").splitlines():
+            m = re.match(r"\s*pcpos\s+\d+\s*=\s*([-\d]+)\s*,\s*([-\d]+)\s*,\s*([-\d]+)", line)
+            if m:
+                out.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
         return out
-
-    def _parse_tail(self, raw: bytes, cells: int) -> None:
-        """解析 .map 尾部的 8 字节/格 object/event 层."""
-        header_bytes = HEADER_U32 * 4 + 2 * cells * 4
-        tail_len = len(raw) - header_bytes
-        if tail_len < cells * 8:
-            return
-        for i in range(cells):
-            a, b = struct.unpack_from("<II", raw, header_bytes + i * 8)
-            self.tail[i] = (a, b)
 
     # ---- 查询 ----
     def in_bounds(self, x: int, y: int) -> bool:
@@ -408,40 +237,108 @@ class RealMap:
         return self.grid[y * self.w + x]
 
     def flag(self, x: int, y: int) -> int:
+        """旧接口: 属性高 16 位 (type + 4*level)."""
         return self.attr[y * self.w + x] >> 16
+
+    def cell(self, x: int, y: int, layer: int = 0) -> int:
+        cells = self.cells1 if (layer and self._layer1) else self.cells
+        return cells[y * self.w + x]
 
     def tail_at(self, x: int, y: int) -> tuple[int, int]:
         return self.tail[y * self.w + x]
 
-    def passable(self, x: int, y: int) -> bool:
-        """可走 = flag 通过 type/level 规则 (见 WALK_FLAGS 上方注释) 且不是空/色键/近黑瓦片; 另有桥·梯白名单.
+    def event_at(self, x: int, y: int) -> tuple[int, int, int] | None:
+        """(事件类型, jmp 下标, 朝向) —— 第 0 层 cell 的 bit19..28; 无事件 → None."""
+        v = self.cells_active[y * self.w + x]
+        kind = (v >> 19) & 3
+        if not kind:
+            return None
+        return kind, (v >> 21) & 0x1F, (v >> 26) & 7
 
-        ⚠ 曾经的尝试 (2026-09-28, 已回退): 用 "网格B 低16位(覆盖层)!=0 即视为有墙/家具" 来挡
-          "走上墙"。**实测该规则会让 417/1146 个传送门走不到** (覆盖层也压在城镇地板/门口上),
-          故**不可用**。想区分"墙 vs 地面"仍需原版的按瓦片碰撞表 (未提取到), 只能按瓦片白名单特判。
-        """
+    def _cells(self, layer: int | None) -> list[int]:
+        if layer is None:
+            return self.cells_active
+        return self.cells1 if (layer == 1 and self._layer1) else self.cells
+
+    def layer_at(self, x: int, y: int) -> int:
+        """某格该站在哪一层: 有 pcpos 记录用它的 z, 否则默认层 (两层都可站时取默认层)."""
+        for (px, py, z) in self.pcpos:
+            if (px, py) == (x, y):
+                return 1 if (z == 1 and self._layer1) else 0
+        if not self.passable(x, y, self.layer) and self._layer1 and self.passable(x, y, 1 - self.layer):
+            return 1 - self.layer
+        return self.layer
+
+    def passable(self, x: int, y: int, layer: int | None = None) -> bool:
+        """可站 = 在图内且该层该格不实心 (bit9). layer=None → 默认层."""
         if not self.in_bounds(x, y):
             return False
-        i = y * self.w + x
-        idx = self.grid[i]
-        if idx in self._void:                                # 色键/水域: 哪都不能走
-            return False
-        if idx in self._black and self._in_frame(x, y):      # 地图外框黑边 (别走出地图)
-            return False
-        if idx in _SOLID_TILES.get(self.ts_name, ()):        # 假可走物体 (树桩/木桶/房墙): 必挡
-            return False
-        if idx in _WALK_OVER_TILES.get(self.ts_name, ()):    # 可踩的桥/梯 (手写白名单)
-            return True
-        if idx in self._walk_over:                           # 数据驱动的门洞/门槛白名单
-            return True
-        if (x, y) in _EXTRA_WALKABLE.get(self.base, ()):     # 按位置特判 (门洞/林间隧道等)
-            return True
-        return flag_walkable(self.attr[i] >> 16)             # type/level 规则
+        return not (self._cells(layer)[y * self.w + x] & CELL_SOLID)
+
+    def step(self, x: int, y: int, dx: int, dy: int, layer: int | None = None) -> tuple[bool, int]:
+        """从 (x,y) 朝 (dx,dy) 走一步 → (能否走, 走完所在层). 见 move()."""
+        ok, nz, _nx, _ny = self.move(x, y, dx, dy, layer)
+        return ok, nz
+
+    def move(self, x: int, y: int, dx: int, dy: int, layer: int | None = None
+             ) -> tuple[bool, int, int, int]:
+        """原版玩家走一步 (FUN_004b4f56 + FUN_0049e2b5) → (能否走, 新层, 新 x, 新 y).
+        · 目标格实心 / 本格该方向出边被挡 → 不能走
+        · 目标格是坡口 (bit12) → 按朝向切层
+        · 本格 bit17 (崖梯) 且 (无 bit10 或 朝向匹配) 且 下一格实心、再下一格可站 → 跨 2 格
+        · 本格属性下标 0x32..0x3B (斜梯): 左右移动变成斜向 (见 _DIAG)"""
+        if layer is None:
+            layer = self.layer
+        d = DIR_OF_DELTA.get((dx, dy))
+        cells = self._cells(layer)
+        cur = cells[y * self.w + x] if self.in_bounds(x, y) else 0
+        if d is not None and (cur >> CELL_EDGE_SHIFT) & 0xF & (1 << d):
+            return False, layer, x, y
+        if d is not None and self.in_bounds(x, y):
+            idx = self.attr[y * self.w + x] & 0xFFFF if layer == 0 else self.attr1[y * self.w + x] & 0xFFFF
+            for lo, hi, dd, ddy, code in _DIAG:
+                if dd == d and lo <= idx <= hi:
+                    nx, ny = x + dx, y + ddy
+                    nl = layer
+                    if not self.passable(nx, ny, layer):
+                        # 斜梯落点在本层实心 → 原版标 flag 4 直接换层 (另一层可站才走)
+                        if not (self._layer1 and self.passable(nx, ny, 1 - layer)):
+                            return False, layer, x, y
+                        nl = 1 - layer
+                    return True, self._ramp_layer(nx, ny, code, nl), nx, ny
+            if cur & CELL_STAIR and (not cur & CELL_STAIR_DIRECTED or ((cur >> 26) & 7) == d):
+                x1, y1, x2, y2 = x + dx, y + dy, x + 2 * dx, y + 2 * dy
+                if (self.in_bounds(x1, y1) and cells[y1 * self.w + x1] & CELL_SOLID
+                        and self.passable(x2, y2, layer)):
+                    return True, layer, x2, y2
+        nx, ny = x + dx, y + dy
+        if not self.passable(nx, ny, layer):
+            return False, layer, x, y
+        if d is not None:
+            layer = self._ramp_layer(nx, ny, d, layer)
+        return True, layer, nx, ny
+
+    def _ramp_layer(self, x: int, y: int, code: int, layer: int) -> int:
+        """进入 (x,y) 时若它是坡口 (bit12): 顺着坡的朝向 (bit26..28) 走 → 第 1 层, 逆向 → 第 0 层."""
+        if not self._layer1:
+            return layer
+        tgt = self._cells(layer)[y * self.w + x]
+        if not tgt & CELL_RAMP:
+            return layer
+        ramp_dir = (tgt >> 26) & 7
+        if code == ramp_dir:
+            return 1
+        if code == OPPOSITE.get(ramp_dir, -1):
+            return 0
+        return layer
+
+    def can_move(self, x: int, y: int, dx: int, dy: int, layer: int | None = None) -> bool:
+        return self.step(x, y, dx, dy, layer)[0]
 
     def start_pos(self) -> tuple[int, int]:
         """玩家起始格: 优先 .mfo pcpos[0], 否则地图中心最近的可通行格."""
-        for (px, py) in self.pcpos:
-            if self.passable(px, py):
+        for (px, py, z) in self.pcpos:
+            if self.passable(px, py, 1 if z == 1 else 0):
                 return (px, py)
         cx, cy = self.w // 2, self.h // 2
         best: tuple[int, int] | None = None
@@ -468,20 +365,9 @@ class RealMap:
         return (max(0, (self.w * TILE_W) // 2 - 400),
                 max(0, (self.h * TILE_H) // 2 - 300))
 
-    def draw_overlay(self, surface: pygame.Surface, cam_x: int, cam_y: int,
-                     rows: tuple[int, int] | None = None) -> None:
-        """绘制**覆盖层 (网格B)**: 屋顶/雨棚/墙沿/房梁 等"上层"美术.
-
-        原版 2.5D 画法: 这层要画在**角色之后** —— 角色走到建筑/墙后面会被正确遮挡
-        (否则看起来像"站在墙上/墙上没有房梁挡人", 2026-09-28 用户实测反馈)。
-        网格B 低 16 位 = 覆盖层瓦片号, 0 = 该格无上层。
-        """
-        # ⚠ 跨页回退图集 (如图集 TEV0___P 配给 TBB0___P) 不画覆盖层:
-        #   覆盖层瓦片号在别人图集里对不上, 画出来是花斑 (2026-09-29 用户截图实测:
-        #   小森林右缘一列沙色错块 + 中部散落斜切块)。曾试图放宽, 被实测否决 ——
-        #   226 张跨页图宁可没有覆盖层 ("宁缺勿错", 二次验证)。
-        if self.ts_name[:5] != self.base[:5]:
-            return
+    # ---- 渲染 ----
+    def _visible_range(self, surface: pygame.Surface, cam_x: int, cam_y: int,
+                       rows: tuple[int, int] | None) -> tuple[int, int, int, int]:
         sw, sh = surface.get_size()
         x0 = max(0, cam_x // TILE_W)
         y0 = max(0, cam_y // TILE_H)
@@ -489,51 +375,42 @@ class RealMap:
         y1 = min(self.h, (cam_y + sh) // TILE_H + 1)
         if rows is not None:
             y0, y1 = max(y0, rows[0]), min(y1, rows[1])
-        ts, tc, cw, ch = self.tileset, self.ts_cols, self.cell_w, self.cell_h
-        maxt = self.ts_cols * self.ts_rows
+        return x0, y0, x1, y1
+
+    def _blit_layer(self, surface, cam_x, cam_y, rng, grid, ts, cols, rows, mat, want) -> None:
+        x0, y0, x1, y1 = rng
+        maxt = cols * rows
         for y in range(y0, y1):
             row = y * self.w
             for x in range(x0, x1):
-                idx = self.attr[row + x] & 0xFFFF
-                if not idx or idx >= maxt:
+                idx = grid[row + x]
+                if idx >= maxt:
                     continue
-                if idx in self._void_render or idx in self._blank:
-                    # 覆盖层里的"空块"(纯黑/近黑/色键) 不是美术, 画出来就是满地图黑框
-                    # ⚠ 用 _void_render (豁免前的原始集合): 通行豁免不改变渲染行为
+                m = mat[idx] if mat and idx < len(mat) else MAT_UNDER
+                if m == MAT_EMPTY or (want is not None and m != want):
                     continue
-                if idx in _OVERLAY_TILE_SKIP.get(self.ts_name, ()):
-                    # 确认画不对的覆盖层瓦片 (三角过渡等, 原版带翻转/混合处理)
-                    continue
-                src = pygame.Rect((idx % tc) * cw, (idx // tc) * ch, cw, ch)
+                src = pygame.Rect((idx % cols) * TILE_W, (idx // cols) * TILE_H, TILE_W, TILE_H)
                 surface.blit(ts, (x * TILE_W - cam_x, y * TILE_H - cam_y), src)
 
     def draw_terrain(self, surface: pygame.Surface, cam_x: int, cam_y: int,
                      rows: tuple[int, int] | None = None) -> None:
-        """画底层 (网格A)。`rows=(y0, y1)` 只画这些行 —— 供场景做 2.5D 按行交错绘制。
+        """画角色**下面**的东西: 地面层全部 + 高层里 .mat 标 0x200 的瓦片.
+        `rows=(y0, y1)` 只画这些行 —— 供场景做 2.5D 按行交错绘制."""
+        rng = self._visible_range(surface, cam_x, cam_y, rows)
+        self._blit_layer(surface, cam_x, cam_y, rng, self.grid, self.tileset,
+                         self.ts_cols, self.ts_rows, self.mat, None)
+        if self.tileset_s is not None:
+            self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset_s,
+                             self.ts_cols_s, self.ts_rows_s, self.mat_s, MAT_UNDER)
 
-        原版是"画到实体所在行 → 画实体 → 再画南边的行"，这样**南侧的桥板/墙沿会挡住角色**
-        (2026-09-29 用户实测: 站在桥上时桥板应遮住角色)。整张图一次性画完就做不到这点。
-        """
-        sw, sh = surface.get_size()
-        x0 = max(0, cam_x // TILE_W)
-        y0 = max(0, cam_y // TILE_H)
-        x1 = min(self.w, (cam_x + sw) // TILE_W + 1)
-        y1 = min(self.h, (cam_y + sh) // TILE_H + 1)
-        if rows is not None:
-            y0, y1 = max(y0, rows[0]), min(y1, rows[1])
-        ts, tc, cw, ch = self.tileset, self.ts_cols, self.cell_w, self.cell_h
-        maxt = self.ts_cols * self.ts_rows
-        for y in range(y0, y1):
-            row = y * self.w
-            for x in range(x0, x1):
-                idx = self.grid[row + x]
-                if idx >= maxt:
-                    continue
-                if idx in self._colorkey:
-                    # 真·色键瓦片 = 透明 (原版此处露出底色/上一屏), 画出来就是品红块
-                    continue
-                src = pygame.Rect((idx % tc) * cw, (idx // tc) * ch, cw, ch)
-                surface.blit(ts, (x * TILE_W - cam_x, y * TILE_H - cam_y), src)
+    def draw_overlay(self, surface: pygame.Surface, cam_x: int, cam_y: int,
+                     rows: tuple[int, int] | None = None) -> None:
+        """画角色**上面**的东西: 高层里 .mat 标 0x100 的瓦片 (屋檐/树冠/桥栏)."""
+        if self.tileset_s is None:
+            return
+        rng = self._visible_range(surface, cam_x, cam_y, rows)
+        self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset_s,
+                         self.ts_cols_s, self.ts_rows_s, self.mat_s, MAT_OVER)
 
 
 def load(base: str) -> RealMap:

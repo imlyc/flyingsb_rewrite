@@ -110,6 +110,8 @@ class WorldMapScene(Scene):
         # 玩家 tile 坐标 (静止时); 移动时已经更新为目标 tile, 用 subpx/py 做插值.
         self.real_map = self._try_real_map()
         self.player_x, self.player_y = self._start_pos()
+        self.player_z = (self.real_map.layer_at(self.player_x, self.player_y)
+                         if self.real_map is not None else 0)   # 原版的层号 (海拔区域)
         self.location_base = realm.DEFAULT_WORLD_MAP
         self._transitions = world_graph.transitions(self.location_base)
         self.npc_layer = NpcLayer(self.location_base, doors=set(self._transitions),
@@ -184,10 +186,11 @@ class WorldMapScene(Scene):
         self._transitions = world_graph.transitions(base)
         pos = spawn or world_graph.spawn(base) or self.real_map.start_pos()
         # 门格常画在墙上 (严格不可走), 但作为传送点必须允许站立; 否则会退回 map 默认出生点
-        if not (self.real_map.passable(pos[0], pos[1])
+        if not (self.real_map.passable(pos[0], pos[1], self.real_map.layer_at(*pos))
                 or (pos[0], pos[1]) in self._transitions):
             pos = self.real_map.start_pos()
         self.player_x, self.player_y = pos
+        self.player_z = self.real_map.layer_at(*pos)
         self.subpx = self.subpy = 0.0
         self.moving_dir = (0, 0)
         self._anim.reset()
@@ -418,10 +421,12 @@ class WorldMapScene(Scene):
             self._anim.reset()
             self._update_npc_hint()
             return
-        if self.passable_at(nx, ny):
+        dest = self._step_to(dx, dy)
+        if dest is not None:
+            nx, ny = dest
+            self.subpx = -(nx - self.player_x) * TILE_W
+            self.subpy = -(ny - self.player_y) * TILE_H
             self.player_x, self.player_y = nx, ny
-            self.subpx = -dx * TILE_W
-            self.subpy = -dy * TILE_H
             self.moving_dir = (dx, dy)
             self._check_transition()
         else:
@@ -477,7 +482,21 @@ class WorldMapScene(Scene):
                 if tile.terrain in (TerrainType.TOWN, TerrainType.DUNGEON):
                     pygame.draw.rect(surface, (0, 0, 0), rect, 2)
 
-    def passable_at(self, x: int, y: int) -> bool:
+    def _step_to(self, dx: int, dy: int) -> tuple[int, int] | None:
+        """玩家朝 (dx,dy) 走一步的落点 (原版规则: 实心/出边/坡口切层/崖梯跨格/斜梯), 不能走 → None.
+        传送点格一律可踩 (触发传送); NPC/宝箱挡路由 passable_at 管."""
+        nx, ny = self.player_x + dx, self.player_y + dy
+        if self.real_map is None:
+            return (nx, ny) if self.passable_at(nx, ny) else None
+        if (nx, ny) in self._transitions:
+            return (nx, ny) if self.passable_at(nx, ny) else None
+        ok, z, mx, my = self.real_map.move(self.player_x, self.player_y, dx, dy, self.player_z)
+        if not ok or not self.passable_at(mx, my, z):
+            return None
+        self.player_z = z
+        return (mx, my)
+
+    def passable_at(self, x: int, y: int, layer: int | None = None) -> bool:
         if (x, y) in self._transitions:         # 出入口(门/台阶): 可踩上以触发传送/进出
             return True
         if chests_mod.chest_at(self.location_base, x, y) is not None:
@@ -485,7 +504,8 @@ class WorldMapScene(Scene):
         if self.npc_layer.blocks(x, y):         # 可交谈角色挡路 (面前空格 = 触发对白)
             return False
         if self.real_map is not None:
-            return self.real_map.passable(x, y)
+            return self.real_map.passable(
+                x, y, layer if layer is not None else getattr(self, "player_z", None))
         if not (0 <= x < MAP_W and 0 <= y < MAP_H):
             return False
         return TILES[self.grid[y][x]].passable

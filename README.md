@@ -67,6 +67,19 @@ venv/bin/python -m tools.extract_maps
 战斗 / 竞技场场景默认加载 `TARA_00P`，地形与障碍都取自原版地图
 （`core/real_map.py`）。缺资源时自动回退到占位地形。
 
+地图 ↔ 图集 的对应和碰撞规则都来自 exe 真值（`tools/extract_map_table.py`，**必跑**）：
+
+```sh
+venv/bin/python -m tools.extract_map_table   # exe 地图表 (500 项) + 格属性表 (260 项)
+```
+
+- 487 张 `.map` 里只有 80 张有同名 `.pcx`，其余 425 张用别的图集 —— 对应关系在 exe 的地图表
+  （VA `0x6474D0`，位置 ID 为下标），`assets/map_table.json`。
+- `.map` = 两层（地面 / 高处），每格属性低 16 位是 exe 格属性表（VA `0x6521D4`）的下标：
+  bit9 实心、bit5..8 四向出边阻挡（栅栏）、bit12 坡口（切层）、bit17 崖梯（跨 2 格）、
+  属性下标 0x32..0x3B 斜梯；玩家的通行判定 = `FUN_0049e2b5(x, y, dir, 0x32)`，
+  已原样实现在 `RealMap.move()`。
+
 ### 5. 提取剧本（可选）
 
 从 `FlyingSB.exe` 里把原版剧情剧本（Big5 明文 + 标记语言 `<msg_id=>`/`<$SONA>`/`<&item329>` 等）
