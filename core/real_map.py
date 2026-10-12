@@ -202,13 +202,17 @@ class RealMap:
         self.pcpos = self._read_pcpos()
         # "高物件"瓦片 (cell type bit0: 墙/屋顶/树/桥): 原版 FUN_004b8aa9 在画完精灵后按
         # 基线 (y + 1 + level) 行再盖一遍 → 角色在它北边就被挡住. 按基线行分组.
-        self._tall: dict[int, list[tuple[int, int, int]]] = {}
+        # 按**角色所在层**的属性判 (FUN_004b8aa9 用 param_1=层 读 cell): 站在桥上 (层 1) 时桥格
+        # 在层 1 的属性是普通地面, 不再盖人; 站在桥下 (层 0) 时桥格是高物件, 盖人.
+        self._tall: list[dict[int, list[tuple[int, int]]]] = [{}, {}]
         for L, cells in ((0, self.cells), (1, self.cells1 if self._layer1 else [])):
             for i, v in enumerate(cells):
                 if v & CELL_TALL:
                     y = i // self.w
                     r = min(self.h - 1, y + ((v >> 2) & 7))
-                    self._tall.setdefault(r, []).append((i % self.w, y, L))
+                    self._tall[L].setdefault(r, []).append((i % self.w, y))
+        # 层 1 有自己的瓦片 (天空图等) 才用它画, 否则 (五指村的桥) 画层 0 的瓦片
+        self._layer1_has_tiles = self._layer1 and any(self.grid1)
         # 默认通行层: 出生点所在层 (有第 1 层数据时才允许 1); 场景按玩家当前层传 layer 参数
         self.layer = 1 if (self._layer1 and self.pcpos and self.pcpos[0][2] == 1) else 0
         self.cells_active = self.cells1 if self.layer == 1 else self.cells
@@ -417,11 +421,16 @@ class RealMap:
             self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset,
                              self.ts_cols, self.ts_rows, self.mat, None, skip_zero=True)
 
-    def draw_tall(self, surface: pygame.Surface, cam_x: int, cam_y: int, row: int) -> None:
+    def draw_tall(self, surface: pygame.Surface, cam_x: int, cam_y: int, row: int,
+                  layer: int | None = None) -> None:
         """把基线落在 `row` 行的高物件瓦片再盖一遍 (原版 FUN_004b8aa9 的 "瓦片压精灵" 规则):
-        瓦片 (x, y, level) 的基线 = y + level 行; 场景在画完该行精灵后调用 → 基线以北的角色被挡住."""
-        for (x, y, L) in self._tall.get(row, ()):
-            grid = self.grid if L == 0 else self.grid1
+        瓦片 (x, y, level) 的基线 = y + level 行; 场景在画完该行精灵后调用 → 基线以北的角色被挡住.
+        `layer` = 角色所在层 (决定用哪一层的属性判高物件)."""
+        if layer is None:
+            layer = self.layer
+        L = 1 if (layer == 1 and self._layer1) else 0
+        grid = self.grid1 if (L == 1 and self._layer1_has_tiles) else self.grid
+        for (x, y) in self._tall[L].get(row, ()):
             idx = grid[y * self.w + x]
             if idx >= self.ts_cols * self.ts_rows:
                 continue

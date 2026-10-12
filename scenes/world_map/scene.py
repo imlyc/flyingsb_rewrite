@@ -913,7 +913,7 @@ class WorldMapScene(Scene):
             self._draw_chests(self.surface, cx, cy, rows=(y, y + 1))
             if m is not None:
                 # 高物件 (墙/屋顶/树/桥) 按基线行盖在该行实体之上 (原版 FUN_004b8aa9)
-                m.draw_tall(self.surface, cx, cy, y)
+                m.draw_tall(self.surface, cx, cy, y, self.player_z)
                 # 高处层里标"画在角色上"的瓦片
                 if ENABLE_OVERLAY:
                     m.draw_overlay(self.surface, cx, cy, rows=(y, y + 1))
