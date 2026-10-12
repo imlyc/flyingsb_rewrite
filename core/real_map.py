@@ -59,6 +59,7 @@ DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT = 0, 1, 2, 3
 DIR_OF_DELTA = {(0, -1): DIR_UP, (0, 1): DIR_DOWN, (-1, 0): DIR_LEFT, (1, 0): DIR_RIGHT}
 
 MAT_EMPTY, MAT_OVER, MAT_UNDER = 0, 0x100, 0x200
+CELL_TALL = 1 << 0           # type bit0: 高物件 (墙/屋顶/树/桥), 画在其基线行以北的精灵之上
 CELL_RAMP = 1 << 12          # 坡/梯口: 进入时按朝向切层
 CELL_STAIR = 1 << 17         # 崖梯: 朝实心格走时跨 2 格 (FUN_004b4f56 返回 flag 2)
 CELL_STAIR_DIRECTED = 1 << 10  # 崖梯只允许 bit26..28 的朝向
@@ -197,6 +198,15 @@ class RealMap:
         else:
             self.ts_cols_s = self.ts_rows_s = 0
         self.pcpos = self._read_pcpos()
+        # "高物件"瓦片 (cell type bit0: 墙/屋顶/树/桥): 原版 FUN_004b8aa9 在画完精灵后按
+        # 基线 (y + 1 + level) 行再盖一遍 → 角色在它北边就被挡住. 按基线行分组.
+        self._tall: dict[int, list[tuple[int, int, int]]] = {}
+        for L, cells in ((0, self.cells), (1, self.cells1 if self._layer1 else [])):
+            for i, v in enumerate(cells):
+                if v & CELL_TALL:
+                    y = i // self.w
+                    r = min(self.h - 1, y + ((v >> 2) & 7))
+                    self._tall.setdefault(r, []).append((i % self.w, y, L))
         # 默认通行层: 出生点所在层 (有第 1 层数据时才允许 1); 场景按玩家当前层传 layer 参数
         self.layer = 1 if (self._layer1 and self.pcpos and self.pcpos[0][2] == 1) else 0
         self.cells_active = self.cells1 if self.layer == 1 else self.cells
@@ -402,6 +412,26 @@ class RealMap:
         if self.tileset_s is not None:
             self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset_s,
                              self.ts_cols_s, self.ts_rows_s, self.mat_s, MAT_UNDER)
+
+    def draw_tall(self, surface: pygame.Surface, cam_x: int, cam_y: int, row: int) -> None:
+        """把基线落在 `row` 行的高物件瓦片再盖一遍 (原版 FUN_004b8aa9 的 "瓦片压精灵" 规则):
+        瓦片 (x, y, level) 的基线 = y + level 行; 场景在画完该行精灵后调用 → 基线以北的角色被挡住."""
+        for (x, y, L) in self._tall.get(row, ()):
+            if L == 0:
+                idx, ts, cols, rows_, mat = self.grid[y * self.w + x], self.tileset, self.ts_cols, self.ts_rows, self.mat
+            else:
+                if self.tileset_s is None:
+                    continue
+                idx, ts, cols, rows_, mat = self.grid1[y * self.w + x], self.tileset_s, self.ts_cols_s, self.ts_rows_s, self.mat_s
+            if idx >= cols * rows_:
+                continue
+            if mat and idx < len(mat) and mat[idx] == MAT_EMPTY:
+                continue
+            sx, sy = x * TILE_W - cam_x, y * TILE_H - cam_y
+            if sx < -TILE_W or sy < -TILE_H or sx > surface.get_width() or sy > surface.get_height():
+                continue
+            src = pygame.Rect((idx % cols) * TILE_W, (idx // cols) * TILE_H, TILE_W, TILE_H)
+            surface.blit(ts, (sx, sy), src)
 
     def draw_overlay(self, surface: pygame.Surface, cam_x: int, cam_y: int,
                      rows: tuple[int, int] | None = None) -> None:

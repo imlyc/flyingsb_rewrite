@@ -911,9 +911,12 @@ class WorldMapScene(Scene):
             if y == self.player_y:
                 self._draw_player(cx, cy)
             self._draw_chests(self.surface, cx, cy, rows=(y, y + 1))
-            # 覆盖层 (网格B) = 屋顶/雨棚/墙沿等上层美术: 画在该行实体之后才能正确遮挡
-            if ENABLE_OVERLAY and m is not None:
-                m.draw_overlay(self.surface, cx, cy, rows=(y, y + 1))
+            if m is not None:
+                # 高物件 (墙/屋顶/树/桥) 按基线行盖在该行实体之上 (原版 FUN_004b8aa9)
+                m.draw_tall(self.surface, cx, cy, y)
+                # 高处层里标"画在角色上"的瓦片
+                if ENABLE_OVERLAY:
+                    m.draw_overlay(self.surface, cx, cy, rows=(y, y + 1))
 
         if not self._no_hud:
             self._draw_hud()
