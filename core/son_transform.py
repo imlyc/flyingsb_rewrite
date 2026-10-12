@@ -1722,13 +1722,15 @@ def spawn_mfeng_beast(battle, caster, coord: "Entity", atlas: int) -> None:
 # 逐级放大到大笑脸 (柴郡猫式咧嘴, 末段只剩漂浮的大笑). think 无物理 (静态), seq 播完发-100 销毁.
 # ⚠目标=队友(解异常治疗类, 非攻击). **解异常暂占位** (无异常状态系统, 留 _kukumao_cure 钩子).
 KUKUMAO_HEIGHT = 90             # 居中高度 px (静态, 笑脸猫显示在屏幕中部)
-# seq 0x671b80: eson04a 帧0-4 → b/c/d/e 各(长hold帧0 + 帧1-3快闪). 省略原 sound 289 (wav 未接).
+# seq 0x671b80 (tools/verify_seqs 逐 op 核对): eson04a 帧0-4 → b/c/d/e 各(长hold帧0 + 帧1-3快闪),
+# 每段开头 sound 0x121 (E121 猫叫) 共 5 次 —— 首段在帧 0 前, 后四段在 24 tick hold 之后.
+SFX_KUKUMAO = 0x121
 KUKUMAO_SEQ = (
-    [('fm', 257, i, 3) for i in range(5)]
-    + [('fm', 258, 0, 24)] + [('fm', 258, i, 3) for i in (1, 2, 3)]
-    + [('fm', 259, 0, 24)] + [('fm', 259, i, 3) for i in (1, 2, 3)]
-    + [('fm', 260, 0, 24)] + [('fm', 260, i, 3) for i in (1, 2, 3)]
-    + [('fm', 261, 0, 24)] + [('fm', 261, i, 3) for i in (1, 2, 3)]
+    [('sound', SFX_KUKUMAO, 0x0411)] + [('fm', 257, i, 3) for i in range(5)]
+    + [('fm', 258, 0, 24), ('sound', SFX_KUKUMAO, 0x0411)] + [('fm', 258, i, 3) for i in (1, 2, 3)]
+    + [('fm', 259, 0, 24), ('sound', SFX_KUKUMAO, 0x0411)] + [('fm', 259, i, 3) for i in (1, 2, 3)]
+    + [('fm', 260, 0, 24), ('sound', SFX_KUKUMAO, 0x0411)] + [('fm', 260, i, 3) for i in (1, 2, 3)]
+    + [('fm', 261, 0, 24), ('sound', SFX_KUKUMAO, 0x0411)] + [('fm', 261, i, 3) for i in (1, 2, 3)]
     + [('exit',)]
 )
 
