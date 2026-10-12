@@ -41,6 +41,9 @@ _HAIR = (48, 38, 34)
 _SHADOW = (0, 0, 0, 90)
 
 
+NPC_SPEED_TILES_PER_SEC = 4.0     # 村民走路速度 (玩家 13); 一格 ~0.25s, 配 140ms 走路帧刚好迈两步
+
+
 class NpcLayer:
     """一张地图上的所有角色. 负责绘制与"撞人"判定."""
 
@@ -228,6 +231,34 @@ class NpcLayer:
         self._t = (self._t + dt_ms) % 2000
         self._wander(dt_ms, passable)          # 原版 c0 角色 (~0.9s 一跳)
         self._wander_extra(dt_ms, passable)    # 手工 NPC (逐帧, 带停顿/回窝)
+        self._advance_slides(dt_ms)            # 像素级滑到目标格 + 走路帧 (与玩家同一套)
+
+    # ---- 平滑移动 ----
+    @staticmethod
+    def _start_step(n: dict, dx: int, dy: int) -> None:
+        """迈一步: 格坐标立刻落到目标格 (占位/排序用), 画面从原格滑过去 (subpx 与玩家同义)."""
+        n["x"], n["y"] = n["x"] + dx, n["y"] + dy
+        n["_subpx"] = -dx * TILE_W
+        n["_subpy"] = -dy * TILE_H
+        if n.get("_anim") is None:
+            n["_anim"] = AnimationState()
+
+    @staticmethod
+    def _sliding(n: dict) -> bool:
+        return bool(n.get("_subpx") or n.get("_subpy"))
+
+    def _advance_slides(self, dt_ms: int) -> None:
+        step_x = NPC_SPEED_TILES_PER_SEC * TILE_W * dt_ms / 1000.0
+        step_y = NPC_SPEED_TILES_PER_SEC * TILE_H * dt_ms / 1000.0
+        for n in self.npcs + self._extra:
+            moving = self._sliding(n)
+            if moving:
+                sx, sy = n.get("_subpx", 0.0), n.get("_subpy", 0.0)
+                n["_subpx"] = 0.0 if abs(sx) <= step_x else sx + (step_x if sx < 0 else -step_x)
+                n["_subpy"] = 0.0 if abs(sy) <= step_y else sy + (step_y if sy < 0 else -step_y)
+            anim = n.get("_anim")
+            if anim is not None:
+                anim.tick(dt_ms, moving=moving)
 
     def _wander_extra(self, dt_ms: int, passable=None) -> None:
         """手工 NPC 踱步: 在被放下的位置附近(±3 格)走动, 每步之间随机停顿, 不踩门/不重叠.
@@ -238,7 +269,8 @@ class NpcLayer:
         if not self._extra:
             return
         for n in self._extra:
-            moved = False
+            if self._sliding(n):
+                continue
             n["_pause"] = n.get("_pause", 0) - dt_ms
             if n["_pause"] <= 0:
                 hx, hy = n.get("_home", (n["x"], n["y"]))
@@ -256,13 +288,9 @@ class NpcLayer:
                     if passable is not None and not passable(nx, ny):
                         continue
                     n["d"] = {(0, 1): 0, (1, 0): 1, (0, -1): 2, (-1, 0): 3}[d]
-                    n["x"], n["y"] = nx, ny
-                    moved = True
+                    self._start_step(n, d[0], d[1])
                     break
                 n["_pause"] = random.randint(800, 2600)            # 走/停交替, 像在干活
-            anim = n.get("_anim")
-            if anim is not None:
-                anim.tick(dt_ms, moving=moved)
 
     def _wander(self, dt_ms: int, passable=None) -> None:
         """原版 NPC 会走动: 每 ~0.9s 随机走一格 (不走出可通行区, 不叠人)."""
@@ -276,6 +304,8 @@ class NpcLayer:
                 continue
             if random.random() < 0.55:           # 一半角色原地不动
                 continue
+            if self._sliding(n):
+                continue
             dx, dy = random.choice(((1, 0), (-1, 0), (0, 1), (0, -1)))
             nx, ny = n["x"] + dx, n["y"] + dy
             if (nx, ny) in self.occupied or (nx, ny) == self._player_tile:
@@ -283,7 +313,8 @@ class NpcLayer:
             if passable is not None and not passable(nx, ny):
                 continue
             self._at.pop((n["x"], n["y"]), None)
-            n["x"], n["y"] = nx, ny
+            n["d"] = {(0, -1): 0, (0, 1): 1, (-1, 0): 2, (1, 0): 3}[(dx, dy)]   # 图集行: 背/正/左/右
+            self._start_step(n, dx, dy)
             self._at[(nx, ny)] = n
             self.occupied = set(self._at)
 
@@ -306,8 +337,8 @@ class NpcLayer:
                 continue
             if y_to is not None and n["y"] > y_to:
                 continue
-            px = n["x"] * TILE_W - cam_x
-            py = n["y"] * TILE_H - cam_y
+            px = n["x"] * TILE_W + int(n.get("_subpx", 0)) - cam_x
+            py = n["y"] * TILE_H + int(n.get("_subpy", 0)) - cam_y
             if px < -TILE_W or py < -TILE_H or px > sw or py > sh:
                 continue
             self._draw_one(surface, px, py, n, bob, font)
@@ -317,8 +348,8 @@ class NpcLayer:
                 continue
             if y_to is not None and n["y"] > y_to:
                 continue
-            px = n["x"] * TILE_W - cam_x
-            py = n["y"] * TILE_H - cam_y
+            px = n["x"] * TILE_W + int(n.get("_subpx", 0)) - cam_x
+            py = n["y"] * TILE_H + int(n.get("_subpy", 0)) - cam_y
             if px < -TILE_W or py < -TILE_H or px > sw or py > sh:
                 continue
             self._draw_authored(surface, px, py, n, bob, font)
