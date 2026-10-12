@@ -71,6 +71,7 @@ class BattleUnit:
     has_acted: bool = False
     exp_reward: int = 0
     money_reward: int = 0
+    ai_group: int = 0                # 原版敌人表 +0x18 (1..50): 影响「放技能 vs 普攻」的倾向
     sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
     # 渲染态 (UI 写入, 战斗逻辑不动)
     anim: AnimationState = field(default_factory=AnimationState)

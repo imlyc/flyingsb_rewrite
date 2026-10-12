@@ -7,10 +7,25 @@ import sys
 import pygame
 
 from core.audio_manager import AudioManager
+from scenes.base import Scene
 from scenes.menu import TitleScene
 
 WINDOW_SIZE = (800, 600)
 FPS = 60
+
+
+def switch_scene(scene: Scene) -> Scene:
+    """切到 scene.next_scene 并返回新场景.
+
+    只清**旧**场景的 next_scene (不清会导致回跳/闪屏)。
+    ⚠ **不能清新场景的**: 有些场景在构造 / on_enter 之前就挂好了待切场景 ——
+      新游戏时 enter_location 自动弹序章、进店铺地图自动开店; 清掉序章就不会自动播。
+    """
+    nxt = scene.next_scene
+    scene.next_scene = None
+    scene.on_exit()
+    nxt.on_enter()
+    return nxt
 
 
 def main() -> int:
@@ -39,14 +54,9 @@ def main() -> int:
         scene.draw()
         pygame.display.flip()
 
-        # 场景切换: 清掉两端的 next_scene 指针, 否则旧引用会导致回跳 (闪屏)
+        # 场景切换 (见 switch_scene 的说明: 不能清新场景预挂的 next_scene)
         if scene.next_scene is not None:
-            nxt = scene.next_scene
-            scene.next_scene = None
-            scene.on_exit()
-            scene = nxt
-            scene.next_scene = None
-            scene.on_enter()
+            scene = switch_scene(scene)
 
     audio.stop_bgm()
     pygame.quit()

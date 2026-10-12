@@ -188,6 +188,49 @@ def default_skills_for(name: str) -> list[int]:
     return list(CHARACTER_SKILL_POOL.get(name, ()))
 
 
+# === 技能类别 (治疗 / 复活 / 辅助 / 吸取 / 攻击) ===
+# 依据: 原版技能描述文本 (exe 技能表 +0x04/+0x20 的双字符串; 见 tools/extract_* 注释) 与
+# 回血/复活动词. 类别决定「目标是敌人还是友军」(战斗 AI / 目标选择要用).
+HEAL_SKILLS: set[int] = {0x09, 0x0A, 0x0E, 0x11, 0x15, 0x19, 0x26, 0x2C}      # HP恢复(友军)
+REVIVE_SKILLS: set[int] = {0x0F, 0x12, 0x2B, 0x2E}                            # 复活/满HP救醒
+CURE_SKILLS: set[int] = {0x03, 0x0B}                                          # 解除异常
+BUFF_SKILLS: set[int] = {0x27, 0x28, 0x29, 0x2A, 0x2D}                        # 增益(幸运/攻击/无敌)
+DRAIN_SKILLS: set[int] = {0x0D, 0x3B, 0x3D, 0x3E, 0x40}                       # 吸HP/MP (对敌)
+
+# 回血量: 描述里写明的数值优先 (玩家可见的权威值), 未写则用技能表威力 f2 (见 extract 注释)
+HEAL_AMOUNT: dict[int, int] = {
+    0x0A: 100,   # 小回复: HP可恢复100
+    0x0E: 500,   # 大恢复: HP可恢复500
+    0x26: 200,   # 恢复乐章: HP回升到200
+    0x2C: 500,   # 回复优卡: HP恢复500
+    0x11: 9999,  # 超回复: 完全恢复
+    0x09: 9999,  # M.凤凰: 将全体人员复原
+    0x2E: 9999,  # 强力慢曲: 回生并 HP 升到最高
+    0x15: 120,   # 生命之火: 无标注数值 → 用表威力
+    0x19: 110,   # 回复猪弹: 无标注 → 表威力
+}
+
+
+def skill_kind(skill_id: int) -> str:
+    """技能类别: heal / revive / cure / buff / drain / attack(默认)."""
+    if skill_id in HEAL_SKILLS:
+        return "heal"
+    if skill_id in REVIVE_SKILLS:
+        return "revive"
+    if skill_id in CURE_SKILLS:
+        return "cure"
+    if skill_id in BUFF_SKILLS:
+        return "buff"
+    if skill_id in DRAIN_SKILLS:
+        return "drain"
+    return "attack"
+
+
+def targets_allies(skill_id: int) -> bool:
+    """该技能是否以**友军**为目标 (治疗/复活/解异常/增益) —— AI/UI 选目标用."""
+    return skill_kind(skill_id) in ("heal", "revive", "cure", "buff")
+
+
 assert len(SKILLS) == 0x42, f"Expected 66 skills, got {len(SKILLS)}"
 assert len(SKILL_DESCRIPTIONS) == 0x42, f"Expected 66 descs, got {len(SKILL_DESCRIPTIONS)}"
 assert sum(len(v) for v in CHARACTER_SKILL_POOL.values()) == 0x42, \

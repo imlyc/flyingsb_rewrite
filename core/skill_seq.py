@@ -851,7 +851,19 @@ SKILL_COSTS: dict[int, int] = {
 # ---- 辅助/回血技能 (target 友军, IMPACT 时回血而非伤害) ----
 # 0x15 生命之火: 蓝火回 HP. exe dispatcher 0x4fe111 走 victim 循环 + esum1 burst (atlas 299).
 # heal 量公式 exe 未精确提取, 暂用 caster.attack * 3 (典型 三藏 ~60). TODO 校准.
-SKILL_HEAL_SKILLS: set[int] = {0x15}
+SKILL_HEAL_SKILLS: set[int] = set()   # 运行时填 (= core.skills 的 治疗 + 复活)
+
+
+def _load_heal_skills() -> None:
+    global SKILL_HEAL_SKILLS
+    try:
+        from core.skills import HEAL_SKILLS, REVIVE_SKILLS
+        SKILL_HEAL_SKILLS = set(HEAL_SKILLS) | set(REVIVE_SKILLS)
+    except Exception:
+        SKILL_HEAL_SKILLS = {0x15}
+
+
+_load_heal_skills()
 
 
 def is_heal_skill(skill_id: int | None) -> bool:
@@ -859,7 +871,11 @@ def is_heal_skill(skill_id: int | None) -> bool:
 
 
 def heal_amount(attacker, skill_id: int) -> int:
-    """生命之火回血量. 暂用 caster.attack * 3 (placeholder, 待 exe 校准)."""
+    """回血量: 优先用原版描述里写明的数值 (见 core.skills.HEAL_AMOUNT), 否则 caster.attack*3."""
+    from core.skills import HEAL_AMOUNT
+    amt = HEAL_AMOUNT.get(skill_id)
+    if amt:
+        return amt
     return max(1, attacker.attack * 3)
 
 

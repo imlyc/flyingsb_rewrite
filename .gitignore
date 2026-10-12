@@ -4,3 +4,5 @@ assets
 /data/
 venv/
 _audio_clips/
+saveData/
+saves/

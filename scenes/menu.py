@@ -8,37 +8,37 @@ from pathlib import Path
 import pygame
 
 from core.audio_manager import AudioManager
-from core.save_manager import load_save
+from core.save_manager import load_save, new_game_save
 from scenes.base import Scene
 
-# 各平台常见中文字体, 按优先级找第一个存在的 (只列 macOS 路径会让 Windows/Linux
-# 全部 miss → 落到无中文字形的默认字体 → 全是豆腐框).
 CHINESE_FONT_CANDIDATES = [
     # macOS
     "/System/Library/Fonts/STHeiti Medium.ttc",
     "/System/Library/Fonts/STHeiti Light.ttc",
-    "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/Supplemental/Songti.ttc",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
     # Windows
-    "C:/Windows/Fonts/msyh.ttc",       # 微软雅黑 (Vista+ 简中)
-    "C:/Windows/Fonts/msyh.ttf",
-    "C:/Windows/Fonts/simhei.ttf",     # 黑体
-    "C:/Windows/Fonts/msjh.ttc",       # 微软正黑 (繁中)
-    "C:/Windows/Fonts/simsun.ttc",     # 宋体
-    "C:/Windows/Fonts/mingliu.ttc",    # 细明体
+    "C:/Windows/Fonts/msyh.ttc",     # 微软雅黑
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/simhei.ttf",   # 黑体
+    "C:/Windows/Fonts/simsun.ttc",   # 宋体
+    "C:/Windows/Fonts/simkai.ttf",   # 楷体
+    "C:/Windows/Fonts/Deng.ttf",     # 等线
     # Linux
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
 ]
-# 路径全 miss 时按字体名匹配系统字体 (pygame.font.SysFont 接受逗号分隔的候选名单)
-CHINESE_SYSFONT_NAMES = (
-    "microsoftyahei,msyh,simhei,simsun,pingfangsc,heitisc,"
-    "notosanscjksc,notosanscjk,wenquanyimicrohei,arialunicodems"
-)
 
-_FONT_PATH_CACHE: str | None | bool = False   # False=未探测; None=无路径命中(用 SysFont)
+# 系统字体名 (pygame.font.match_font 用, 需小写无空格); 覆盖 Win/macOS/Linux 常见中文字体
+CHINESE_SYSFONT_NAMES = [
+    "microsoftyahei", "microsoftyaheiui", "simhei", "simsun", "nsimsun",
+    "kaiti", "dengxian", "pingfangsc", "stheiti", "heitisc",
+    "notosanscjksc", "notosanscjktc", "wenquanyimicrohei", "wenquanyizenhei",
+    "arplumingcn", "arplukai",
+]
 
 # 原版存档: 默认 repo 上一级 origin/ 里的全剧情存档, 可用 FLYINGSB_SAVE 环境变量覆盖
 DEFAULT_SAVE = Path(os.environ.get(
@@ -49,17 +49,25 @@ DEFAULT_SAVE = Path(os.environ.get(
 
 
 def load_chinese_font(size: int) -> pygame.font.Font:
-    global _FONT_PATH_CACHE
-    if _FONT_PATH_CACHE is False:                 # 首次: 探测一次, 结果缓存
-        _FONT_PATH_CACHE = next(
-            (p for p in CHINESE_FONT_CANDIDATES if Path(p).exists()), None)
-    if _FONT_PATH_CACHE is not None:
+    """加载支持中文的字体: 依次尝试已知字体文件路径 → 系统字体名匹配 → 兜底."""
+    # 1. 直接按文件路径加载 (跨平台常见中文字体)
+    for p in CHINESE_FONT_CANDIDATES:
         try:
-            return pygame.font.Font(_FONT_PATH_CACHE, size)
-        except OSError:
-            _FONT_PATH_CACHE = None
-    # 无路径命中 → 按字体名匹配系统字体; 再不行 SysFont 落默认 (可能无中文字形)
-    return pygame.font.SysFont(CHINESE_SYSFONT_NAMES, size)
+            return pygame.font.Font(p, size)
+        except (FileNotFoundError, OSError):
+            continue
+    # 2. 用系统字体名让 pygame 定位字体文件 (Windows/macOS/Linux 通用)
+    for name in CHINESE_SYSFONT_NAMES:
+        path = pygame.font.match_font(name)
+        if path:
+            try:
+                return pygame.font.Font(path, size)
+            except (FileNotFoundError, OSError):
+                continue
+    # 3. 最后兜底: 让 SysFont 自己在候选名里挑 (找不到中文时也不崩)
+    return pygame.font.SysFont(
+        "microsoftyahei,simhei,simsun,pingfangsc,notosanscjk", size
+    )
 
 
 class TitleScene(Scene):
@@ -78,6 +86,7 @@ class TitleScene(Scene):
         self.item_font = load_chinese_font(36)
         self.items: list[tuple[str, callable]] = [
             ("竞技场", self._action_arena),
+            ("剧情回放", self._action_script_viewer),
             ("新游戏", self._action_new_game),
             ("读取存档", self._action_load_save),
             ("退出", self._action_quit),
@@ -113,21 +122,25 @@ class TitleScene(Scene):
     def _action_new_game(self) -> None:
         # 延迟 import 避免 menu <-> world_map 循环导入
         from scenes.world_map.scene import WorldMapScene
-        self.next_scene = WorldMapScene(self.surface, self.audio, save=None)
+        # 复刻原版: 新游戏主角 **美娜** 开局 (其余角色后续入队)
+        scene = WorldMapScene(self.surface, self.audio, save=new_game_save())
+        # 序章前先在小森林 (TBB0___P, id 476) 起步, 出村(南) -> 五指村 (见 world_graph._EXTRA_TRANSITIONS)
+        scene.enter_location("TBB0___P")
+        self.next_scene = scene
 
     def _action_load_save(self) -> None:
-        from scenes.world_map.scene import WorldMapScene
-        try:
-            save = load_save(DEFAULT_SAVE)
-            print(f"[读取存档] {DEFAULT_SAVE}  地点={save.location}  金钱={save.money}")
-        except Exception as e:
-            print(f"读取存档失败: {e}")
-            return
-        self.next_scene = WorldMapScene(self.surface, self.audio, save=save)
+        # 打开读档界面 (3 个 remake 存档槽 + 可选的原版全剧情存档)
+        from scenes.pause import PauseScene
+        self.next_scene = PauseScene(self.surface, None, self.audio,
+                                     mode="load", include_original=True)
 
     def _action_arena(self) -> None:
         from scenes.arena import ArenaSetupScene
         self.next_scene = ArenaSetupScene(self.surface, self.audio)
+
+    def _action_script_viewer(self) -> None:
+        from scenes.script_viewer import ScriptViewerScene
+        self.next_scene = ScriptViewerScene(self.surface, self)
 
     def _action_quit(self) -> None:
         self._quit_requested = True

@@ -35,7 +35,7 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
         return True
 
     # 菜单 / 二级 / 各种过渡 / 关闭动画 期间: 走菜单键路由, 不让方向键漏给角色移动
-    if (scene._menu_open or scene._submenu is not None
+    if (scene._menu_open or scene._submenu is not None or scene._item_submenu
             or scene._menu_transition_t is not None
             or scene._menu_close_t is not None
             or scene._menu_dismiss_t is not None):
@@ -137,6 +137,26 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
             return
         return
 
+    # 道具二级菜单: ↑↓ 选消耗品 / Enter 使用 / ESC 回退到一级
+    if scene._item_submenu:
+        inv = scene.world_map.save.inventory
+        items = inv.consumables()
+        if key in (pygame.K_ESCAPE, pygame.K_x):
+            scene._item_submenu = False
+            scene._menu_open = True
+            scene._menu_anim_t = 0
+            return
+        if not items:
+            return
+        if key in (pygame.K_UP, pygame.K_w):
+            scene._item_cursor = (scene._item_cursor - 1) % len(items)
+        elif key in (pygame.K_DOWN, pygame.K_s):
+            scene._item_cursor = (scene._item_cursor + 1) % len(items)
+        elif key in (pygame.K_RETURN, pygame.K_SPACE):
+            item_id, _ = items[scene._item_cursor]
+            scene.use_consumable(item_id)
+        return
+
     # 一级菜单 — 全部通过 dismiss 动画收掉
     if key in (pygame.K_ESCAPE, pygame.K_x):
         # ESC: 白点直接消失 (target=None), icons 转出
@@ -149,10 +169,12 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
         scene._menu_transition_t = 0
         scene._menu_transition_target = SMENU_SKILL
     elif key in (pygame.K_LEFT, pygame.K_a):
-        # 道具 → 走 dismiss 动画 (含白框移到 item icon), 暂无实际效果
-        scene._menu_dismiss_t = 0
-        scene._menu_dismiss_target = SMENU_ITEM
-        scene._menu_dismiss_action = None
+        # 道具 → 打开消耗品二级菜单
+        scene._item_submenu = True
+        scene._item_cursor = 0
+        scene._menu_open = False
+        scene._input_gated = False
+        return
     elif key in (pygame.K_RIGHT, pygame.K_d):
         # 设置 → 同上, 暂无实际效果
         scene._menu_dismiss_t = 0
@@ -166,21 +188,19 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
 
 
 def _advance_end_screen(scene: "BattleScene") -> None:
-    """胜利后逐个翻升级框, 然后返回地图. 失败时直接返回."""
-    if scene.battle.phase == Phase.DEFEAT:
-        scene.next_scene = scene.return_scene
-        return
-    # 第一次按键: 跳过胜利 banner
-    if not scene._victory_acknowledged:
-        scene._victory_acknowledged = True
-        scene._levelup_idx = 0
-        if not scene.battle.level_ups:
-            scene.next_scene = scene.return_scene
-        return
-    # 后续按键: 逐个翻升级框
-    scene._levelup_idx += 1
-    if scene._levelup_idx >= len(scene.battle.level_ups):
-        scene.next_scene = scene.return_scene
+    """胜利后逐个翻升级框, 然后返回地图. 失败时直接返回.
+
+    在返回地图前先通知 return_scene 本场战斗的胜负 (若它实现了
+    ``_on_story_battle_end`` 钩子) —— 供剧情战斗在胜利后才入队/置进度。
+    """
+    won = scene.battle.phase == Phase.VICTORY
+    rs = scene.return_scene
+    if hasattr(rs, "_on_story_battle_end"):
+        try:
+            rs._on_story_battle_end(won)
+        except Exception:
+            pass
+    scene.next_scene = rs
 
 
 def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:

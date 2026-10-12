@@ -63,8 +63,8 @@ def test_location_decoded(save):
 
 
 def test_all_slots_present(save):
-    """character.py 定义 TOTAL_SLOTS=12 (10 个 PLAYABLE + 2 个 GAP). 全 slot 都要有 entry."""
-    assert TOTAL_SLOTS == 12
+    """character.py 定义 TOTAL_SLOTS=16 (= exe 角色定义表 16 条, 含备用槽). 全 slot 都要有 entry."""
+    assert TOTAL_SLOTS == 16
     assert len(save.characters) == TOTAL_SLOTS
     for slot in range(TOTAL_SLOTS):
         assert slot in save.characters

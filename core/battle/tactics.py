@@ -66,6 +66,8 @@ class TacticsBattle:
         self.level_ups: list[LevelUpReport] = []
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)
         self._pending_enemy_attack: BattleUnit | None = None
+        self._pending_enemy_skill: int | None = None      # 敌人待放技能 (exe 敌人表的技能)
+        self._pending_enemy_cursor: tuple[int, int] | None = None
         # 敌方 AI 延迟执行标志: ENEMY_TURN 进入时为 True (= 先显示移动范围),
         # scene pre-move 暂停结束后 UI 调 run_pending_enemy_ai 触发实际移动.
         self._enemy_ai_pending: bool = False
@@ -269,8 +271,20 @@ class TacticsBattle:
         if self.phase != Phase.ENEMY_TURN:
             return
         if self._pending_enemy_attack is not None and self._pending_enemy_attack.alive:
-            combat.begin_attack(self, self.current, self._pending_enemy_attack)
+            sid = self._pending_enemy_skill
+            cursor = self._pending_enemy_cursor
+            target = self._pending_enemy_attack
             self._pending_enemy_attack = None
+            self._pending_enemy_skill = None
+            self._pending_enemy_cursor = None
+            try:
+                combat.begin_attack(self, self.current, target,
+                                    skill_id=sid, cursor=cursor)
+            except Exception as e:      # 技能 seq 缺失等 → 回退普攻
+                print(f"[AI] 敌人技能 {sid} 执行失败, 回退普攻: {e}")
+                self._pending_damage_range = None
+                if target.alive:
+                    combat.begin_attack(self, self.current, target)
             return  # UI 跑 attack_seq, 命中点回调 apply_pending_attack, 'end' 回调 post_attack_anim
         self._pending_enemy_attack = None
         if self._check_end():
@@ -295,26 +309,56 @@ class TacticsBattle:
         return False
 
     def _allocate_levelups(self) -> None:
-        """战斗胜利时分配经验, 触发升级 + 生成升级报告."""
+        """战斗胜利时分配经验, 触发升级 + 生成升级报告.
+
+        有原版数据 (assets/characters_table.json) 时用**真实经验表 + 成长表**:
+        逐级扣 exp_needed(level), 应用 growth_gains(level) 到 HP/MP/攻/防.
+        缺数据时回退旧的随机成长占位.
+        """
+        from core import character_data
         survivors = [p for p in self.players if p.alive]
         if not survivors or self.exp_gained <= 0:
             return
         per = self.exp_gained // len(survivors)
+        real = bool(character_data.records())
         for p in survivors:
-            levels = per // EXP_PER_LEVEL
+            levels = 0
+            hp_inc = mp_inc = atk_inc = def_inc = 0
+            if real:
+                remaining = per
+                while p.level < character_data.MAX_LEVEL:
+                    need = character_data.exp_needed(p.level)
+                    if need <= 0 or remaining < need:
+                        break
+                    remaining -= need
+                    g = character_data.growth_gains(p.name, p.level + 1)
+                    p.level += 1
+                    levels += 1
+                    hp_inc += g.get("MaxHP", 0)
+                    mp_inc += g.get("MaxMP", 0)
+                    atk_inc += g.get("base_atk", 0)
+                    def_inc += g.get("base_def", 0)
+            else:
+                levels = per // EXP_PER_LEVEL
+                if levels <= 0:
+                    continue
+                hp_inc = sum(self.rng.randint(3, 8) for _ in range(levels))
+                mp_inc = sum(self.rng.randint(0, 3) for _ in range(levels))
+                atk_inc = sum(self.rng.randint(1, 3) for _ in range(levels))
+                def_inc = sum(self.rng.randint(1, 3) for _ in range(levels))
+                p.level += levels
             if levels <= 0:
                 continue
-            hp_inc = sum(self.rng.randint(3, 8) for _ in range(levels))
-            mp_inc = sum(self.rng.randint(0, 3) for _ in range(levels))
-            atk_inc = sum(self.rng.randint(1, 3) for _ in range(levels))
-            def_inc = sum(self.rng.randint(1, 3) for _ in range(levels))
-            p.level += levels
             p.max_hp += hp_inc
-            p.hp = min(p.max_hp, p.hp + hp_inc)  # 顺手补血
+            p.hp = min(p.max_hp, p.hp + hp_inc)  # 原版升级回满
             p.max_mp += mp_inc
             p.mp = min(p.max_mp, p.mp + mp_inc)
             p.attack += atk_inc
             p.defence += def_inc
+            if real:   # 升级后刷新已学技能 (按真实学习表)
+                learned = character_data.learned_skills(p.name, p.level)
+                if learned:
+                    p.known_skills = learned
             self.level_ups.append(LevelUpReport(
                 name=p.name, new_level=p.level, gained_levels=levels,
                 hp_inc=hp_inc, mp_inc=mp_inc, atk_inc=atk_inc, def_inc=def_inc,

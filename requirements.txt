@@ -6,3 +6,6 @@ pytest>=9.0.0
 
 # 离线工具 (一次性: 给 mod item.txt 做 t2s 转换, 见 core/items.py 注释)
 opencc-python-reimplemented>=0.1.7
+
+# 反汇编 (tools/extract_script_entries.py 解析 exe 提取剧本入口表用)
+capstone>=5.0

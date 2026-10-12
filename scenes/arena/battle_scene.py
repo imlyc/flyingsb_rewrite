@@ -10,6 +10,7 @@ import random
 
 import pygame
 
+from core import real_map as realm
 from core.audio_manager import AudioManager
 from core.battle.tactics import TacticsBattle
 from scenes.base import Scene
@@ -58,7 +59,7 @@ class ArenaBattleScene(BattleScene):
         return_scene: Scene,
     ) -> None:
         rng = random.Random()
-        terrain = ArenaTerrain()
+        terrain = self._make_terrain()
         battle_map = terrain.build_battle_map()
 
         players = [build_player_unit(n) for n in player_names]
@@ -94,6 +95,15 @@ class ArenaBattleScene(BattleScene):
         self._console_idx = 0
         self._console_font = self.font
         self._console_small = self.small
+
+    @staticmethod
+    def _make_terrain():
+        if realm.maps_available() and realm.is_available(realm.DEFAULT_ARENA_MAP):
+            try:
+                return realm.load(realm.DEFAULT_ARENA_MAP)
+            except Exception as e:
+                print("arena real map failed:", e)
+        return ArenaTerrain()
 
     # 顶层命令: (标签, 类型)
     _CONSOLE_TOP = [("增加敌人 ▸", "add_enemy"), ("退出战斗", "quit_battle"),

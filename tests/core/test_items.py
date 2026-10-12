@@ -2,7 +2,18 @@
 
 import pytest
 
-from core.items import ITEMS, ItemCategory, UNSET, get_item_category, get_item_name
+from core.items import (
+    ITEMS,
+    ItemCategory,
+    UNSET,
+    get_item_category,
+    get_item_name,
+    is_equippable,
+    item_combat_bonus,
+    item_desc,
+    item_effect,
+    item_table_entry,
+)
 
 
 def test_known_anchors():
@@ -41,3 +52,45 @@ def test_category_boundaries():
 def test_total_count():
     """表项数固定 355 项 (mod 文件 356 - 1 个空白 ID 354)."""
     assert len(ITEMS) == 355
+
+
+# ---------------------------------------------------------------------------
+# 原版真实数值 (源自 FlyingSB.exe 物品表; 缺 assets 自动 skip)
+# ---------------------------------------------------------------------------
+_have_table = item_table_entry(124) is not None
+
+
+@pytest.mark.skipif(not _have_table, reason="缺 assets/items_table.json")
+def test_equip_stats_real():
+    """装备属性取自原版表: 攻击/防御/五维加成, 归属由反汇编确认."""
+    assert item_combat_bonus(1) == {"def": 2}                    # 草帽 防+2
+    assert item_combat_bonus(124) == {"atk": 300}                # 双截棍 攻+300
+    assert item_combat_bonus(128) == {"atk": 960}                # 如意双截棍 攻+960
+    assert item_combat_bonus(208) == {"pow": -10, "wis": 30, "atk": -50}  # 魔法师头饰
+    assert item_combat_bonus(213) == {"wis": 3, "agi": 8, "atk": 470,
+                                      "def": 100, "luk": 5}       # 君子剑
+    # 消耗品不可装备 → 无加成
+    assert item_combat_bonus(299) == {}
+    assert not is_equippable(299)
+    assert is_equippable(124)
+
+
+@pytest.mark.skipif(not _have_table, reason="缺 assets/items_table.json")
+def test_item_effect_real():
+    """回复品效果取自原版 (type=14); 全回复记 9999."""
+    assert item_effect(299) == (50, 0)       # 恢复药 HP+50
+    assert item_effect(300) == (300, 0)      # 良药 HP+300
+    assert item_effect(301) == (9999, 0)     # 优药 HP 全回
+    assert item_effect(302) == (0, 50)       # 药草 MP+50
+    assert item_effect(303) == (0, 150)      # 良药 MP+150
+    assert item_effect(304) == (0, 9999)     # 优药 MP 全回
+    assert item_effect(305) == (9999, 9999)  # 仙桃 HP/MP 全回
+    # 非回复类 (船票) 无效果
+    assert item_effect(343) == (0, 0)
+
+
+@pytest.mark.skipif(not _have_table, reason="缺 assets/items_table.json")
+def test_item_desc_real():
+    """描述来自原版 +0x44 字符串."""
+    assert "龙宫宝物" in item_desc(124)
+    assert item_desc(299).startswith("HP")

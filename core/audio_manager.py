@@ -44,22 +44,32 @@ class AudioManager:
         raise FileNotFoundError(f"audio not found: {filename} (in {self.assets_dir})")
 
     def play_bgm(self, filename: str, loops: int = -1) -> None:
-        """循环播放背景音乐 (loops=-1 表示无限循环)."""
-        if self._current_bgm == filename and pygame.mixer.music.get_busy():
-            return
-        path = self._resolve(filename)
-        pygame.mixer.music.load(str(path))
-        pygame.mixer.music.play(loops=loops)
-        self._current_bgm = filename
+        """循环播放背景音乐 (loops=-1 表示无限循环). 任何异常 (文件缺失/格式不支持/
+        解码失败) 都静默吞掉 —— 音频绝不允许阻断游戏主循环 (否则表现为"卡死")."""
+        try:
+            if self._current_bgm == filename and pygame.mixer.music.get_busy():
+                return
+            path = self._resolve(filename)
+            pygame.mixer.music.load(str(path))
+            pygame.mixer.music.play(loops=loops)
+            self._current_bgm = filename
+        except Exception:
+            self._current_bgm = None
 
     def stop_bgm(self) -> None:
-        pygame.mixer.music.stop()
+        try:
+            pygame.mixer.music.stop()
+        except Exception:
+            pass
         self._current_bgm = None
 
     def play_sfx(self, filename: str) -> None:
-        if filename not in self._sfx_cache:
-            self._sfx_cache[filename] = pygame.mixer.Sound(str(self._resolve(filename)))
-        self._sfx_cache[filename].play()
+        try:
+            if filename not in self._sfx_cache:
+                self._sfx_cache[filename] = pygame.mixer.Sound(str(self._resolve(filename)))
+            self._sfx_cache[filename].play()
+        except Exception:
+            pass
 
     def play_sfx_id(self, sound_id: int, solo: bool = False) -> None:
         """按全局 sound_id 播放战斗音效 (anim seq 'sound' op / 技能 dispatcher 用).

@@ -30,6 +30,7 @@ from core.movement_input import DirectionalHold
 from core.sprites.base import TILE_W, TILE_H, load_shadow
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
+from core.items import get_item_name, item_effect
 from scenes.battle import hud as hud_mod
 from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
@@ -144,6 +145,9 @@ class BattleScene(Scene):
         self._submenu: str | None = None
         # 技能二级菜单的选中 idx (0..len(current.known_skills)-1). 每次打开二级菜单从 0 起.
         self._skill_cursor: int = 0
+        # 道具二级菜单 (左→消耗品列表): 选中消耗品对当前单位回血/回蓝
+        self._item_submenu: bool = False
+        self._item_cursor: int = 0
         # 打开一级菜单的动画计时 (ms 累加; None = 已完成静态显示).
         # phase 1: 白方框收缩, phase 2: 4 icon 旋转放大入位. 见 scenes.battle.hud.
         self._menu_anim_t: int | None = None
@@ -220,10 +224,69 @@ class BattleScene(Scene):
             hud_mod.draw_skill_desc_bar(self)
         else:
             hud_mod.draw_log(self)
+        if self._item_submenu:
+            self._draw_item_menu()
         # 8) 胜负 (等死亡动画跑完再出 banner, 否则技能秒杀最后一个敌人会跳过死亡演出)
         if (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
                 and not update_mod.death_animations_pending(self)):
             hud_mod.draw_end_banner(self)
+
+    # ------- 道具子菜单 -------
+    def use_consumable(self, item_id: int) -> None:
+        """对当前单位使用消耗品 (回血/回蓝), 关闭菜单."""
+        u = self.battle.current
+        if u is None or not u.is_player:
+            self._item_submenu = False
+            return
+        hp, mp = item_effect(item_id)
+        if not (hp or mp):
+            self.battle._log(f"{get_item_name(item_id)} 无法使用")
+            return
+        u.hp = min(u.max_hp, u.hp + hp)
+        u.mp = min(u.max_mp, u.mp + mp)
+        self.world_map.save.inventory.remove(item_id, 1)
+        self._item_submenu = False
+        self._menu_open = False
+        self._input_gated = False
+        bits = []
+        if hp:
+            bits.append(f"+{hp} HP")
+        if mp:
+            bits.append(f"+{mp} MP")
+        self.battle._log(f"{u.name} 使用 {get_item_name(item_id)} {' '.join(bits)}")
+
+    def _draw_item_menu(self) -> None:
+        inv = self.world_map.save.inventory
+        items = inv.consumables()
+        w, h = self.surface.get_size()
+        pw, ph = 380, 320
+        x, y = 30, h - ph - 30
+        pygame.draw.rect(self.surface, (20, 20, 40), (x, y, pw, ph))
+        pygame.draw.rect(self.surface, (120, 120, 200), (x, y, pw, ph), 2)
+        self.surface.blit(
+            self.font.render("消耗品  Enter使用 / Esc取消", True, (255, 215, 90)),
+            (x + 10, y + 8))
+        if not items:
+            self.surface.blit(self.small.render("无消耗品", True, (200, 200, 200)),
+                              (x + 10, y + 44))
+            return
+        yy = y + 44
+        for i, (iid, cnt) in enumerate(items):
+            color = (255, 255, 255) if i == self._item_cursor else (180, 180, 180)
+            if i == self._item_cursor:
+                pygame.draw.rect(self.surface, (70, 60, 30),
+                                 (x + 6, yy - 2, pw - 12, 26), border_radius=4)
+            hp, mp = item_effect(iid)
+            eff = []
+            if hp:
+                eff.append(f"+{hp}HP")
+            if mp:
+                eff.append(f"+{mp}MP")
+            txt = f"{get_item_name(iid)} x{cnt}   {' '.join(eff)}"
+            self.surface.blit(self.small.render(txt, True, color), (x + 12, yy))
+            yy += 28
+            if yy > y + ph - 10:
+                break
 
     def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
         u = self.battle.current

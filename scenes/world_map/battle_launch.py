@@ -9,7 +9,9 @@ import random
 from typing import TYPE_CHECKING
 
 from core.battle.data import BattleMap, BattleUnit
-from core.battle.setup import make_enemy, unit_from_character
+from core.battle.setup import (
+    ENEMY_TEMPLATES, make_enemy, make_enemy_by_type, unit_from_character,
+)
 from core.battle.tactics import TacticsBattle
 from core.character import CHARACTER_NAMES, PLAYABLE_SLOTS
 from core.character_sprites import sprite_resource
@@ -19,8 +21,37 @@ if TYPE_CHECKING:
     from scenes.world_map.scene import WorldMapScene
 
 
+def make_story_enemy(name: str) -> "BattleUnit":
+    """剧情敌人构造: 已知模板直接用, 否则按名字套模板并给 Boss 加数值.
+
+    章节剧本里用到很多原版 Boss 名 (那印/干达休斯/玉皇大帝/魔王合体…),
+    它们不在 ENEMY_TEMPLATES 里, 这里做兜底: 普通杂兵 1.6×、Boss(名含 王/帝/魔/那印/
+    干达/乐神/合体/化身) 3×, 保证剧情战斗可玩且 Boss 更有压迫感。真实数值待从 exe
+    敌人表校准 (core.battle.setup.make_enemy_by_type)。
+    """
+    if name in ENEMY_TEMPLATES:
+        return make_enemy(name)
+    base = ENEMY_TEMPLATES["黄色怪"]
+    boss = any(k in name for k in ("王", "帝", "魔", "那印", "干达", "乐神", "合体", "化身"))
+    mul = 3.0 if boss else 1.6
+    lvl = base["level"] + (8 if boss else 2)
+    max_hp = int(base["max_hp"] * mul)
+    return BattleUnit(
+        name=name, level=lvl, max_hp=max_hp, hp=max_hp,
+        max_mp=0, mp=0, sg=0,
+        attack=int(base["attack"] * mul), defence=int(base["defence"] * mul),
+        agile=base["agile"], move=base["move"],
+        exp_reward=int(base["exp_reward"] * mul),
+        money_reward=int(base["money_reward"] * mul),
+        is_player=False,
+        color=(210, 70, 70) if boss else (160, 120, 160),
+        sprite_key="CGHOU00",
+    )
+
+
 RANDOM_BATTLE_EVERY = 3
 RANDOM_BATTLE_CHANCE = 0.00
+REAL_MAP_BATTLE_CHANCE = 0.25
 PARTY_SIZE = 2
 
 
@@ -36,23 +67,26 @@ def build_party(scene: "WorldMapScene") -> list[BattleUnit]:
                 break
         if chars:
             return chars
-    # 无存档时的默认队伍
+    # 无存档时的默认队伍 (主角美娜开局)
     from core.skills import default_skills_for
     return [
+        BattleUnit(name="美娜", level=1, max_hp=40, hp=40, max_mp=20, mp=20, sg=10,
+                   attack=14, defence=10, agile=40, move=4, is_player=True,
+                   color=(220, 200, 120),
+                   sprite_key=sprite_resource("美娜"),
+                   known_skills=default_skills_for("美娜")),
         BattleUnit(name="孙悟空", level=1, max_hp=30, hp=30, max_mp=10, mp=10, sg=20,
                    attack=22, defence=12, agile=50, move=4, is_player=True,
                    color=(120, 200, 230),
                    sprite_key=sprite_resource("孙悟空"),
                    known_skills=default_skills_for("孙悟空")),
-        BattleUnit(name="三藏法师", level=1, max_hp=30, hp=30, max_mp=15, mp=15, sg=18,
-                   attack=24, defence=11, agile=40, move=4, is_player=True,
-                   color=(220, 200, 120),
-                   sprite_key=sprite_resource("三藏法师"),
-                   known_skills=default_skills_for("三藏法师")),
     ]
 
 
 def maybe_trigger_battle(scene: "WorldMapScene") -> None:
+    if getattr(scene, "real_map", None) is not None:
+        _maybe_real_map_battle(scene)
+        return
     # 走到地牢: 两个地牢分别对应不同敌人组
     if TILES[scene.grid[scene.player_y][scene.player_x]].terrain == TerrainType.DUNGEON:
         pos = (scene.player_x, scene.player_y)
@@ -71,6 +105,8 @@ def maybe_trigger_battle(scene: "WorldMapScene") -> None:
 
 def _make_battle_map_from_world(scene: "WorldMapScene") -> BattleMap:
     """把整张世界地图当战场: 不可通行 (水/山) → 障碍物."""
+    if getattr(scene, "real_map", None) is not None:
+        return scene.real_map.build_battle_map()
     bm = BattleMap(MAP_W, MAP_H)
     for y in range(MAP_H):
         for x in range(MAP_W):
@@ -79,13 +115,32 @@ def _make_battle_map_from_world(scene: "WorldMapScene") -> BattleMap:
     return bm
 
 
+def _reachable_from(scene: "WorldMapScene", start: tuple[int, int]) -> set[tuple[int, int]]:
+    """从 start 出发在可通行格上 BFS 能到达的连通区域 (防止单位被摆到孤岛/水上)."""
+    from collections import deque
+    if not scene.passable_at(start[0], start[1]):
+        return {start}
+    seen = {start}
+    q = deque([start])
+    while q:
+        x, y = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            p = (x + dx, y + dy)
+            if p in seen or not scene.passable_at(p[0], p[1]):
+                continue
+            seen.add(p)
+            q.append(p)
+    return seen
+
+
 def _scatter_positions(
     scene: "WorldMapScene",
     center: tuple[int, int], count: int, ring_min: int, ring_max: int,
     avoid: set[tuple[int, int]],
 ) -> list[tuple[int, int]]:
-    """在 center 周围 ring_min..ring_max 步范围内挑 count 个空格."""
+    """在 center 周围 ring_min..ring_max 步范围内挑 count 个**连通**空格."""
     cx, cy = center
+    reach = _reachable_from(scene, center)
     cands = []
     for r in range(ring_min, ring_max + 1):
         for dy in range(-r, r + 1):
@@ -93,9 +148,7 @@ def _scatter_positions(
                 if abs(dx) + abs(dy) != r:
                     continue
                 p = (cx + dx, cy + dy)
-                if not (0 <= p[0] < MAP_W and 0 <= p[1] < MAP_H):
-                    continue
-                if not TILES[scene.grid[p[1]][p[0]]].passable:
+                if p not in reach:            # 必须可达 (含可通行判定)
                     continue
                 if p in avoid:
                     continue
@@ -138,9 +191,9 @@ def start_battle(scene: "WorldMapScene", enemies: list[BattleUnit]) -> None:
         enemy_positions.extend(more)
     while len(enemy_positions) < len(enemies):
         # 兜底: 找任意空格
-        for y in range(MAP_H):
-            for x in range(MAP_W):
-                if (x, y) not in used and TILES[scene.grid[y][x]].passable:
+        for y in range(scene._map_h()):
+            for x in range(scene._map_w()):
+                if (x, y) not in used and scene.passable_at(x, y):
                     enemy_positions.append((x, y))
                     used.add((x, y))
                     if len(enemy_positions) >= len(enemies):
@@ -160,3 +213,30 @@ def start_battle(scene: "WorldMapScene", enemies: list[BattleUnit]) -> None:
         scene.surface, scene.audio, battle,
         world_map=scene, return_scene=scene,
     )
+
+
+def _maybe_real_map_battle(scene: "WorldMapScene") -> None:
+    """real map encounter: roll every RANDOM_BATTLE_EVERY steps (城镇/房间不遇敌)."""
+    from core import world_graph
+    base = getattr(scene, "location_base", "")
+    if not world_graph.has_encounters(base):
+        return
+    if scene.steps % RANDOM_BATTLE_EVERY != 0:
+        return
+    if scene.rng.random() >= REAL_MAP_BATTLE_CHANCE:
+        return
+    # 用该地图 .mfo 的 enemytype 池 + 原版敌人表真实数值
+    types = world_graph.enemy_types(base)
+    enemies: list[BattleUnit] = []
+    if types:
+        count = scene.rng.randint(1, 2)
+        for et in scene.rng.sample(types, min(count, len(types))):
+            u = make_enemy_by_type(int(et))
+            if u is not None:
+                enemies.append(u)
+    if not enemies:                       # 缺数据 → 回退旧占位模板
+        template = scene.rng.choice(["骷髅", "乌鸦怪", "贼"])
+        enemies = [make_enemy(template) for _ in range(scene.rng.randint(1, 2))]
+    start_battle(scene, enemies)
+
+

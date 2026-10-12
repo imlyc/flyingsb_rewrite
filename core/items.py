@@ -21,7 +21,10 @@ ID 约定: engine_id = file_line - 1 (mod 文件 1-indexed 列出, 但游戏内�
 
 from __future__ import annotations
 
+import json
+import re
 from enum import Enum
+from pathlib import Path
 
 UNSET = 0xFFFFFFFF
 
@@ -47,7 +50,7 @@ def _category_for(item_id: int) -> ItemCategory:
 
 
 _RAW_ITEMS: dict[int, str] = {
-    0: '普通帽子', 1: '草帽', 2: '圆锥帽子', 3: '皮帽', 4: '魔法头巾',
+    0: '普通帽子', 1: '草帽', 2: '圆锥帽子', 3: '皮帽子', 4: '魔法头巾',
     5: '使者帽子', 6: '银头带', 7: '金头带', 8: '钻石头带', 9: '皮帽',
     10: '风的头巾', 11: '黑暗头巾', 12: '强力头巾', 13: '羽毛帽子', 14: '高僧帽子',
     15: '铜头盔', 16: '铁盔', 17: '钢盔', 18: '银盔', 19: '金头盔',
@@ -69,7 +72,7 @@ _RAW_ITEMS: dict[int, str] = {
     90: '力量之衫', 91: '热血汗衫', 92: '公主裙', 93: '天使裙', 94: '巴起里的裙子',
     95: '高僧服装', 96: '罗汉服装', 97: '任得罗的战袍', 98: '超合金背心', 99: '特殊军服',
     100: '背德的背心', 101: '赤披肩', 102: '原厂披肩', 103: '蝙辐侠披肩', 104: '底乌个奈斯的蓑衣',
-    105: '圣战甲', 106: '死者服装', 107: '特拉路战甲在', 108: '龙战甲', 109: '摇滚音乐外套',
+    105: '圣战甲', 106: '死者服装', 107: '特拉路战甲', 108: '龙战甲', 109: '摇滚音乐外套',
     110: '鳄鱼外套', 111: '龙皮外套', 112: '特殊皮战衣', 113: '狙击手护心镜', 114: '杀手护心镜',
     115: '魔鬼司令外套', 116: '恐布份子外套', 117: '战神外套', 118: '女神韵律服', 119: '调整型盔甲',
     120: '半透明盔甲',
@@ -82,7 +85,7 @@ _RAW_ITEMS: dict[int, str] = {
     146: '强力机关砲', 147: '虎砲', 148: '龙砲', 149: '风火箭砲', 150: '原子火箭砲',
     151: '自动火箭砲', 152: '手提火箭砲', 153: '黄槌子', 154: '重槌子', 155: '碰碰槌',
     156: '红色槌子', 157: '银槌子', 158: '金槌子', 159: '霸者斧头', 160: '连续槌子',
-    161: '长剑', 162: '莫亚剑', 163: '鱼肠剑', 164: '修罗剑', 165: '丧节刀',
+    161: '长剑', 162: '莫亚刀', 163: '鱼肠剑', 164: '修罗剑', 165: '丧节刃',
     166: '阎罗刀', 167: '太极剑', 168: '普通吉他', 169: '铁吉他', 170: '钢吉他',
     171: '铝吉他', 172: '巨型吉他', 173: '大声翁吉他', 174: '乂吉他', 175: '名人吉他',
     176: '小箭', 177: '箭', 178: '长箭', 179: '古箭', 180: '王箭',
@@ -118,7 +121,7 @@ _RAW_ITEMS: dict[int, str] = {
     314: '兴奋剂', 315: '双光', 316: '梦梦777', 317: '万灵丹', 318: '强力药丸',
     319: 'DHA药丸', 320: '雪药丸', 321: '幸运药丸', 322: '鼬鼠内衣', 323: '空保温瓶',
     324: '满的保温瓶', 325: '火大的丝巾', 326: '坏的手表', 327: '超级滑板', 328: '混乱笛子',
-    329: '黄色炸药', 330: '线锯', 331: '时温超合金时', 332: '高品质润滑油', 333: '斧头',
+    329: '黄色炸药', 330: '线锯', 331: '时温超合金', 332: '高品质润滑油', 333: '斧头',
     334: '木材', 335: '坏掉的斧头', 336: '桥梁设计图', 337: '穿孔器', 338: '抓鸟机',
     339: '钥匙', 340: '钥匙', 341: '铲子', 342: '能量药丸', 343: '船票',
     344: '红宝石', 345: '钥匙', 346: '万年雪之精气', 347: '精灵粉', 348: '眼罩',
@@ -148,3 +151,109 @@ def get_item_category(item_id: int) -> ItemCategory | None:
 
 
 assert len(ITEMS) == 355, f"Expected 355 items, got {len(ITEMS)}"
+
+
+# ---------------------------------------------------------------------------
+# 原版真实数值 (来源: FlyingSB.exe 物品表 VA 0x6954D4, 步长 76; 见 tools/extract_item_table.py)
+#
+# 字段语义已由反汇编证实 (装备应用函数 0x4334b0..0x4335a8):
+#   item[+0x20/24/28/2c/30/34] = 力量/智慧/敏捷/攻击/防御/幸运 加成, 加到角色对应属性上.
+#   item[+0x18] = 装备槽位掩码 (0=不可装备)
+#   item[+0x1c] = 效果类型: 5=纯装备 / 6=属性药丸 / 10=状态·特殊 / 14=HP·MP回复 / 0=关键道具
+#   item[+0x20] (type=14) = 回复量 (10000=全回复); item[+0x44] = 描述
+# 数据落在 assets/items_table.json (由 tools.extract_item_table 生成).
+# 缺数据时回退到旧的分类占位数值, 保证无资源环境 (CI/单测) 仍可跑.
+# ---------------------------------------------------------------------------
+_TABLE_PATH = Path(__file__).resolve().parent.parent / "assets" / "items_table.json"
+_table_cache: dict | None = None
+
+
+def _table() -> dict:
+    global _table_cache
+    if _table_cache is None:
+        try:
+            _table_cache = json.loads(
+                _TABLE_PATH.read_text(encoding="utf-8")).get("items", {})
+        except Exception:
+            _table_cache = {}
+    return _table_cache
+
+
+def item_table_entry(item_id: int) -> dict | None:
+    """原版物品记录 (含价格/属性/效果/描述). 缺 assets 时为 None."""
+    return _table().get(str(item_id))
+
+
+def item_slot_mask(item_id: int) -> int:
+    """装备槽位掩码 (0 = 不可装备)."""
+    e = item_table_entry(item_id)
+    return int(e.get("slot", 0)) if e else 0
+
+
+def is_equippable(item_id: int) -> bool:
+    return item_slot_mask(item_id) != 0
+
+
+def item_effect_type(item_id: int) -> int:
+    """效果类型: 5 装备 / 6 属性药丸 / 10 状态 / 14 HP·MP 回复 / 0 关键道具."""
+    e = item_table_entry(item_id)
+    return int(e.get("type", 0)) if e else 0
+
+
+def item_desc(item_id: int) -> str:
+    """原版物品描述 (简体). 缺数据返回 ''."""
+    e = item_table_entry(item_id)
+    return str(e.get("desc", "")) if e else ""
+
+
+def item_combat_bonus(item_id: int) -> dict[str, int]:
+    """装备的真实属性加成: {"pow","wis","agi","atk","def","luk"}.
+
+    数值直接取自原版物品表 (已由反汇编确认字段归属). 不可装备物品返回 {}.
+    缺 assets 时回退旧占位 (分类常量).
+    """
+    e = item_table_entry(item_id)
+    if e is None:                                  # 无资源回退
+        cat = get_item_category(item_id)
+        if cat is ItemCategory.WEAPON:
+            return {"atk": 6}
+        if cat is ItemCategory.CLOTHES:
+            return {"def": 5, "hp": 10}
+        if cat is ItemCategory.HAT:
+            return {"def": 2}
+        if cat is ItemCategory.ACCESSORY:
+            return {"hp": 5, "mp": 5}
+        return {}
+    if not e.get("slot"):
+        return {}
+    return {k: int(v) for k, v in (e.get("stats") or {}).items() if v}
+
+
+def item_effect(item_id: int) -> tuple[int, int]:
+    """可用道具效果: 返回 (hp_restore, mp_restore). 全回复用 9999 表示. 非回复品 (0, 0).
+
+    原版 type=14 的回复品, 回复量取自描述文本 (玩家可见的权威值: 如 "HP回復300"),
+    全回复 (描述含 "完全回復" 或值 >= 10000) 记 9999.
+    """
+    e = item_table_entry(item_id)
+    if e is None:                                  # 无资源回退
+        cat = get_item_category(item_id)
+        if cat is not ItemCategory.CONSUMABLE:
+            return (0, 0)
+        hp = 30 if item_id in (299, 300, 301) else 0
+        mp = 60 if item_id in (302, 303, 304) else 0
+        if item_id in (305, 306, 307):
+            hp = mp = 9999
+        return (hp, mp)
+    if item_effect_type(item_id) != 14:
+        return (0, 0)
+    desc = str(e.get("desc", ""))
+    val = int(e.get("val", 0) or 0)
+    full = ("完全" in desc) or ("全回" in desc) or val >= 10000
+    m = re.search(r"(\d+)", desc)
+    amount = 9999 if full else (int(m.group(1)) if m else val)
+    hp = amount if "HP" in desc else 0
+    mp = amount if "MP" in desc else 0
+    if not hp and not mp:                          # 描述未标 → 按 hp 兜底
+        hp = amount
+    return (hp, mp)
