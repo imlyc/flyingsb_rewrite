@@ -13,7 +13,9 @@
   **地图 ↔ 图集** 不是同名关系: exe 里有一张 500 项地图表 (VA 0x6474D0, 位置 ID 为下标),
     每项给出 map 资源名 + tileset 资源名 (487 张里 425 张用别人的图集) → assets/map_table.json
     (tools/extract_map_table.py). 图集 = <tileset>P.pcx (地面层) / <tileset>S.pcx (高层),
-    配套 .mat = 每个瓦片一个 u32: 0 = 空 (不画), 0x200 = 画在角色下, 0x100 = 画在角色上.
+    <tileset>S.pcx 与 P 同网格: 第 N 格 = P 第 N 格的"镂空版" (树冠/屋檐只留物件像素, 其余黑=透明),
+    压精灵时用它 (FUN_004b8aa9: 有镂空版用镂空版, 否则整格). .mat 每瓦片 u32: P 里 0 = 空格不画;
+    S 里 0 = 没有镂空版.
   .mfo = 文本元数据 (mapname / pcpos / jmp ...), 由 tools/extract_events.py 解析.
 
 本类同时实现 BattleScene / WorldMapScene 期望的 "地形提供者" 接口:
@@ -190,7 +192,7 @@ class RealMap:
         self.cell_w, self.cell_h = TILE_W, TILE_H
         self.mat = _load_mat(self.ts_name)
         s_name = self.ts_name[:-1] + "S"
-        self.tileset_s = _load_surface(s_name) if self._layer1 else None
+        self.tileset_s = _load_surface(s_name)          # 镂空版图集 (压精灵用)
         self.mat_s = _load_mat(s_name) if self.tileset_s is not None else None
         if self.tileset_s is not None:
             sw, sh = self.tileset_s.get_size()
@@ -387,14 +389,15 @@ class RealMap:
             y0, y1 = max(y0, rows[0]), min(y1, rows[1])
         return x0, y0, x1, y1
 
-    def _blit_layer(self, surface, cam_x, cam_y, rng, grid, ts, cols, rows, mat, want) -> None:
+    def _blit_layer(self, surface, cam_x, cam_y, rng, grid, ts, cols, rows, mat, want,
+                    skip_zero: bool = False) -> None:
         x0, y0, x1, y1 = rng
         maxt = cols * rows
         for y in range(y0, y1):
             row = y * self.w
             for x in range(x0, x1):
                 idx = grid[row + x]
-                if idx >= maxt:
+                if idx >= maxt or (skip_zero and idx == 0):
                     continue
                 m = mat[idx] if mat and idx < len(mat) else MAT_UNDER
                 if m == MAT_EMPTY or (want is not None and m != want):
@@ -409,38 +412,37 @@ class RealMap:
         rng = self._visible_range(surface, cam_x, cam_y, rows)
         self._blit_layer(surface, cam_x, cam_y, rng, self.grid, self.tileset,
                          self.ts_cols, self.ts_rows, self.mat, None)
-        if self.tileset_s is not None:
-            self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset_s,
-                             self.ts_cols_s, self.ts_rows_s, self.mat_s, MAT_UNDER)
+        if self._layer1:
+            # 高处层的瓦片用同一张 P 图集 (0 = 空格)
+            self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset,
+                             self.ts_cols, self.ts_rows, self.mat, None, skip_zero=True)
 
     def draw_tall(self, surface: pygame.Surface, cam_x: int, cam_y: int, row: int) -> None:
         """把基线落在 `row` 行的高物件瓦片再盖一遍 (原版 FUN_004b8aa9 的 "瓦片压精灵" 规则):
         瓦片 (x, y, level) 的基线 = y + level 行; 场景在画完该行精灵后调用 → 基线以北的角色被挡住."""
         for (x, y, L) in self._tall.get(row, ()):
-            if L == 0:
-                idx, ts, cols, rows_, mat = self.grid[y * self.w + x], self.tileset, self.ts_cols, self.ts_rows, self.mat
-            else:
-                if self.tileset_s is None:
-                    continue
-                idx, ts, cols, rows_, mat = self.grid1[y * self.w + x], self.tileset_s, self.ts_cols_s, self.ts_rows_s, self.mat_s
-            if idx >= cols * rows_:
+            grid = self.grid if L == 0 else self.grid1
+            idx = grid[y * self.w + x]
+            if idx >= self.ts_cols * self.ts_rows:
                 continue
-            if mat and idx < len(mat) and mat[idx] == MAT_EMPTY:
+            if self.mat and idx < len(self.mat) and self.mat[idx] == MAT_EMPTY:
                 continue
             sx, sy = x * TILE_W - cam_x, y * TILE_H - cam_y
             if sx < -TILE_W or sy < -TILE_H or sx > surface.get_width() or sy > surface.get_height():
                 continue
+            # 有镂空版 (S 图集同号格, S.mat != 0) 就用镂空版: 树冠/屋檐只盖物件像素, 不盖地面
+            if (self.tileset_s is not None and self.mat_s and idx < len(self.mat_s)
+                    and self.mat_s[idx] != MAT_EMPTY and idx < self.ts_cols_s * self.ts_rows_s):
+                ts, cols = self.tileset_s, self.ts_cols_s
+            else:
+                ts, cols = self.tileset, self.ts_cols
             src = pygame.Rect((idx % cols) * TILE_W, (idx // cols) * TILE_H, TILE_W, TILE_H)
             surface.blit(ts, (sx, sy), src)
 
     def draw_overlay(self, surface: pygame.Surface, cam_x: int, cam_y: int,
                      rows: tuple[int, int] | None = None) -> None:
-        """画角色**上面**的东西: 高层里 .mat 标 0x100 的瓦片 (屋檐/树冠/桥栏)."""
-        if self.tileset_s is None:
-            return
-        rng = self._visible_range(surface, cam_x, cam_y, rows)
-        self._blit_layer(surface, cam_x, cam_y, rng, self.grid1, self.tileset_s,
-                         self.ts_cols_s, self.ts_rows_s, self.mat_s, MAT_OVER)
+        """兼容旧接口: 压精灵的逻辑已全部在 draw_tall 里, 这里不再画东西."""
+        return
 
 
 def load(base: str) -> RealMap:
