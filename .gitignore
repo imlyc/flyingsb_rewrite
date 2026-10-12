@@ -6,3 +6,4 @@ venv/
 _audio_clips/
 saveData/
 saves/
+*.swp
