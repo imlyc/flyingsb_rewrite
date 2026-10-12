@@ -853,9 +853,17 @@ def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
 # 敌人被风**击退/抖动** (弹簧物理). 我们: 每敌持续从脚下升起 ehari00 旋涡环堆成旋风柱 + 受击抖动.
 BH_ATLAS = 256
 BH_COIL_FRAMES = (0, 1, 2, 3, 1)   # exe seq 0x671b48
-BH_DESCEND_HEIGHT = 220
+BH_DESCEND_HEIGHT = 660          # 30 tick 落地: 原版实录 烟雾→旋风起 (=落地) 62 tick (含 32 tick 召唤延迟)
 BH_DESCEND_VZ = 22
-BH_ATTACK_TICKS = 80             # 阶段1: 浮到风高度+旋转+旋风 (exe tick 8~0x78)
+BH_ATTACK_TICKS = 120            # 阶段1: 浮到风高度+旋转+旋风 (exe tick 8~0x78; 实录 0xdc→0xf4 = 123 tick)
+BH_RETURN_HOLD = 35              # 摔地后神兽原地盘踞再升空 (实录 0xf0 → 返程烟雾 65 tick = 35 + 升空 30)
+# 音效 (exe FUN_004da9ed 旋风 think + coil seq 0x671b48; 2026-10-12 sfx_trace 实录核对):
+SFX_BH_WIND = 0xdc               # 旋风起 (E052 2.4s): 旋风 tick 0 和 64 各一次 (tick%0x40==0, 仅首敌)
+SFX_BH_ROAR = 0x139              # 白虎吼 (E145): coil seq 第 24 tick 的 sound op; 返程时 stop
+SFX_BH_FLING = 0xf4              # 抛天 (E076): 旋风 tick 0x78
+SFX_BH_SLAM = 0xf0               # 摔地 (E072): 落地结算时
+BH_ROAR_TICK = 24
+BH_WIND_SOUND_PERIOD = 64
 BH_FLING_TICKS = 14              # 阶段2: 抛向天空 (exe 0x77<tick<0x8c 强力上推 +0x40000)
 BH_FALL_MAX_TICKS = 110          # 落下兜底上限 (抛出屏外, 落回耗时较长)
 BH_WIND_INTERVAL = 4            # 每 4 tick 每敌升一对旋涡环 (exe tick%4)
@@ -963,10 +971,16 @@ def baihu_beast_think(e: "Entity", eng: "Engine") -> None:
             e.z = 0
             ud['atk_tick'] = 0
             e.state_code = _BH_ATTACK
+            _sfx(battle, SFX_BH_WIND)                 # 旋风 tick 0
     elif e.state_code == _BH_ATTACK:                  # 阶段1: 浮到风高度 + 旋转 + 旋风
         _bh_coil(e)
         ud['atk_tick'] += 1
         t = ud['atk_tick']
+        if t == BH_ROAR_TICK:
+            _sfx(battle, SFX_BH_ROAR)
+            ud['coord'].user_data['beast_sound'] = SFX_BH_ROAR   # 返程 (case 0x28) 切断
+        if t == BH_WIND_SOUND_PERIOD:
+            _sfx(battle, SFX_BH_WIND)
         _bh_update_airborne(ud, 'float')
         ud['phase'] += 0.4                            # 双螺旋相位旋转
         if t % BH_WIND_INTERVAL == 0:                 # 两股风: 每敌两侧各升旋涡环
@@ -978,6 +992,7 @@ def baihu_beast_think(e: "Entity", eng: "Engine") -> None:
         if t >= BH_ATTACK_TICKS:
             ud['fling_tick'] = 0
             e.state_code = _BH_FLING
+            _sfx(battle, SFX_BH_FLING)
     elif e.state_code == _BH_FLING:                   # 阶段2: 抛向天空
         _bh_coil(e)
         ud['fling_tick'] += 1
@@ -993,11 +1008,16 @@ def baihu_beast_think(e: "Entity", eng: "Engine") -> None:
             for v in ud['victims']:
                 v.wind_lift = 0.0
                 v.wind_spin_col = -1
+            _sfx(battle, SFX_BH_SLAM)
             _aoe_hit_all(battle, caster, ud['victims'])   # 摔地受伤 (exe z<1 发 -200/-250)
+            ud['hold_tick'] = 0
             e.state_code = _BH_RISE
     elif e.state_code == _BH_RISE:
-        e.z -= BH_DESCEND_VZ << 16
         _bh_coil(e)
+        ud['hold_tick'] += 1
+        if ud['hold_tick'] <= BH_RETURN_HOLD:         # 原地盘踞一会儿再升空
+            return
+        e.z -= BH_DESCEND_VZ << 16
         if (e.z >> 16) <= -BH_DESCEND_HEIGHT:
             for v in ud['victims']:
                 v.wind_lift = 0.0                     # 安全复位

@@ -658,3 +658,44 @@ def test_luanwu_skateboards():
     assert not any(e.user_data.get('skate') for e in b.engine.entities if e.flags & 0x800), \
         "收尾时滑板应全销毁"
     assert b._pending_turn_end is True
+
+
+def test_baihu_sounds_follow_original_trace():
+    """白虎音效时序 (2026-10-12 原版 sfx_trace 实录, 单位 tick≈24.5ms):
+    烟雾 → +62 旋风起 0xdc → +27 虎吼 0x139 → 0xdc 第二次 (与首次相隔 64) → 首次 0xdc +123 抛天 0xf4
+    → 摔地 0xf0 → +65 返程烟雾, 同时 stop 0x139."""
+    from core.son_transform import (start_son_transform, SFX_SMOKE, SFX_BH_WIND, SFX_BH_ROAR,
+                                    SFX_BH_FLING, SFX_BH_SLAM)
+
+    b, caster, d1, d2 = _fixture()
+    caster.pending_attack_target = d1
+    caster.pending_attack_cursor = (7, 5)
+    caster.pending_skill_id = 0x02
+    caster.pending_impact_count = 0
+    caster.pending_impact_total = 1
+    b._pending_damage_range = {(8, 5), (7, 6)}
+
+    tick = [0]
+    played, stopped = [], []
+    b.engine.on('sound_play', lambda ent, sid: played.append((tick[0], sid)))
+    b.engine.on('sound_stop', lambda ent, sid: stopped.append((tick[0], sid)))
+    start_son_transform(b, caster, (7, 5), 0x02)
+    for _ in range(900):
+        tick[0] += 1
+        b.engine.tick()
+        if b._pending_turn_end:
+            break
+    assert b._pending_turn_end
+
+    def at(sid, n=0):
+        return [t for t, s in played if s == sid][n]
+    smoke1, smoke2 = at(SFX_SMOKE, 0), at(SFX_SMOKE, 1)
+    wind1, wind2 = at(SFX_BH_WIND, 0), at(SFX_BH_WIND, 1)
+    assert [s for _, s in played if s == SFX_BH_WIND] == [SFX_BH_WIND] * 2
+    assert abs((wind1 - smoke1) - 62) <= 4, f"烟雾→旋风起 {wind1 - smoke1} tick (实录 62)"
+    assert abs((at(SFX_BH_ROAR) - wind1) - 26) <= 3, "虎吼在旋风起后 ~26 tick"
+    assert wind2 - wind1 == 64
+    assert abs((at(SFX_BH_FLING) - wind1) - 121) <= 3, "抛天在旋风起后 ~121 tick"
+    assert at(SFX_BH_SLAM) > at(SFX_BH_FLING)
+    assert abs((smoke2 - at(SFX_BH_SLAM)) - 65) <= 4, f"摔地→返程 {smoke2 - at(SFX_BH_SLAM)} tick (实录 65)"
+    assert [s for _, s in stopped] == [SFX_BH_ROAR] and stopped[0][0] == smoke2
