@@ -629,6 +629,16 @@ class WorldMapScene(Scene):
 
         同时供手动 G 与世界地图自动触发复用。
         """
+        # 序章: 有 exe 提取的序章数据 (tools.extract_prologue / extract_event_scenes) 就按原版分场景演出
+        if beat.id == "intro":
+            from core import prologue
+            if prologue.available():
+                from scenes.prologue import PrologueScene
+                self.story.apply_presave(beat, self.save)
+                self.next_scene = PrologueScene(self.surface, return_scene=self, audio=self.audio,
+                                                on_close=lambda: self._after_beat(beat))
+                print(f"[剧情] {beat.title} — 原版序章演出")
+                return
         plan = self.story.plan(beat, self.save)
         if not plan["affordable"]:
             print(f"[剧情] 金钱不足 ({beat.cost}G): {beat.title}")

@@ -62,17 +62,25 @@ def test_new_game_auto_plays_prologue():
     # 主循环采纳世界地图 (其 enter_location 已预挂序章对白)
     world = switch_scene(title)
     assert isinstance(world, WorldMapScene)
-    assert isinstance(world.next_scene, DialogueScene), "序章应自动弹出"
+    from scenes.prologue import PrologueScene
+    assert isinstance(world.next_scene, (DialogueScene, PrologueScene)), "序章应自动弹出"
 
-    # 播完序章
-    dlg = switch_scene(world)
+    # 播完序章 (原版序章演出 = 导演 + 若干场底部对白, 逐场按空格翻完)
     key = lambda k: pygame.event.Event(pygame.KEYDOWN, key=k)
-    for _ in range(6):
-        dlg.update(16)
-        dlg.handle_event(key(pygame.K_SPACE))
-        if dlg.next_scene is not None:
+    scene = world
+    for _ in range(40):
+        scene = switch_scene(scene)
+        if isinstance(scene, WorldMapScene):
             break
-    assert dlg.next_scene is not None
-    world2 = switch_scene(dlg)
+        if isinstance(scene, DialogueScene):
+            for _ in range(6):
+                scene.update(16)
+                scene.handle_event(key(pygame.K_SPACE))
+                if scene.next_scene is not None:
+                    break
+            if scene.next_scene is None:
+                scene._exit()
+        assert scene.next_scene is not None
+    world2 = scene
     assert isinstance(world2, WorldMapScene)
     assert "PROLOGUE" in world2.story.state.flags, "序章播完应置 PROLOGUE"

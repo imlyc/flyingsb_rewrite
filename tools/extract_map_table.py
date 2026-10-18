@@ -7,9 +7,10 @@
     +0x0D char[9] map 资源名     ('#' + 7 字符; exe 拼 "p.map"/"p.mfo")
     +0x16 u16   ?
     +0x18 u32   (疑似 BGM 号 / 区域号, -1 = 无)
-    +0x20 u32   该地图事件回调函数 VA (代码指针, 多数是空函数 push ebp;mov ebp,esp;pop ebp;ret)
-    +0x24 u32   ?
-    +0x28 char[24] Big5 显示名 (读档界面/存档 0x04 地点名用的就是它)
+    +0x20 u32   进入该地图的回调函数 VA (代码指针, 多数是空函数 push ebp;mov ebp,esp;pop ebp;ret)
+    +0x24 u32   下一张地图 id (序章地图链 469→470→…→476 靠它串; 其余多为 id+1/0)
+  Big5 显示名 (24B) 在**前一项的 +0x28** —— 即以本项为准是 -0x1C 处 (mygame 贡献者按 0x6474B4 为
+  基址读 +0x00 显示名 / +0x34 BGM / +0x3C 回调 / +0x40 next, 与此一致). 读档界面/存档地点名用它.
   共 500 项 (488.. 为空占位 '#T______').
 
 **这张表是地图 ↔ 图集的唯一真值**: 487 张 .map 里只有 80 张有同名 .pcx, 其余共用别的图集,
@@ -62,15 +63,17 @@ def parse(exe: Path = EXE) -> list[dict]:
         ts, mp = _cstr(e[4:13]), _cstr(e[13:22])
         if not mp.startswith("#") or mp == "#T______":
             continue
-        f18, _f1c, script_va = struct.unpack_from("<iII", e, 0x18)
-        name = e[0x28:0x40].decode("big5", errors="replace").strip(" \0")
+        f18, _f1c, callback_va, next_id = struct.unpack_from("<iIIi", e, 0x18)
+        name_off = base + i * STRIDE - 0x1C
+        name = data[name_off:name_off + 24].decode("big5", errors="replace").strip(" \0")
         out.append({
             "id": i,
             "map": _res_name(mp, "P"),
             "tileset": _res_name(ts, "P"),
             "flags": flags,
             "bgm": f18,
-            "script_va": script_va,
+            "callback_va": callback_va,
+            "next": next_id,
             "name": name,
         })
     return out

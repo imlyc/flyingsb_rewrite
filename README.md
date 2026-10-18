@@ -139,7 +139,14 @@ venv/bin/python -m tools.extract_characters     # 读 exe 角色表/成长表/�
 venv/bin/python -m tools.extract_enemies        # 读 exe 敌人表 → assets/enemy_table.json
 venv/bin/python -m tools.extract_skill_learn    # 读 exe 技能学习表 → assets/skill_learn.json
 venv/bin/python -m tools.extract_enemy_actions  # 读 exe 敌方行动表 → assets/enemy_actions.json
+venv/bin/python -m tools.extract_prologue       # 开场+序章对白 183 页 → assets/script/prologue.json
+venv/bin/python -m tools.extract_event_scenes   # 事件脚本的场景/角色站位 92 个 → assets/script/event_scenes.json
 ```
+
+- **序章演出**（`core/prologue.py` + `scenes/prologue.py`）：新游戏的序章按原版分 7 场
+  （樂神封印孫悟空 → 美娜房間 → 天宮 ×2 → 禁斷之房 → 天宮大殿 → 小森林），每场用真实地图作舞台，
+  在场角色按 exe 事件脚本的站位摆放，对白用 exe 剧本原文；有 `prologue.json` 时自动替换
+  `story.py` 里的攻略文本兜底。
 
 - **剧情分派表**：原版用一张 669 项跳转表（VA `0x467006`）把「位置 / 角色 ID」映射到剧本分支；
   `PlayScript` 入口 `0x45b7d0`，对白播放函数 `0x45b173`，当前剧本 ID 全局 `0x7d75b8`。

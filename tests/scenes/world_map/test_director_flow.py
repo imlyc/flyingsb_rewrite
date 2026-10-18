@@ -40,7 +40,8 @@ def test_launch_dialogue_beat_opens_dialogue(pygame_inited):
     beat = sc.story.current()            # 序章 intro (enter=())
     assert beat is not None
     sc._launch_beat(beat)
-    assert isinstance(sc.next_scene, DialogueScene)
+    from scenes.prologue import PrologueScene
+    assert isinstance(sc.next_scene, (DialogueScene, PrologueScene))   # 有序章数据时走原版序章演出
     sc.next_scene.on_close()             # 模拟对白播完
     assert beat.id in sc.story.state.done
 

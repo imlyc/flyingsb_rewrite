@@ -114,8 +114,10 @@ def test_world_map_uses_cutscene_for_portrait_beats():
     assert isinstance(sc.next_scene, CutsceneScene)
     assert sc.next_scene.backdrop is not None   # 用地图画面作背景
 
-    # 序章是纯文字 → 仍走底部对话框
+    # 序章: 有 exe 序章数据 → 原版分场景演出 (PrologueScene); 否则纯文字 → 底部对话框
+    from core import prologue
+    from scenes.prologue import PrologueScene
     intro = next(x for x in BEATS if x.id == "intro")
     sc.next_scene = None
     sc._launch_beat(intro)
-    assert isinstance(sc.next_scene, DialogueScene)
+    assert isinstance(sc.next_scene, PrologueScene if prologue.available() else DialogueScene)
