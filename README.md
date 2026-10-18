@@ -141,12 +141,26 @@ venv/bin/python -m tools.extract_skill_learn    # 读 exe 技能学习表 → as
 venv/bin/python -m tools.extract_enemy_actions  # 读 exe 敌方行动表 → assets/enemy_actions.json
 venv/bin/python -m tools.extract_prologue       # 开场+序章对白 183 页 → assets/script/prologue.json
 venv/bin/python -m tools.extract_event_scenes   # 事件脚本的场景/角色站位 92 个 → assets/script/event_scenes.json
+venv/bin/python -m tools.extract_event_scripts  # 原版事件字节码 168 个事件 + 子脚本 → assets/script/events.json, assets/fc_tables.json
 ```
 
-- **序章演出**（`core/prologue.py` + `scenes/prologue.py`）：新游戏的序章按原版分 7 场
-  （樂神封印孫悟空 → 美娜房間 → 天宮 ×2 → 禁斷之房 → 天宮大殿 → 小森林），每场用真实地图作舞台，
-  在场角色按 exe 事件脚本的站位摆放，对白用 exe 剧本原文；有 `prologue.json` 时自动替换
-  `story.py` 里的攻略文本兜底。
+- **序章演出 = 跑原版事件脚本**（`core/event_script.py` 解释器 + `core/dialog_engine.py` 气泡引擎 +
+  `scenes/prologue.py` 舞台）：新游戏的序章不再手摆，而是逐条执行 exe 里的事件字节码
+  （事件 0..9：樂神封印孫悟空 → 美娜房間 → 天宮 → 禁斷之房 → 天宮大殿 → 小森林，共 7 张图）。
+  数据由 `tools.extract_event_scripts` 产出 `assets/script/events.json`（168 个事件 + 398 段子脚本，
+  含转向/走路/说话等引擎内置脚本）和 `assets/fc_tables.json`（图集表 / fm 帧组 / FC 定义）。
+  干跑：`venv/bin/python -m tools.run_event 0 -q -n 12 -d`（打印演出回调与卡住点）；
+  无头截图：`venv/bin/python -m tools.prologue_shots /tmp/shots --every 150`。
+  旧的 `core/prologue.py` 分场景数据仍保留（`tools.extract_prologue`），游戏不再用它。
+
+  解释器要点（wh/seq.cpp 逆向）：命令 `[op][sub][len u16][5 字节操作数…]`，256 项处理表 `0x632b78`；
+  事件表 `0x73df8c`；任务 ctx 的 `+0x30` pc / `+0x40` 等待计数 / `+0x44` 返回值 / `+0xcc,+0xd0` 同步·异步子任务句柄 /
+  `+0xf8,+0xfc` 默认 FC / `+0xf4` 说话代号。对白是**挂在角色头上的气泡任务**（`0x45b173`），文本本身是小脚本：
+  `@@` 新框、`;` 翻页、`|` 换行、`<Dn>` 停 n×100ms、`<$L>` 向消息环（`0x7af598`，32 项 [key,sub,flags]）发标签、
+  `/` 等发给自己的消息、`<$=X>`+`<$>` 对手轮流制、`<$X:n>` 让 X 的说话脚本换姿势（n≥10000: fm 组 (n-10000)/100 帧 n%100；
+  3xxx: 姿势子脚本表 `0x73c38e`）、`<possub_U/D/L/R>` 气泡方位偏好（十进制各位 = 小键盘方位序）。
+  主脚本用 `71.01 [L]` 等气泡走到标签、`71.05 [L, X]` 放行 X 的 `/`、`71.04 [L, X, f]` 关窗/图标、`71.07 [X, n]` 换姿势。
+  `92.02` = 事件结束后按事件标志 `0x7d72e8[ev]` 重跑自己（ev2 第二阶段）。
 
 - **剧情分派表**：原版用一张 669 项跳转表（VA `0x467006`）把「位置 / 角色 ID」映射到剧本分支；
   `PlayScript` 入口 `0x45b7d0`，对白播放函数 `0x45b173`，当前剧本 ID 全局 `0x7d75b8`。

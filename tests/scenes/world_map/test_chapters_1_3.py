@@ -35,6 +35,8 @@ def _run_story(scene: WorldMapScene) -> None:
         cn = type(cur).__name__
         if cn in ("DialogueScene", "CutsceneScene"):
             cur._exit()                       # 读完 -> on_close -> _after_beat
+        elif cn == "PrologueScene":
+            cur._finish()                     # 原版序章演出: 相当于 ESC 跳过 -> on_close -> _after_beat
         elif cn == "BattleScene":
             scene._on_story_battle_end(True)  # 判胜 -> 结算
             cur.next_scene = scene

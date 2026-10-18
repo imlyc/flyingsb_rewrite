@@ -72,7 +72,10 @@ def test_new_game_auto_plays_prologue():
         scene = switch_scene(scene)
         if isinstance(scene, WorldMapScene):
             break
-        if isinstance(scene, DialogueScene):
+        if isinstance(scene, PrologueScene):
+            scene.update(60)                    # 原版事件脚本序章: 跑几帧后 ESC 跳过
+            scene.handle_event(key(pygame.K_ESCAPE))
+        elif isinstance(scene, DialogueScene):
             for _ in range(6):
                 scene.update(16)
                 scene.handle_event(key(pygame.K_SPACE))

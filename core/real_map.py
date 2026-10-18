@@ -305,6 +305,8 @@ class RealMap:
         · 本格属性下标 0x32..0x3B (斜梯): 左右移动变成斜向 (见 _DIAG)"""
         if layer is None:
             layer = self.layer
+        if layer == 1 and not self._layer1:          # 单层图没有第 1 层: 一律按第 0 层算
+            layer = 0
         d = DIR_OF_DELTA.get((dx, dy))
         cells = self._cells(layer)
         cur = cells[y * self.w + x] if self.in_bounds(x, y) else 0
