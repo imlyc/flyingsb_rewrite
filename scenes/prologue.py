@@ -173,6 +173,7 @@ class PrologueScene(Scene, EventHost):
         if self.audio is not None:
             try:
                 self.audio.stop_bgm()
+                pygame.mixer.music.set_volume(self._base_volume())   # 还原给地图曲
             except Exception:
                 pass
         self.next_scene = self.return_scene
@@ -573,7 +574,12 @@ class PrologueScene(Scene, EventHost):
             except Exception:
                 pass
 
+    def _base_volume(self) -> float:
+        return float(getattr(self.audio, "_volume", 1.0) or 1.0)
+
     def bgm(self, n, fade_frames: int = 0) -> None:
+        """换曲. 之前的 bgm_volume 淡出会把 mixer 音量压到 0, 新曲开始前必须把音量还原,
+        否则后面整段序章 (以及回到地图后的地图曲) 都是哑的."""
         if self.audio is None:
             return
         try:
@@ -584,16 +590,26 @@ class PrologueScene(Scene, EventHost):
                 n = self.map_row.get("bgm")
             f = bgm_table.bgm_file(n) if n is not None and n >= 0 else None
             if f:
+                pygame.mixer.music.set_volume(self._base_volume())
+                self.audio.stop_bgm()          # 同名曲也要从头播 (脚本语义), play_bgm 对同曲会跳过
                 self.audio.play_bgm(f)
         except Exception:
             pass
 
     def bgm_volume(self, vol: int, frames: int) -> None:
-        if self.audio is not None:
-            try:
-                pygame.mixer.music.set_volume(max(0.0, min(1.0, vol / 100.0)) if vol else 0.0)
-            except Exception:
-                pass
+        """脚本的音量指令: vol=0 + frames = 淡出 (用 mixer 的 fadeout, 淡完即停); 其它 = 按比例设."""
+        if self.audio is None:
+            return
+        try:
+            if vol <= 0:
+                if frames > 0:
+                    pygame.mixer.music.fadeout(int(frames * 25))
+                else:
+                    self.audio.stop_bgm()
+            else:
+                pygame.mixer.music.set_volume(self._base_volume() * max(0.0, min(1.0, vol / 100.0)))
+        except Exception:
+            pass
 
     def speak(self, dlg: DialogTask) -> None:
         self.log(f"[气泡] {code_str(dlg.code)} fc{dlg.fc}")
