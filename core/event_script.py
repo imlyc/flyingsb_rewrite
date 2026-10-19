@@ -1103,10 +1103,13 @@ class EventVM:
                     h.fc_move(self.fc_default, signed(R(o[1])) / 65536.0, signed(R(o[2])) / 65536.0, 0, True)
                 elif sub == 8 and len(o) >= 4:
                     h.fc_move(self.fc(R(o[1])), signed(R(o[2])), signed(R(o[3])), 0, True)
-                if n <= 0:
+                if n <= 0 or fast_forward():
+                    # Shift: FUN_004871c1 直接清等待并推进, **不置让帧标志** → 同帧继续执行下一条
+                    # (走路脚本每组 3 个 67 + 1 个 61, 于是一格 24 帧变 8 帧 = 原版按住 Shift 的快走)
+                    self.wait = 0
                     self.pc += 1
                     return False
-                self.wait = n + self.local(0x108) + self._walk_delay()   # FUN_00484ba5/004871c1
+                self.wait = n + self.local(0x108) + self._walk_delay()   # FUN_004871c1
             if fast_forward():
                 self.wait = 1
             self.wait -= 1
