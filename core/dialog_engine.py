@@ -320,7 +320,7 @@ class Page:
 class DialogTask:
     """一个气泡. 每帧 tick(dt_ms); 状态供场景渲染."""
 
-    TICK_MS = 30
+    TICK_MS = 25
     OPEN_MS = 160
     CLOSE_MS = 120
     PUNCT_EXTRA = {" ": 2.0, "!": 13.0, ",": 7.0, ".": 1.0, "?": 17.0, "，": 8.0, "。": 19.0, "…": 4.0}

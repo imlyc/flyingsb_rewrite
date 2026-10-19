@@ -27,7 +27,7 @@ from scenes.menu import load_chinese_font
 ROOT = Path(__file__).resolve().parent.parent
 SPRITES = ROOT / "assets" / "sprites"
 FC_TABLES = ROOT / "assets" / "fc_tables.json"
-TICK_MS = 30                      # 1 原版 tick (见 project_frame_timing)
+TICK_MS = 25                      # 1 原版 tick: 主循环受渲染限制, Wine 实测 24.5ms (见 project_frame_timing)
 FIRST_EVENT = 0
 LAST_EVENT = 9                    # 序章链 ev0..ev9 (之后玩家接管)
 
