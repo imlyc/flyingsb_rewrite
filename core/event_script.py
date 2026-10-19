@@ -431,6 +431,7 @@ class EventHost:
     def fc_clone(self, src: int) -> int: self.log(f"[ev] clone fc{src}"); return 0x10000
     def fc_blank(self) -> int: self.log("[ev] blank obj"); return 0x10000
     def task_alive(self, hd: int) -> bool: return False
+    def fc_on_screen(self, fc: int) -> bool: return True                 # 9c.00: 在镜头内
     def dialog_event(self, dlg: "DialogTask", what: str) -> None: ...
     def fc_place(self, fc: int, x: int, y: int, z: int, d: int) -> None:
         self.log(f"[ev] place fc{fc} ({x},{y},z{z}) d{d}")
@@ -467,10 +468,13 @@ class EventHost:
 # ---------------------------------------------------------------- 解释器
 class Frame:
     """gosub 调用帧 (07/08): 返回地址 + 调用时 blocks 深度 (返回时丢掉子程序里没闭合的块)."""
-    __slots__ = ("ret", "nblocks", "count", "sub", "cmd")
+    __slots__ = ("ret", "nblocks", "count", "sub", "cmd", "saved")
 
-    def __init__(self, ret: int, nblocks: int, count: int = 0, sub: int = 0, cmd: int = -1) -> None:
+    def __init__(self, ret: int, nblocks: int, count: int = 0, sub: int = 0, cmd: int = -1,
+                 saved: list | None = None) -> None:
         self.ret, self.nblocks, self.count, self.sub, self.cmd = ret, nblocks, count, sub, cmd
+        self.saved = saved      # 调用时的块栈快照 (原版块栈是定长数组 + 深度, 返回只恢复深度,
+                                # 子程序里 05.00 弹掉的 if 块回来后还在 —— 走路脚本 0x739480 就靠这个)
 
 
 @dataclass
@@ -606,6 +610,9 @@ class EventVM:
         """操作数 → FC id: -1 = 本任务默认角色."""
         return self.fc_default if v in (-1, 0xFFFFFFFF) else v
 
+    def _walk_delay(self) -> int:
+        return self.scheduler.walk_delay if self.scheduler is not None else 0
+
     def spawn_child(self, script_va: int, fc: int, locals_: dict[int, int] | None = None) -> int:
         if self.scheduler is None or script_va not in self.scripts:
             self.host.log(f"[ev] (no sub-script {script_va:#x})")
@@ -652,7 +659,10 @@ class EventVM:
         if not self.calls:
             return False
         fr = self.calls.pop()
-        del self.blocks[fr.nblocks:]
+        if fr.saved is not None:
+            self.blocks[:] = fr.saved[:fr.nblocks]
+        else:
+            del self.blocks[fr.nblocks:]
         self.pc = self.index_of(fr.ret)
         return True
 
@@ -764,7 +774,7 @@ class EventVM:
                 self.pc += 1
             return False
         if op == 0x07:                                   # gosub ptr
-            self.calls.append(Frame(self.addr_of(self.pc + 1), len(self.blocks)))
+            self.calls.append(Frame(self.addr_of(self.pc + 1), len(self.blocks), saved=list(self.blocks)))
             self.jump_addr(R(o[0]))
             return False
         if op == 0x08:                                   # 调 ptr 共 n 次 (每次返回到本指令)
@@ -774,7 +784,7 @@ class EventVM:
                 if n <= 0:
                     self.pc += 1
                     return False
-                fr = Frame(c.addr, len(self.blocks), count=n, cmd=c.addr)
+                fr = Frame(c.addr, len(self.blocks), count=n, cmd=c.addr, saved=list(self.blocks))
                 self.calls.append(fr)
             if fr.count <= 0:
                 self.calls.pop()
@@ -1071,7 +1081,7 @@ class EventVM:
                 if n <= 0:
                     self.pc += 1
                     return False
-                self.wait = n
+                self.wait = n + self.local(0x108) + self._walk_delay()   # FUN_00484ba5/004871c1
             if fast_forward():
                 self.wait = 1
             self.wait -= 1
@@ -1086,8 +1096,9 @@ class EventVM:
                 n = R(o[0]) if o else 0
                 if sub == 0 and len(o) >= 3:                 # 偏移目标 (+0x20) += (dx,dy) px, n 帧内滑到
                     h.fc_move(self.fc_default, signed(R(o[1])), signed(R(o[2])), n, False)
-                elif sub == 1 and len(o) >= 3:               # 位置 += (dx,dy) px
-                    h.fc_move(self.fc_default, signed(R(o[1])), signed(R(o[2])), 0, True)
+                elif sub == 1 and len(o) >= 3:               # 位置 += (dx,dy) px —— 仅当 40.00 判定能走
+                    if (self.local(0x104) & 1) == 0:         # (FUN_004871c1 case 1: 挡住就原地踏步)
+                        h.fc_move(self.fc_default, signed(R(o[1])), signed(R(o[2])), 0, True)
                 elif sub == 2 and len(o) >= 3:               # 位置 += (dx,dy) 16.16 px
                     h.fc_move(self.fc_default, signed(R(o[1])) / 65536.0, signed(R(o[2])) / 65536.0, 0, True)
                 elif sub == 8 and len(o) >= 4:
@@ -1095,7 +1106,7 @@ class EventVM:
                 if n <= 0:
                     self.pc += 1
                     return False
-                self.wait = n
+                self.wait = n + self.local(0x108) + self._walk_delay()   # FUN_00484ba5/004871c1
             if fast_forward():
                 self.wait = 1
             self.wait -= 1
@@ -1423,9 +1434,17 @@ class EventVM:
             if sub == 4 and o and R(o[0]) == 1000 and self.scheduler is not None:
                 if self.scheduler.auto_dialog == 0:
                     self.scheduler.auto_dialog = 10      # DAT_007d70d8: 事件里气泡 ';' 自动翻页 (10×100ms)
-        elif op in (0x68, 0x80, 0xE6, 0xEF, 0x9C, 0xF1, 0x52, 0x4C, 0x4D):
-            if op == 0x9C:
-                self.set_local(0x44, 1)                      # 对象在屏幕内
+        elif op == 0x6F and o:                           # 全局走路延时 DAT_007d8080 (00 设 / 01 加)
+            if self.scheduler is not None:
+                v = signed(R(o[0]))
+                self.scheduler.walk_delay = v if sub == 0 else self.scheduler.walk_delay + v
+        elif op == 0x68:                                 # 走完: 站立帧按朝向复位 (FUN_00498ed1)
+            fc = self.fc(R(o[0])) if (sub == 1 and o) else self.fc_default
+            d = h.fc_get(fc, 0x110) & 7
+            h.fc_anim(fc, 0x20000, (0, 6, 12, 18, 5, 11, 17, 23)[d], 0)
+        elif op in (0x80, 0xE6, 0xEF, 0x9C, 0xF1, 0x52, 0x4C, 0x4D):
+            if op == 0x9C:                               # 对象在屏幕内? (走路脚本: 屏外的步子是瞬移)
+                self.set_local(0x44, 1 if h.fc_on_screen(self.fc(R(o[0])) if o else self.fc_default) else 0)
         else:
             h.unknown(c)
         if advance:
@@ -1466,6 +1485,7 @@ class TaskScheduler:
         self.fc_codes: dict[int, int] = {}       # 说话代号 → fc
         self.path_state: dict[int, list] = {}    # 46 寻路: fc → [steps, idx]
         self.auto_dialog = 0                     # DAT_007d70d8 (×100ms); 0 = 等按键
+        self.walk_delay = 0                      # DAT_007d8080: 每个 61/67 等待额外加的帧数 (op 6f)
         self.text_speed = 25                     # ms/字
         self._n = 0
         self._nd = 0

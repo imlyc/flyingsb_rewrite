@@ -565,6 +565,15 @@ class PrologueScene(Scene, EventHost):
         finally:
             self._in_runner = False
 
+    def fc_on_screen(self, fc: int) -> bool:
+        """9c.00: 演员脚点是否在当前镜头画面内 (原版屏外角色走路不放动画, 直接瞬移一格)."""
+        a = self._actor(fc, create=False)
+        if a is None:
+            return False
+        cx, cy = self._cam_origin()
+        sw, sh = self.surface.get_size()
+        return -TILE_W <= a.px - cx <= sw + TILE_W and -TILE_H * 2 <= a.py - cy <= sh + TILE_H
+
     def task_alive(self, hd: int) -> bool:
         if self.runner is not None and hd and (hd & 0xF0000) in (0x20000, 0x40000):
             return self.runner.alive(hd)
