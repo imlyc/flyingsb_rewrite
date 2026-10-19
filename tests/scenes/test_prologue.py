@@ -87,3 +87,31 @@ def test_director_runs_whole_prologue_headless():
     assert pro.done and pro.next_scene is ret
     assert pro.runner.history[-1] == 9 and n < 40000
     assert [m for m in pro.runner.history] == [0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9]
+
+
+def test_shift_fast_forward_skips_waits_and_tweens():
+    """原版按住 Shift = 跳过停顿/补间/等按键 (DAT_00742350). 快进下整段序章要比正常快得多."""
+    from core.dialog_engine import set_fast
+    from scenes.prologue import PrologueScene, available
+    if not available():
+        pytest.skip("缺序章数据")
+    pygame.init()
+    surf = pygame.display.set_mode((800, 600))
+
+    def run(fast: bool, limit: int) -> int:
+        set_fast(fast)
+        try:
+            p = PrologueScene(surf, return_scene=_Return(surf))
+            p.on_enter()
+            n = 0
+            while not p.done and n < limit:
+                p.step(); n += 1
+                if not fast and n % 10 == 0 and p.runner is not None:
+                    p.runner.press_key()          # 正常模式还得有人按键翻页
+            return n if p.done else limit
+        finally:
+            set_fast(False)
+    fast_n = run(True, 20000)
+    assert fast_n < 20000, "快进应能跑完整段序章"
+    normal_n = run(False, 20000)
+    assert fast_n * 3 < normal_n, f"快进 {fast_n} 帧 vs 正常 {normal_n} 帧, 没快多少"

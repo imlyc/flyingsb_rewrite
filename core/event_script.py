@@ -32,7 +32,7 @@ EXE = Path(os.environ.get("FLYINGSB_EXE", ORIGIN / "FlyingSB.exe"))
 IMAGE_BASE = 0x400000
 EVENT_TABLE_VA = 0x73DF8C
 EVENT_COUNT_MAX = 0xA8            # FUN_0045901c: 0 <= ev <= 0xa7
-from core.dialog_engine import DialogTask, MessageQueue, code_str  # noqa: E402
+from core.dialog_engine import DialogTask, MessageQueue, code_str, fast_forward  # noqa: E402
 
 TALK_SCRIPT_VA = 0x73C192
 EVENT_FLAGS_VA = 0x7D72E8         # DAT_007d72e8[ev]: 事件触发次数 (92.02/03 自增, 91.00 读)
@@ -712,6 +712,8 @@ class EventVM:
                     if self.wait == 0:
                         self.pc += 1
                         return False
+                if fast_forward():                       # Shift: ctx+0x40 = 1 (FUN_00467cbc 分支)
+                    self.wait = 1
                 self.wait -= 1
                 if self.wait == 0:
                     self.pc += 1
@@ -720,8 +722,8 @@ class EventVM:
                 if R(o[0]) == 0:
                     self.pc += 1
                 return True
-            if sub == 2:                                 # 等按键
-                if h.key_pressed():
+            if sub == 2:                                 # 等按键 (Shift 视为已按, FUN_00457173)
+                if h.key_pressed() or fast_forward():
                     self.pc += 1
                 return True
             if sub in (3, 4):                            # 等句柄对象 (子任务 / 对白框) 消失
@@ -1070,6 +1072,8 @@ class EventVM:
                     self.pc += 1
                     return False
                 self.wait = n
+            if fast_forward():
+                self.wait = 1
             self.wait -= 1
             if self.wait == 0:
                 self.pc += 1
@@ -1092,6 +1096,8 @@ class EventVM:
                     self.pc += 1
                     return False
                 self.wait = n
+            if fast_forward():
+                self.wait = 1
             self.wait -= 1
             if self.wait == 0:
                 self.pc += 1

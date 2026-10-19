@@ -25,6 +25,21 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 # ---------------------------------------------------------------- 消息环 (0x7af598)
+# ---------------------------------------------------------------- 快进 (原版按住 Shift)
+# exe 的键盘钩子 FUN_0040f025 把 Shift 状态写到 DAT_00742350, 脚本/气泡各处直接读它:
+#   等待 op (ctx+0x40) 一律改成 1 帧; 等按键 (FUN_00457173) 视为已按; 镜头/位移补间
+#   (FUN_0049a66c/0049aa5b/0049a818) 直接到位. 不是"倍速", 是把所有停顿和补间跳掉.
+_FAST = [False]
+
+
+def set_fast(on: bool) -> None:
+    _FAST[0] = bool(on)
+
+
+def fast_forward() -> bool:
+    return _FAST[0]
+
+
 class MessageQueue:
     """[key, sub, flags, sender] 列表; 原版是 32 项环, 这里不限长 (语义一致)."""
 
@@ -431,13 +446,13 @@ class DialogTask:
         # 等待类
         if self.wait_kind == "delay":
             self.wait_ms -= dt_ms
-            if self.wait_ms > 0:
+            if self.wait_ms > 0 and not fast_forward():
                 return
             self.wait_kind = None
         elif self.wait_kind == "key":
             if self.auto_delay_ms > 0:
                 self.wait_ms -= dt_ms
-            if self.key_latch or (self.auto_delay_ms > 0 and self.wait_ms <= 0):
+            if self.key_latch or fast_forward() or (self.auto_delay_ms > 0 and self.wait_ms <= 0):
                 self.key_latch = False
                 self.wait_kind = None
                 self._next_page()
@@ -456,7 +471,7 @@ class DialogTask:
             self.char_ms -= dt_ms
             if self.char_ms > 0:
                 return
-        budget = 64 if self.fast else 1
+        budget = 64 if (self.fast or fast_forward()) else 1
         while budget > 0 and self.wait_kind is None and self.box_state in ("open", "closed") \
                 and self.alive and not self.finished:
             if self._step():
@@ -606,7 +621,7 @@ class DialogTask:
             return False
         if k == "delay":
             self.wait_kind = "delay"
-            self.wait_ms = float(t.a) if not self.fast else 0.0
+            self.wait_ms = float(t.a) if not (self.fast or fast_forward()) else 0.0
             return False
         if k == "speed":
             self.speed_ms = max(0, self.speed_ms + int(t.a)) if t.b else int(t.a)

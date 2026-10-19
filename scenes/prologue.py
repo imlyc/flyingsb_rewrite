@@ -17,7 +17,7 @@ from pathlib import Path
 import pygame
 
 from core import bgm_table, real_map as realm
-from core.dialog_engine import DialogTask, code_str
+from core.dialog_engine import DialogTask, code_str, fast_forward, set_fast
 from core.event_script import EventHost, EventRunner, ScriptBundle
 from core.fm_frames import FM_FRAMES
 from core.sprites.base import TILE_H, TILE_W, load_image
@@ -90,6 +90,11 @@ class Actor:
             self.frame = DIR_ROWS[self.dir] * 6
 
     def tick(self) -> None:
+        if fast_forward():                 # Shift: 位移/跳跃补间直接到位 (FUN_0049a818 置 0x754e)
+            if self.off_ticks > 0:
+                self.off_ticks = 1
+            if self.motion is not None:
+                self.motion["t"] = max(self.motion["t"], self.motion["n"] - 1)
         if self.off_ticks > 0:
             self.off_ticks -= 1
             k = 1.0 - self.off_ticks / max(1, self.off_total)
@@ -170,6 +175,7 @@ class PrologueScene(Scene, EventHost):
         if self.done:
             return
         self.done = True
+        set_fast(False)
         if self.audio is not None:
             try:
                 self.audio.stop_bgm()
@@ -194,6 +200,11 @@ class PrologueScene(Scene, EventHost):
     def update(self, dt_ms: int) -> None:
         if self.done or self.runner is None:
             return
+        # 原版: 按住 Shift = 跳过所有停顿/补间 (键盘钩子 DAT_00742350), 见 core.dialog_engine.set_fast
+        try:
+            set_fast(bool(pygame.key.get_mods() & pygame.KMOD_SHIFT))
+        except Exception:
+            set_fast(False)
         self._acc += min(dt_ms, 250)
         while self._acc >= TICK_MS:
             self._acc -= TICK_MS
@@ -251,6 +262,8 @@ class PrologueScene(Scene, EventHost):
         tx = (self.cam[0] / TILE_W - 0.5 + x) if relative else x
         ty = (self.cam[1] / TILE_H - 0.5 + y) if relative else y
         target = [(tx + 0.5) * TILE_W, (ty + 0.5) * TILE_H]
+        if fast_forward():                 # Shift: 镜头直接到位 (FUN_0049a66c 不起补间任务)
+            frames = 0
         if frames <= 0:
             self.cam = target
             self.cam_ticks = 0
@@ -269,7 +282,10 @@ class PrologueScene(Scene, EventHost):
                 self.cam = [a.px, a.py]
             return
         if self.cam_ticks > 0:
-            self.cam_ticks -= 1
+            if fast_forward():
+                self.cam_ticks = 0
+            else:
+                self.cam_ticks -= 1
             k = 1.0 - self.cam_ticks / max(1, self.cam_total)
             self.cam = [f + (t - f) * k for f, t in zip(self.cam_from, self.cam_to)]
 
@@ -290,7 +306,7 @@ class PrologueScene(Scene, EventHost):
 
     def _tick_fade(self) -> None:
         if self.fade_ticks > 0:
-            self.fade_ticks -= 1
+            self.fade_ticks = 0 if fast_forward() else self.fade_ticks - 1
             k = 1.0 - self.fade_ticks / max(1, self.fade_total)
             self.fade_alpha = self.fade_from + (self.fade_to - self.fade_from) * k
 
@@ -512,7 +528,8 @@ class PrologueScene(Scene, EventHost):
         return steps
 
     def _motion(self, a: Actor, kind: str, x1: float, y1: float, ticks: int, h: float = 0.0) -> int:
-        a.motion = {"kind": kind, "t": 0, "n": max(1, ticks), "x0": a.px, "y0": a.py, "x1": x1, "y1": y1, "h": h}
+        a.motion = {"kind": kind, "t": 0, "n": 1 if fast_forward() else max(1, ticks),
+                    "x0": a.px, "y0": a.py, "x1": x1, "y1": y1, "h": h}
         self._task_n += 1
         self._tasks[self._task_n] = a
         return self._task_n
