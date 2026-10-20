@@ -11,7 +11,7 @@
     type bit6 (0x40) = 变量: 低 6 位 = 字节数 (1/2/4), bit7 = 全局 (value 是绝对地址),
       否则 value 是脚本上下文内偏移 (局部变量, 如 +0x44 返回值槽 / +0xe8 +0xec 临时).
     例: 0xc4 0x73e235 = 全局 dword 变量 (对象句柄表: 0x73e235 起 = FC id 0,1,3,4,5,6,8,9,...).
-  op 0x05 (switch) 例外: 操作数 count, index 之后紧跟 count 个 u32 跳转地址 (@+0xe).
+  op 0x05 (switch 跳) / 0x06 (switch 调, 压返回地址) 例外: 操作数 count, index 之后紧跟 count 个 u32 地址 (@+0xe).
 
 执行模型: 每帧跑到某条指令要求 "等待" 为止 (原版 DAT_007d76ec = 1/2), 下一帧继续.
 对外: 解释器只管控制流/变量, 所有世界副作用通过 Host 回调 (见 EventHost) 完成,
@@ -39,6 +39,10 @@ EVENT_FLAGS_VA = 0x7D72E8         # DAT_007d72e8[ev]: 事件触发次数 (92.02/
 G_EVENT_NOW, G_EVENT_PREV, G_EVENT_NEXT, G_EVENT_DEFER = 0x613060, 0x613064, 0x613068, 0x61306C
 G_MAP_NOW = 0x654D98              # DAT_00654d98: 当前地图号         # 4f.09 给 FC 起的子任务跑的标准 "说话" 脚本
 FC_VAR_BASE = 0x73E235            # 对象句柄变量表 (dword), 值 = FC id
+G_PARTY_MASK = 0x7D8008           # DAT_007d8008: 队伍位掩码 (e8.08 写; bit i → PARTY_SLOT_FC[i])
+G_PARTY_LEADER = 0x867E80         # DAT_00867e80 (原版存对象下标, 这里直接存队长 FC id)
+# DAT_0063fa28: 队伍槽 i → FC id (e8.08 的掩码按这张表展开)
+PARTY_SLOT_FC = (1, 3, 4, 5, 6, 8, 9, 10, 11, 12)
 
 # 操作数类型
 T_IMM, T_PTR = "imm", "ptr"
@@ -144,7 +148,7 @@ def cmd_valid(img: ExeImage, p: int) -> bool:
     size = img.u16(p + 2)
     if op not in KNOWN_OPS or size < 4 or not img.in_range(p + size - 1):
         return False
-    if op == 0x05:
+    if op in (0x05, 0x06):                              # 05 switch-jump / 06 switch-call 同形
         if size < 14 or img.u8(p + 4) != 0:
             return False
         return size == 14 + 4 * img.u32(p + 5) and size <= 14 + 4 * 512
@@ -170,7 +174,7 @@ def decode_script(img: ExeImage, va: int, end_va: int | None = None, max_cmds: i
         op, sub = img.u8(p), img.u8(p + 1)
         size = img.u16(p + 2)
         raw = img.data[p + 4 - IMAGE_BASE: p + size - IMAGE_BASE]
-        if op == 0x05:
+        if op in (0x05, 0x06):
             ops = decode_operands(raw[:10])
             cnt = ops[0].value if ops and ops[0].kind == "imm" else 0
             table = [struct.unpack_from("<I", raw, 10 + 4 * k)[0] for k in range(max(0, cnt))
@@ -212,7 +216,7 @@ def decode_region(img: ExeImage, va: int, end_va: int | None = None, max_cmds: i
             seen[c.addr] = c
             if c.op == 0x03:
                 queue.extend(o.value for o in c.operands if o.kind == "ptr")
-            elif c.op == 0x05:
+            elif c.op in (0x05, 0x06):
                 queue.extend(c.table)
     return [seen[a] for a in sorted(seen)]
 
@@ -675,6 +679,11 @@ class EventVM:
             self.scheduler.path_state.clear()
         self.globals[G_MAP_NOW] = map_id
         self.host.switch_map(map_id, reload)
+        # FUN_004c90c3 末尾的 FUN_004b895c: 当前主角对象 flags |= 0x100c0 → 载图后队长一定可见
+        # (前一事件走进门后 4a.00 把她隐藏, 新图靠这里重新显示)
+        leader = self.globals.get(G_PARTY_LEADER, -1)
+        if leader != -1:
+            self.host.fc_show(leader, True)
 
     def _wait_or_store(self, mode: int, hd: int, o0) -> bool:
         """44/46/47 类: mode -1 不管; 0 → 0xd0; 1 → 0xcc (下次同类 mode 1 指令先等它); 否则写变量."""
@@ -829,6 +838,15 @@ class EventVM:
                     self.set_local(0xEC, c.table[idx + 1])
             self.pc += 1
             return False
+        if op == 0x06:                                   # switch-call: gosub 表[idx] (FUN_0046a140; 跑/跳脚本按朝向分派)
+            cnt, idx = R(o[0]), signed(R(o[1]))
+            tgt = c.table[idx] if 0 <= idx < len(c.table) else None
+            if tgt is None:
+                self.pc += 1
+                return False
+            self.calls.append(Frame(self.addr_of(self.pc + 1), len(self.blocks), saved=list(self.blocks)))
+            self.jump_addr(tgt)
+            return False
         if op == 0x0B:                                   # repeat N { ... } (0b..0c)
             n = R(o[0]) if o else 0
             end_i = self.match_end(self.pc + 1, 0x0B, 0x0C)
@@ -977,11 +995,14 @@ class EventVM:
                 self.write(o[0], self.globals.get(G_MAP_NOW, 0))
             elif sub in (1, 2) and o:
                 self._switch_map(R(o[0]), True)
-        elif op == 0x90:
-            if sub in (6, 7) and len(o) >= 2:
+        elif op == 0x90:                                 # 画面框 (FUN_0048cb40)
+            if sub in (6, 7) and len(o) >= 2:                # 6 = 30 帧渐变到 [w,h], 7 = 立刻 (FUN_0049bfd5)
                 h.viewport(R(o[0]), R(o[1]))
-            else:
-                h.viewport(0, sub)
+            elif sub == 5:                                   # FUN_0040e271(800, 0x1c2): 800x450 宽银幕
+                h.viewport(800, 450)
+            elif sub == 4:                                   # FUN_0049bf9c: 30 帧渐变回 800x450 (DAT_0053ca38)
+                h.viewport(800, 450)
+            # 0/1/2/3 (FUN_0049bf31/be56: 640x480 的普通地图框, 战斗/切图相关) 先不管
         elif op == 0xB1:                                 # 镜头 [mode, frames, x|fc, y]
             mode = signed(R(o[0])) if o else -1
             if mode == 1 and self.local(0xCC) == 0xCA:        # 上一条 mode 1 的镜头还在跑 → 先等它
@@ -1198,15 +1219,29 @@ class EventVM:
                 h.caption(self.img.cstr(v) if self.img.in_range(v) else str(v))
             elif sub == 5:
                 h.caption(None)
-        elif op == 0xE8:
-            if sub == 0:
-                h.party("leader", R(o[0]))
-            elif sub == 8:
+        elif op == 0xE8:                                 # 队伍 (FUN_00496912)
+            if sub == 0:                                     # FUN_00499395: 保证该 FC 有对象 (入队, 不显示)
                 h.party("add", R(o[0]))
+            elif sub == 8:                                   # FUN_004998d3(mask, 1): 按位掩码重设队伍
+                mask = R(o[0])
+                members = [PARTY_SLOT_FC[i] for i in range(10) if mask >> i & 1]
+                self.globals[G_PARTY_MASK] = mask
+                for fc in members:
+                    h.party("add", fc)
+                if members:
+                    leader = self.globals.get(G_PARTY_LEADER, -1)
+                    if leader not in members:                # 原队长被踢 → 第一个成员接任 (FUN_004994d9)
+                        leader = members[0]
+                    self.globals[G_PARTY_LEADER] = leader
+                    h.party("leader", leader)
+                    h.fc_show(leader, True)                  # 末尾 FUN_00498daa(leader, 1)
             elif sub == 9:
                 h.party("remove", R(o[0]))
-            elif sub == 2:
-                h.party("swap", R(o[0]))
+            elif sub == 2:                                   # FUN_004994d9: 换队长 (新队长一定显示)
+                fc = R(o[0])
+                self.globals[G_PARTY_LEADER] = fc
+                h.party("leader", fc)
+                h.fc_show(fc, True)
         elif op == 0x81 and o:                           # 销毁句柄 (子任务 / 窗口)
             if self.scheduler is not None:
                 self.scheduler.kill(R(o[0]))
