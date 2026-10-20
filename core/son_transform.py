@@ -1067,6 +1067,8 @@ ZHUQUE_FIRE_TICKS = 128        # 火雨持续 (exe +0x80)
 ZHUQUE_FIRE_INTERVAL = 8       # 每 8 tick 落 1 颗火 (exe tick%8)
 ZHUQUE_FIRE_END_MARGIN = 30    # 结束前 0x1e tick 停撒 (exe timer-0x1e)
 ZHUQUE_FINALE_TICKS = 18       # 末尾让最后的火烧完
+SFX_ZQ_BEAST = 0x146           # 朱雀召唤音 (E158), dispatcher case 0x19
+SFX_ZQ_FIRE = 0xd7             # 每颗火雨 spawn 音 (E047), FUN_004f663a
 FIREBALL_ATLAS = 294           # ej3 帧60 = 下落火球
 FIREBALL_FRAME = 60
 FIRE_BURST_ATLAS = 309         # fire01 帧0-10 = 落地火焰爆
@@ -1117,6 +1119,7 @@ def _spawn_fireball(battle, cx, cy) -> None:
     e.user_data['projectile'] = True
     e.user_data['fire'] = True
     e.user_data['battle'] = battle
+    _sfx(battle, SFX_ZQ_FIRE)                 # exe FUN_004f663a 每颗火 spawn 播 0xd7
 
 
 def zhuque_beast_think(e: "Entity", eng: "Engine") -> None:
@@ -1155,6 +1158,7 @@ def spawn_zhuque_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     """朱雀: 红凤凰落到中心悬空 + 火雨 + AOE 伤害 + 升空."""
     coord.user_data['eson_done'] = False
     victims = _eson_collect_victims(battle, caster)
+    _sfx(battle, SFX_ZQ_BEAST)                # exe FUN_004f6985 case 0x19: 召唤朱雀播 0x146 (单次, 无 stop)
     e = battle.engine.spawn(think_fn=zhuque_beast_think)
     e.atlas_slot = atlas
     e.frame_idx = 0
@@ -1190,6 +1194,9 @@ XW_ROCK_LAND_FRAMES = {320: (1, 2, 3), 321: (1, 2, 3, 4)}   # 落地碎裂帧 (e
 XW_ROCK_HEIGHT = 220            # 落石起始高度 px (exe 0x258=600, 降以多在屏内)
 XW_ROCK_VZ = 24                 # 落石下落 px/tick (exe vz=-64)
 XW_ROCK_FRAME_TICKS = 2         # 碎裂帧 tick (exe land seq ticks=2)
+SFX_XW_COIL = 0x145             # 盘踞 seq 0x671c68 tick0 音 (E157), 每循环一次
+SFX_XW_QUAKE = 0xe3             # 地震隆隆 (E059): FUN_004d8c81 开始播, FUN_004d8ce1 停
+SFX_XW_ROCK = 0xf6              # 落石落地 (E078), FUN_004dc371
 _XW_DESCEND = 0
 _XW_COIL = 1
 _XW_RISE = 2
@@ -1197,8 +1204,8 @@ _XW_ROCK_FALL = 0
 _XW_ROCK_SHATTER = 1
 
 
-def _xw_coil(e: "Entity") -> None:
-    """玄武盘踞动画: 帧 0,1,2 各 ticks 8/8/15, 循环 (exe seq DAT_00671c68)."""
+def _xw_coil(e: "Entity") -> bool:
+    """玄武盘踞动画: 帧 0,1,2 各 ticks 8/8/15, 循环 (exe seq DAT_00671c68). 返回是否为循环首 tick."""
     ud = e.user_data
     ud['anim_tick'] += 1
     total = sum(t for _, t in XW_COIL_FRAMES)
@@ -1208,7 +1215,8 @@ def _xw_coil(e: "Entity") -> None:
         acc += ticks
         if t < acc:
             e.frame_idx = frame
-            return
+            break
+    return t == 0
 
 
 def falling_rock_think(e: "Entity", eng: "Engine") -> None:
@@ -1221,7 +1229,8 @@ def falling_rock_think(e: "Entity", eng: "Engine") -> None:
         e.z += XW_ROCK_VZ << 16
         if e.z >= 0:
             e.z = 0
-            # 落地: 受击反应 (exe -250, 无伤害, 范围攻击不转向) + 切碎裂首帧
+            # 落地: 受击反应 (exe -250, 无伤害, 范围攻击不转向) + 切碎裂首帧 + 落地音
+            _sfx(battle, SFX_XW_ROCK)
             _ql_rain_react(battle, caster, victim)
             land = XW_ROCK_LAND_FRAMES[ud['variant']]
             ud['land_frames'] = land
@@ -1277,9 +1286,12 @@ def xuanwu_beast_think(e: "Entity", eng: "Engine") -> None:
             e.z = 0
             ud['coil_tick'] = 0
             ud['rocks_spawned'] = False
+            ud['anim_tick'] = -1                 # 落地重挂 coil seq (exe FUN_00438d40 0x671c68) → 下 tick 从 0 起
+            _sfx(battle, SFX_XW_QUAKE)           # 地震开始 (exe FUN_004d8c81) 播隆隆长音
             e.state_code = _XW_COIL
     elif e.state_code == _XW_COIL:
-        _xw_coil(e)
+        if _xw_coil(e):
+            _sfx(battle, SFX_XW_COIL)            # coil seq tick0 音, 每循环 (31 tick) 一次
         # 地震: 相机每 tick 随机抖 ±AMP (exe FUN_004d8b0c)
         amp = XW_SHAKE_AMP
         battle.shake_offset = (battle.rng.randint(-amp, amp), battle.rng.randint(-amp, amp))
@@ -1292,11 +1304,13 @@ def xuanwu_beast_think(e: "Entity", eng: "Engine") -> None:
                 if v.alive:
                     _spawn_rock_fall(battle, caster, v)
         if t >= XW_COIL_TICKS:
-            battle.shake_offset = (0, 0)         # 停地震 (exe FUN_004d8ce1)
+            battle.shake_offset = (0, 0)         # 停地震 (exe FUN_004d8ce1) + 切断隆隆音
+            _sfx_stop(battle, SFX_XW_QUAKE)
             e.state_code = _XW_RISE
     elif e.state_code == _XW_RISE:
         e.z -= XW_DESCEND_VZ << 16
-        _xw_coil(e)
+        if _xw_coil(e):
+            _sfx(battle, SFX_XW_COIL)
         if (e.z >> 16) <= -XW_DESCEND_HEIGHT:
             ud['coord'].user_data['eson_done'] = True
             eng.destroy(e)
@@ -1353,19 +1367,30 @@ YT_SPARKLE_DX = 1               # 左右分开 px/tick (exe ±0x10000=±1.0)
 # 的 hit_effect) + projectile=True (seq 播完定格仍渲染). beast 追踪, 末尾统一 destroy.
 YT_HIT_INTERVAL = 2             # 每 N tick spawn 一组正常受击特效 (持续累积叠加)
 YT_REACT_INTERVAL = 10          # 弹幕期每 N tick 重戳受击反应 (~15tick, 重戳前续上 = 全程持续受击)
+SFX_YT_BEAST = 0x108            # 召唤月兔长音 (E096): case 0x19 播, 神兽完 (case 0x1e) 切断
+SFX_YT_BARRAGE = 0xd4           # 弹幕音 (E044): exe 最后 0x1e tick **每 tick** 播 (同 buffer 重启 = 连续)
+SFX_YT_COIL = ((24, 0x12a), (27, 0xa9))   # 盘踞 seq 0x671c8c tick24 播 E130, tick27 播 E001 (每循环)
 _YT_DESCEND = 0
 _YT_BARRAGE = 1
 _YT_RISE = 2
 
 
-def _yt_animate(e: "Entity") -> None:
-    """月兔盘踞: 264 帧0-9 → 265 帧0-6 循环 (跨 atlas, 每帧 3 tick)."""
+def _yt_animate(e: "Entity") -> int:
+    """月兔盘踞: 264 帧0-9 → 265 帧0-6 循环 (跨 atlas, 每帧 3 tick). 返回循环内 tick."""
     ud = e.user_data
     ud['anim_tick'] += 1
-    idx = (ud['anim_tick'] // YT_COIL_FRAME_TICKS) % len(YT_COIL)
-    atlas, frame = YT_COIL[idx]
+    loop_tick = ud['anim_tick'] % (YT_COIL_FRAME_TICKS * len(YT_COIL))
+    atlas, frame = YT_COIL[loop_tick // YT_COIL_FRAME_TICKS]
     e.atlas_slot = atlas
     e.frame_idx = frame
+    return loop_tick
+
+
+def _yt_coil_sfx(battle, loop_tick: int) -> None:
+    """盘踞 seq 内嵌音效 (exe 0x671c8c 的 sound op): 每循环 tick24/27 各一次."""
+    for t, sid in SFX_YT_COIL:
+        if loop_tick == t:
+            _sfx(battle, sid)
 
 
 def yuetu_sparkle_think(e: "Entity", eng: "Engine") -> None:
@@ -1450,9 +1475,10 @@ def yuetu_beast_think(e: "Entity", eng: "Engine") -> None:
         if e.z >= -(YT_HOVER_HEIGHT << 16):        # 落到悬空高度 (仍在空中)
             e.z = -(YT_HOVER_HEIGHT << 16)
             ud['hold_tick'] = 0
+            ud['anim_tick'] = -1                  # 落定重挂 coil seq (exe FUN_00438d40 0x671c8c)
             e.state_code = _YT_BARRAGE
     elif e.state_code == _YT_BARRAGE:
-        _yt_animate(e)
+        _yt_coil_sfx(battle, _yt_animate(e))
         ud['hold_tick'] += 1
         t = ud['hold_tick']
         # 最后 LEAD tick: 命中特效持续生成累积 (不消失) + 小碎屑 + **受击反应全程持续** (与特效同时).
@@ -1467,6 +1493,7 @@ def yuetu_beast_think(e: "Entity", eng: "Engine") -> None:
                 if since % YT_REACT_INTERVAL == 0:
                     combat.set_reaction(v, "hit", None)       # 受击反应 (与受击特效/星光同时, 无伤害)
                 _spawn_yuetu_sparkles(battle, v)              # 小碎屑点缀 (exe FUN_004e8192)
+            _sfx(battle, SFX_YT_BARRAGE, solo=True)           # exe 每 tick 播 0xd4 (solo = 播完再续)
         if t >= YT_HOLD_TICKS:
             # 最后一次伤害 + 累积的命中特效**全部一起消失**
             _aoe_hit_all(battle, caster, ud['victims'])
@@ -1476,7 +1503,7 @@ def yuetu_beast_think(e: "Entity", eng: "Engine") -> None:
             e.state_code = _YT_RISE
     elif e.state_code == _YT_RISE:
         e.z -= YT_DESCEND_VZ << 16
-        _yt_animate(e)
+        _yt_coil_sfx(battle, _yt_animate(e))
         if (e.z >> 16) <= -(YT_HOVER_HEIGHT + YT_DROP):
             ud['coord'].user_data['eson_done'] = True
             eng.destroy(e)
@@ -1486,6 +1513,8 @@ def spawn_yuetu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     """美丽月兔: 召唤线条魔画落中心循环绘制 + 末尾星光弹幕 + AOE 伤害 + 升空."""
     coord.user_data['eson_done'] = False
     victims = _eson_collect_victims(battle, caster)
+    _sfx(battle, SFX_YT_BEAST)                # exe case 0x19 播长音, coord 在 eson_done 时切断
+    coord.user_data['beast_sound'] = SFX_YT_BEAST
     e = battle.engine.spawn(think_fn=yuetu_beast_think)
     e.atlas_slot = atlas
     e.frame_idx = 0
@@ -1790,6 +1819,8 @@ LUANWU_BOUNCE_TURN = 0.5        # **反弹时**额外随机偏转 rad (~±29°) 
 # eson08 8 方向帧 = **从北顺时针**: 0=上(N) 1=右上 2=右(E) 3=右下 4=下(S) 5=左下 6=左(W) 7=左上.
 # (渲染逐帧辨认确认.) 帧 = 飞行速度方向的罗盘扇区, 滑板头朝飞行方向.
 _LUANWU_RUN = 240
+SFX_LUANWU_START = 0xb1         # 滑板起飞 (E009): coordinator spawn FUN_004f82c9
+SFX_LUANWU_HIT = 0xbd           # 周期全敌受击 (E021): dispatcher case -250, 每轮一次
 
 
 def _skate_frame(vx: float, vy: float) -> int:
@@ -1874,11 +1905,13 @@ def luanwu_coord_think(e: "Entity", eng: "Engine") -> None:
         cx, cy = view if view is not None else ((coord.x >> 16), (coord.y >> 16))
         for i in range(LUANWU_COUNT):
             _spawn_skateboard(battle, cx, cy, coord, idx=i)
+        _sfx(battle, SFX_LUANWU_START)
     ud['tick'] += 1
     t = ud['tick']
     if t % LUANWU_REACT_INTERVAL == 0:                    # 周期全敌受击 (滑板撞击感)
         for v in ud['victims']:
             _ql_rain_react(battle, caster, v)
+        _sfx(battle, SFX_LUANWU_HIT)                      # exe case -250: 全敌受击后播一次
     if t >= LUANWU_DURATION:                              # 结算伤害 + 滑板全销毁 + 收尾
         _aoe_hit_all(battle, caster, ud['victims'])
         coord.user_data['luanwu_done'] = True             # 滑板自毁

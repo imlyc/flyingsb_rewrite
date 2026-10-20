@@ -899,6 +899,41 @@ SKILL_COSTS: dict[int, int] = {
 SKILL_HEAL_SKILLS: set[int] = set()   # 运行时填 (= core.skills 的 治疗 + 复活)
 
 
+# ---- 技能音效 (exe 各 dispatcher 显式 FUN_00416311 / DAT_006566c0 登记; 静态表见 core.battle.exe_sounds) ----
+# 规律 (三藏神拳/無限刀/垂直斬/不敗三擊): seq 的 jump -1000/-1002/-1004 = **登记命中音** (DAT_006566c0,
+# IMPACT 时播), jump -1001/-1003/-1005 = **播挥击音**. 这里按 skill 列 (signal → sound_id).
+SKILL_SIGNAL_SOUNDS: dict[int, dict[int, int]] = {      # 播放 (FUN_00416311)
+    0x18: {-1001: 185, -1003: 183, -1005: 210},   # 三藏神拳 三段各自挥拳音
+    0x20: {-1001: 281},                           # 垂直斬 挥刀
+    0x23: {-1001: 261},                           # 破天舞 天字长成后 cdit1_g0 挥刀
+    0x24: {-1001: 260, -1003: 217, -1005: 260},   # 無限刀 (-1001 出现 3 次 = 前 3 斩各播)
+}
+SKILL_SIGNAL_HIT_SOUNDS: dict[int, dict[int, int]] = {  # 登记命中音 (DAT_006566c0 = id, IMPACT 时播)
+    0x18: {-1000: 189, -1002: 191, -1004: 205},
+    0x20: {-1000: 282},
+    0x24: {-1000: 261, -1002: 191, -1004: 261},
+}
+# dispatcher case 10 (挂 cast seq 的同一帧) 播的起手音
+SKILL_START_SOUNDS: dict[int, int] = {
+    0x21: 261,   # 赤雲波
+    0x22: 261,   # 火龍斬
+    0x23: 279,   # 破天舞
+}
+# B 类技能投射物/特效结算 (-200 → 我们的 SIG_IMPACT_2) 时播的命中音
+SKILL_IMPACT2_SOUNDS: dict[int, int] = {
+    0x22: 189,   # 火龍斬 (exe case -200 FUN_00416311(0xbd))
+}
+
+
+def skill_signal_sounds(skill_id: int | None, sig: int) -> tuple[int, int]:
+    """(播放音, 登记命中音) for 技能 seq 的 jump 信号; 没有 → -1."""
+    if skill_id is None:
+        return -1, -1
+    play = SKILL_SIGNAL_SOUNDS.get(skill_id, {}).get(sig, -1)
+    hit = SKILL_SIGNAL_HIT_SOUNDS.get(skill_id, {}).get(sig, -1)
+    return play, hit
+
+
 def _load_heal_skills() -> None:
     global SKILL_HEAL_SKILLS
     try:

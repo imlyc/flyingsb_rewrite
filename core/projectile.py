@@ -54,6 +54,11 @@ PROJ_STATE_EXPLODING = 10
 PROJ_STATE_DONE = 20
 
 
+def _sfx(battle, sound_id: int, solo: bool = False) -> None:
+    """播全局 sound_id (= exe FUN_00416311 在 spawn/think 里的显式调用). 绑定表见 core.battle.exe_sounds."""
+    battle.engine._emit('sound_play_solo' if solo else 'sound_play', None, sound_id)
+
+
 def cloudwave_think_fn(e: "Entity", eng: "Engine") -> None:
     """赤雲波 投射物 think_fn (= exe FUN_00504413 简化版).
     state 0: 抛物线物理 (vx+vy 水平匀速, vz 重力下落). z<=0 时落地, 切到爆炸状态.
@@ -69,6 +74,9 @@ def cloudwave_think_fn(e: "Entity", eng: "Engine") -> None:
             # 落地: 钳 z=0, 发 IMPACT_2 (= 让 battle signal handler 结算伤害)
             e.z = 0
             e.vx = e.vy = e.vz = 0
+            battle = e.user_data.get('battle')
+            if battle is not None:
+                _sfx(battle, 246)             # exe FUN_00504413 落地播 0xf6
             eng._signal(e, SIG_IMPACT_2)
             # 挂着陆爆炸 seq
             from core.anim_engine.bytecode import tuple_to_bytecode
@@ -116,6 +124,7 @@ def spawn_cloudwave_projectile(battle, attacker, target_tile: tuple[int, int]) -
     e.z = -SKY_DROP_HEIGHT_PX * FP_ONE       # 屏幕顶外, 上方 600 px
     e.vx = 0
     e.vy = 0
+    e.user_data['battle'] = battle           # 落地音效用
     e.vz = _compute_initial_vz(SKY_DROP_HEIGHT_PX, SKY_DROP_FLIGHT_TICKS, GRAVITY_PER_TICK)
     e.atlas_slot = 277          # edit01 (mode 0)
     e.frame_idx = 0
@@ -195,6 +204,7 @@ def _spawn_efock_burst(battle, e: "Entity") -> None:
     b.frame_idx = 0
     b.user_data['kind'] = 'hit_effect'
     battle.engine.attach_seq(b, tuple_to_bytecode(EFOCK01_EXPLOSION_SEQ))
+    _sfx(battle, 215)                   # exe FUN_004febad case 0x28: 每爆播 0xd7
 
 
 def phoenix_think_fn(e: "Entity", eng: "Engine") -> None:
@@ -277,6 +287,7 @@ def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     e.user_data['target_x'] = target_x_px * FP_ONE
     e.user_data['target_y'] = target_y_px * FP_ONE
     e.state_code = _PHOENIX_GROW       # 先原地长大 (think_fn 全手动驱动, 不挂 seq)
+    _sfx(battle, 256)                  # exe FUN_004fe964 spawn 凤凰播 0x100
     return e
 
 
@@ -285,7 +296,8 @@ def spawn_phoenix_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
 # =========================================================================
 # 无物理 (无 z 落地), 落 cursor → 播放 16 帧火龍 atlas 278 → seq 完 signal IMPACT_2 → damage.
 HUOLONG_EFFECT_SEQ: list[tuple] = [
-    ('fm', 278, 0, 1), ('fm', 278, 1, 1), ('fm', 278, 2, 1), ('fm', 278, 3, 1),
+    ('fm', 278, 0, 1), ('sound', 327, 0x0411), ('fm', 278, 1, 1), ('fm', 278, 2, 1),
+    ('sound', 221, 0x0411), ('fm', 278, 3, 1),      # exe 序列 tick1 播 0x147, tick4 播 0xdd (两条同 tick 只算 1 次)
     ('fm', 278, 4, 1), ('fm', 278, 5, 1), ('fm', 278, 6, 1), ('fm', 278, 7, 1),
     ('fm', 278, 8, 1), ('fm', 278, 9, 1), ('fm', 278, 10, 1), ('fm', 278, 11, 1),
     ('fm', 278, 12, 1), ('fm', 278, 13, 1), ('fm', 278, 14, 1), ('fm', 278, 15, 1),
@@ -372,6 +384,7 @@ CDIT1_G0_TABLE: list[list[tuple]] = [
         ('move', 0, -1, 0), ('fm', 19, 5, 3),
         ('move', 0, -1, 0), ('fm', 19, 6, 12),
         ('move', 0, -6, 0),
+        ('jump', -1000), ('jump', -1001),   # exe seq 蓄力后信号: 破天舞 dispatcher -1001 播挥刀音 0x105
         ('fm', 19, 7, 2), ('move', 0, -6, 0),
         ('fm', 19, 8, 3), ('move', 0, -6, 0),
         ('impact',),
@@ -391,6 +404,7 @@ CDIT1_G0_TABLE: list[list[tuple]] = [
         ('move', 0, 1, 0), ('fm', 19, 17, 3),
         ('move', 0, 1, 0), ('fm', 19, 18, 12),
         ('move', 0, 6, 0),
+        ('jump', -1000), ('jump', -1001),   # exe seq 蓄力后信号: 破天舞 dispatcher -1001 播挥刀音 0x105
         ('fm', 19, 19, 2), ('move', 0, 6, 0),
         ('fm', 19, 20, 3), ('move', 0, 6, 0),
         ('impact',),
@@ -410,6 +424,7 @@ CDIT1_G0_TABLE: list[list[tuple]] = [
         ('move', -2, 0, 0), ('fm', 19, 29, 3),
         ('move', -2, 0, 0), ('fm', 19, 30, 12),
         ('move', -8, 0, 0),
+        ('jump', -1000), ('jump', -1001),   # exe seq 蓄力后信号: 破天舞 dispatcher -1001 播挥刀音 0x105
         ('fm', 19, 31, 2), ('move', -8, 0, 0),
         ('fm', 19, 32, 3), ('move', -8, 0, 0),
         ('impact',),
@@ -429,6 +444,7 @@ CDIT1_G0_TABLE: list[list[tuple]] = [
         ('move', 2, 0, 0), ('fm', 19, 41, 3),
         ('move', 2, 0, 0), ('fm', 19, 42, 12),
         ('move', 8, 0, 0),
+        ('jump', -1000), ('jump', -1001),   # exe seq 蓄力后信号: 破天舞 dispatcher -1001 播挥刀音 0x105
         ('fm', 19, 43, 2), ('move', 8, 0, 0),
         ('fm', 19, 44, 3), ('move', 8, 0, 0),
         ('impact',),
@@ -684,4 +700,5 @@ def spawn_potian_effects(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     # 破天舞命中不放 ef010/et00 受击特效 (视觉只有天字斩开+爆炸); 结算后清除
     attacker.suppress_hit_fx = True
     coord.state_code = _POTIAN_PHASE_SECONDARY
+    _sfx(battle, 280)                        # exe FUN_005052aa case -100: 天字 spawn 完播 0x118
     return coord

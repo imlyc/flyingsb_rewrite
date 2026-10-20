@@ -194,6 +194,13 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         attacker.pending_draw_signal = -1000
     else:
         battle.engine.swing_sound = -1
+        if skill_id is not None:
+            # 技能起手音 (exe dispatcher case 10 挂 cast seq 时 FUN_00416311); 挥击/命中音走 seq 信号
+            # (core.skill_seq.SKILL_SIGNAL_SOUNDS, tactics._on_anim_signal 路由).
+            from core.skill_seq import SKILL_START_SOUNDS
+            snd = SKILL_START_SOUNDS.get(skill_id, -1)
+            if snd >= 0:
+                battle.engine._emit('sound_play', None, snd)
     attacker.pending_attack_target = defender
     attacker.pending_attack_skill = skill_id is not None
     attacker.pending_skill_id = skill_id
@@ -303,6 +310,7 @@ def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
         healed = t.hp - before
         battle.damage_events.append(DamageEvent(healed, t.hp, t.x, t.y, heal=True))
         _emit_life_fire_effect(battle, t)
+        battle.engine._emit('sound_play', None, 301)    # exe FUN_004fe111 case -210: 每 victim 回血数字旁播 0x12d
         battle._log(f"{attacker.name} → {t.name}: 回复 {healed} HP ({t.hp}/{t.max_hp})")
 
 
@@ -317,6 +325,7 @@ def _emit_life_fire_effect(battle: "TacticsBattle", target: BattleUnit) -> None:
     e.user_data['kind'] = 'hit_effect'
     seq = [('fm', 299, i, 3) for i in range(8)] + [('exit',)]
     battle.engine.attach_seq(e, tuple_to_bytecode(seq))
+    battle.engine._emit('sound_play', None, 299)        # exe FUN_004fdfbf: esum1 burst spawn 播 0x12b
 
 
 def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit,

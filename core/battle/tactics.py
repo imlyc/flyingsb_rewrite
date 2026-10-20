@@ -114,6 +114,11 @@ class TacticsBattle:
             # entity (没 'unit' user_data), 但当前 pending attacker 还是 caster.
             caster = self._find_pending_attacker()
             if caster is not None:
+                # B 类技能落地命中音 (exe dispatcher case -200 显式播, e.g. 火龍斬 0xbd)
+                from core.skill_seq import SKILL_IMPACT2_SOUNDS
+                snd = SKILL_IMPACT2_SOUNDS.get(caster.pending_skill_id, -1)
+                if snd >= 0:
+                    self.engine._emit('sound_play', source_entity, snd)
                 # 让 apply_pending_attack 走最终结算分支: 把 count 提到 total 之上, 强制 last
                 caster.pending_impact_count = caster.pending_impact_total - 1
                 # 临时清 skill_id 让 has_impact_spawn 检查失败 (= 不再 spawn 第 2 个投射物)
@@ -127,6 +132,16 @@ class TacticsBattle:
         unit = source_entity.user_data.get('unit')
         if unit is None:
             return
+        # 技能 seq 专属信号 (jump -1000..-1005): exe dispatcher 在这些 case 播挥击音 / 登记命中音
+        # (DAT_006566c0 → engine.swing_sound, IMPACT 时播). 表见 core.skill_seq.SKILL_SIGNAL_*.
+        # 放在 coord 拦截之前: 破天舞 cdit1_g0 挥刀的 -1001 也要播 (coord 只吞 IMPACT/END).
+        if sig <= -1000 and unit.pending_skill_id is not None:
+            from core.skill_seq import skill_signal_sounds
+            play, hit = skill_signal_sounds(unit.pending_skill_id, sig)
+            if play >= 0:
+                self.engine._emit('sound_play', source_entity, play)
+            if hit >= 0:
+                self.engine.swing_sound = hit
         # 破天舞 PHASE_CASTER_DASH 期间, caster.entity 跑 cdit1_g0 的 'impact'/'end' 不走
         # 常规结算流程, 而是转发给 coord (coord 控制何时真正 SIG_IMPACT_2 + damage + END).
         coord = unit.pending_caster_coord
