@@ -238,7 +238,10 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     # 回血技能 (生命之火): IMPACT 时给 target 友军回 HP, 不走伤害路径.
     sid = attacker.pending_skill_id
     if sid is not None:
-        from core.skill_seq import is_heal_skill
+        from core.skill_seq import is_heal_skill, SKILL_STATUS_EFFECTS
+        if sid in SKILL_STATUS_EFFECTS:
+            _apply_status_skill(battle, attacker)
+            return
         if is_heal_skill(sid):
             _apply_heal(battle, attacker)
             return
@@ -314,6 +317,33 @@ def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
         battle._log(f"{attacker.name} → {t.name}: 回复 {healed} HP ({t.hp}/{t.max_hp})")
 
 
+def _ally_targets(battle: "TacticsBattle", attacker: BattleUnit) -> list[BattleUnit]:
+    """_pending_damage_range (or pending_attack_target) 里的我方存活单位."""
+    targets: list[BattleUnit] = []
+    dmg_tiles = getattr(battle, '_pending_damage_range', None)
+    if dmg_tiles:
+        for (x, y) in dmg_tiles:
+            t = battle.q.occupant(x, y)
+            if t is not None and t.alive and t.is_player == attacker.is_player:
+                targets.append(t)
+    else:
+        t = attacker.pending_attack_target
+        if t is not None and t.alive:
+            targets.append(t)
+    return targets
+
+
+def _apply_status_skill(battle: "TacticsBattle", attacker: BattleUnit) -> None:
+    """状态类技能 (斗轉星移/返荷杖...): 给范围内我方加状态位 + 回合计数 (exe FUN_004a6efe skill switch)."""
+    from core.skill_seq import SKILL_STATUS_EFFECTS
+    from core.battle.status import apply_status
+    from core.skills import get_skill_name
+    bit, turns = SKILL_STATUS_EFFECTS[attacker.pending_skill_id]
+    for t in _ally_targets(battle, attacker):
+        apply_status(t, bit, turns)
+        battle._log(f"{attacker.name} → {t.name}: {get_skill_name(attacker.pending_skill_id)} 生效")
+
+
 def _emit_life_fire_effect(battle: "TacticsBattle", target: BattleUnit) -> None:
     """生命之火 esum1 (atlas 299) burst 在 target 头顶 (8 帧)."""
     from core.anim_engine.bytecode import tuple_to_bytecode
@@ -332,14 +362,26 @@ def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: Batt
                      face_attacker: bool = True) -> None:
     """对单个 target roll miss/hit + 损伤 + 反应动画. 抽出来给 AoE 多目标循环用.
     face_attacker=False (范围/召唤技能): 受击保持原朝向不转向."""
-    if battle.rng.random() < miss_chance(attacker, target):
+    from core.battle.status import has_status, ST_DOUZHUAN, ST_FANHE
+    reflect = has_status(target, ST_FANHE)
+    # exe: 受击方有返荷杖时命中判定强制为命中 (bVar9), 反弹才有机会结算
+    if not reflect and battle.rng.random() < miss_chance(attacker, target):
         battle.damage_events.append(DamageEvent(0, target.hp, target.x, target.y, miss=True))
         set_reaction(target, "dodge", attacker if face_attacker else None)
         battle._log(f"{attacker.name} → {target.name}: MISS (闪避)")
-    else:
-        raw = attacker.attack - target.defence + battle.rng.randint(-5, 5)
-        dmg = max(1, raw)
-        apply_damage(battle, attacker, target, dmg, "", face_attacker=face_attacker)
+        return
+    raw = attacker.attack - target.defence + battle.rng.randint(-5, 5)
+    dmg = max(1, raw)
+    if has_status(target, ST_DOUZHUAN):
+        # 斗轉星移: 伤害归零 (exe: local_238=0, 仍走命中流程, 飘 0)
+        dmg = 0
+    if reflect:
+        # 返荷杖: 本人伤害归零, 攻击者扣 "攻击者攻击力" (exe local_250 = 攻击方攻击力, 非伤害的一半)
+        apply_damage(battle, attacker, target, 0, "", face_attacker=face_attacker)
+        apply_damage(battle, target, attacker, max(0, attacker.attack), "返荷")
+        return
+    apply_damage(battle, attacker, target, dmg, "无效" if dmg == 0 and raw > 0 else "",
+                 face_attacker=face_attacker)
 
 
 def clear_pending_attack(attacker: BattleUnit) -> None:
@@ -360,11 +402,4 @@ def clear_pending_attack(attacker: BattleUnit) -> None:
 
 # 兼容旧 API: 立即结算 (测试 / 必杀沿用)
 def strike(battle: "TacticsBattle", attacker: BattleUnit, defender: BattleUnit) -> None:
-    if battle.rng.random() < miss_chance(attacker, defender):
-        battle.damage_events.append(DamageEvent(0, defender.hp, defender.x, defender.y, miss=True))
-        set_reaction(defender, "dodge", attacker)
-        battle._log(f"{attacker.name} → {defender.name}: MISS (闪避)")
-        return
-    raw = attacker.attack - defender.defence + battle.rng.randint(-5, 5)
-    dmg = max(1, raw)
-    apply_damage(battle, attacker, defender, dmg, "")
+    _roll_damage_one(battle, attacker, defender)

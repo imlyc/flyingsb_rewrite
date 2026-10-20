@@ -807,6 +807,27 @@ SKILL_SON_DAJINGANG: list[list[tuple]] = [_SON_CAST_DAJINGANG] * 4
 
 
 # skill_id → 4-direction seq table
+# ============================================================
+# 沙悟净 2 技能 (skill_id 0x1e 斗轉星移 / 0x1f 返荷杖): dispatcher FUN_00503e6d / FUN_00503f17 (2026-10-20 逆向).
+# 两者共用同一条 cast seq @0x67603c, **不分方向** (直接 attach, 不按 facing 查表): mode2 idle 槽 5
+# = ps_CSAO05 (3×2 = 6 帧结印姿) 0→5→0 两遍, 每帧 4 tick, 两处 jump -1000 各播一次技能音
+# (斗轉 0x137=311 / 返荷 0xb6=182). seq 原本以 exit 结束 (dispatcher state 10 等播完就收尾);
+# 我们补 impact+end: impact 时给自己加状态 (exe 在技能结算函数 FUN_004a6efe 里加, 见 core.battle.status), end 收尾.
+# 无伤害/无投射物. 状态效果 + 2 回合计数见 SKILL_STATUS_EFFECTS.
+_SAO_CAST_FRAMES = (0, 1, -1000, 2, 3, 4, 5, 4, 3, -1000, 2, 3, 4, 5, 4, 3, 2, 1, 0)
+SKILL_SAO_CAST: list[tuple] = (
+    [('jump', f) if f < 0 else ('idle', 5, f, 4) for f in _SAO_CAST_FRAMES]
+    + [('impact',), ('end',)]
+)
+SKILL_SEQS_SAO = [list(SKILL_SAO_CAST) for _ in range(4)]   # 4 方向同一条
+
+# 状态类技能: skill_id → (状态位, 回合计数) (exe FUN_004a6efe `A |= bit; nibble = n`)
+SKILL_STATUS_EFFECTS: dict[int, tuple[int, int]] = {
+    0x1e: (0x4000, 2),   # 斗轉星移: 受伤归零
+    0x1f: (0x8000, 2),   # 返荷杖: 受伤归零 + 攻击者扣其攻击力
+}
+
+
 SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x00: SKILL_SON_DAJINGANG,        # 孙悟空 大金刚 (self-cast AOE 菱r2)
     0x14: SKILL_SAM_PUMPKIN_BREAK,    # 三藏 南瓜破 (A 类)
@@ -814,6 +835,8 @@ SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x16: SKILL_SAM_THREE_HIT,        # 三藏 不败三击 (A 类 3 IMPACT)
     0x17: SKILL_SAM_PHOENIX_CAST,     # 三藏 凤凰掌 (B 类, cast + spawn phoenix)
     0x18: SKILL_SAM_GOD_FIST,         # 三藏 三藏神拳 (A 类 5 IMPACT, 3 段切换)
+    0x1e: SKILL_SEQS_SAO,             # 沙悟净 斗轉星移 (自身状态, 结印 cast)
+    0x1f: SKILL_SEQS_SAO,             # 沙悟净 返荷杖 (自身状态, 结印 cast)
     0x20: SKILL_VERTICAL_SLASH,       # 蒙面人 垂直斬
     0x21: SKILL_CAST_CDIT1_M1,        # 赤雲波 (B 类, IMPACT 时 spawn projectile, 不直接掉血)
     0x22: SKILL_CAST_CDIT1_M1,        # 火龍斬 (B 类, 共享 cast seq, IMPACT 时 spawn effect)
@@ -906,6 +929,8 @@ SKILL_SIGNAL_SOUNDS: dict[int, dict[int, int]] = {      # 播放 (FUN_00416311)
     0x14: {-1001: 169},                           # 南瓜破 (FUN_004fdf0e)
     0x16: {-1001: 185},                           # 不敗三擊 (每击前各播一次)
     0x18: {-1001: 185, -1003: 183, -1005: 210},   # 三藏神拳 三段各自挥拳音
+    0x1e: {-1000: 311},                           # 斗轉星移 (seq 两处 -1000 各播一次)
+    0x1f: {-1000: 182},                           # 返荷杖
     0x20: {-1001: 281},                           # 垂直斬 挥刀
     0x23: {-1001: 261},                           # 破天舞 天字长成后 cdit1_g0 挥刀
     0x24: {-1001: 260, -1003: 217, -1005: 260},   # 無限刀 (-1001 出现 3 次 = 前 3 斩各播)

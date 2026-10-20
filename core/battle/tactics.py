@@ -232,6 +232,9 @@ class TacticsBattle:
 
     # ---- 回合 ----
     def _start_round(self) -> None:
+        # 状态回合递减 (exe 回合管理器 FUN_004a4f94 state 1 → FUN_004a3738, 每新回合对全体一次)
+        from core.battle.status import round_tick
+        round_tick(self.all_units)
         self._turn_order = sorted(self.alive_units, key=lambda u: -u.agile)
         for u in self._turn_order:
             u.has_acted = False
@@ -496,9 +499,10 @@ class TacticsBattle:
             return False
         u = self.current
         from core.skill_seq import is_heal_skill
-        heal = is_heal_skill(self.aim_skill_id)
+        from core.skill_table import skill_targets_allies
+        # 回复/状态类技能 (exe SKILL 表 flags 0x01000000) 选友军 (is_player 相同); 攻击技能选敌人.
+        heal = is_heal_skill(self.aim_skill_id) or skill_targets_allies(self.aim_skill_id)
         dmg_tiles = self.damage_range(self.aim_cursor)
-        # heal 技能选友军 (is_player 相同); 攻击技能选敌人.
         targets = []
         for (x, y) in dmg_tiles:
             occ = self.q.occupant(x, y)
