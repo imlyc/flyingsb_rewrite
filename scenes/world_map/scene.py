@@ -51,7 +51,10 @@ WORLD_SELECT_HUBS = {"T_LOC0_P"}
 ENABLE_OVERLAY = True
 
 # HUD: 固定三行 (①状态 ②剧情 ③按键提示), 避免右对齐内容与长文本叠字
-HUD_H = 84
+HUD_H = 60                        # = 640x480 框上方的黑边高度 (两行小字), 按键提示放下方黑边
+# 原版普通地图的画面框 (90.02/03 → FUN_0049bf31: DAT_0053ca30/34 = 640x480, 在 800x600 窗口里居中, 四周黑边);
+# 镜头按这个框夹紧 (FUN_004b19d5: 框不越过地图最外一圈瓦片, 框比地图还大就定地图正中)
+VIEW_W, VIEW_H = 640, 480
 HUD_KEYS = ("[空格] 对话·开店    [M] 地图    [I] 背包    [ESC] 菜单    "
             "F1 枢纽    F2 世界    T 剧本")
 
@@ -434,29 +437,37 @@ class WorldMapScene(Scene):
             self._anim.tick(dt_ms, moving=True)
 
     # ------- 渲染 -------
-    def camera_offset_for(self, focus_x: int, focus_y: int) -> tuple[int, int]:
-        """让 (focus_x, focus_y) 这格在屏幕中心, 边缘夹紧."""
+    def view_rect(self) -> tuple[int, int, int, int]:
+        """画面框在窗口里的位置 (bx, by, vw, vh): 640x480 居中 (窗口更小就整个窗口)."""
         sw, sh = self.surface.get_size()
-        cx = focus_x * TILE_W + TILE_W // 2 - sw // 2
-        cy = focus_y * TILE_H + TILE_H // 2 - sh // 2
-        max_cx = self._map_w() * TILE_W - sw
-        max_cy = self._map_h() * TILE_H - sh
-        cx = max(0, min(cx, max(0, max_cx)))
-        cy = max(0, min(cy, max(0, max_cy)))
-        return cx, cy
+        vw, vh = min(VIEW_W, sw), min(VIEW_H, sh)
+        return (sw - vw) // 2, (sh - vh) // 2, vw, vh
+
+    def _cam_for(self, focus_px: float, focus_py: float) -> tuple[int, int]:
+        """让焦点在画面框中心; 框按原版规则夹在地图内 (留最外一圈瓦片), 框比地图宽就定正中.
+        返回的是"屏幕原点"对应的世界坐标 (= 框原点 - 黑边), 画图时 屏幕 = 世界 - cam."""
+        bx, by, vw, vh = self.view_rect()
+        W, H = self._map_w() * TILE_W, self._map_h() * TILE_H
+        # 原版留最外一圈瓦片不进框; 我们的地点切换会把玩家放在边缘格 (world_graph 的出口), 那时放宽到地图边
+        def axis(f: float, v: int, L: int, t: int) -> float:
+            if v < L - 2 * t:
+                lo, hi = t, L - t - v
+                if f < lo + v / 2 - t or f > hi + v / 2 + t:   # 焦点在最外圈 → 允许框贴到地图边
+                    lo, hi = 0, L - v
+                return max(lo, min(f - v / 2, hi))
+            if v <= L:
+                return (L - v) / 2
+            return max(0.0, min(f - v / 2, max(0.0, L - v)))
+        return int(axis(focus_px, vw, W, TILE_W)) - bx, int(axis(focus_py, vh, H, TILE_H)) - by
+
+    def camera_offset_for(self, focus_x: int, focus_y: int) -> tuple[int, int]:
+        """让 (focus_x, focus_y) 这格在画面框中心, 边缘夹紧."""
+        return self._cam_for(focus_x * TILE_W + TILE_W / 2, focus_y * TILE_H + TILE_H / 2)
 
     def _camera_offset(self) -> tuple[int, int]:
         # 用像素位置 (含 subpx/y) 让相机跟随平滑
-        sw, sh = self.surface.get_size()
-        focus_px = self.player_x * TILE_W + self.subpx + TILE_W / 2
-        focus_py = self.player_y * TILE_H + self.subpy + TILE_H / 2
-        cx = int(focus_px - sw / 2)
-        cy = int(focus_py - sh / 2)
-        max_cx = self._map_w() * TILE_W - sw
-        max_cy = self._map_h() * TILE_H - sh
-        cx = max(0, min(cx, max(0, max_cx)))
-        cy = max(0, min(cy, max(0, max_cy)))
-        return cx, cy
+        return self._cam_for(self.player_x * TILE_W + self.subpx + TILE_W / 2,
+                             self.player_y * TILE_H + self.subpy + TILE_H / 2)
 
     def draw_terrain(self, surface: pygame.Surface, cam_x: int, cam_y: int,
                      rows: tuple[int, int] | None = None) -> None:
@@ -928,10 +939,22 @@ class WorldMapScene(Scene):
                 if ENABLE_OVERLAY:
                     m.draw_overlay(self.surface, cx, cy, rows=(y, y + 1))
 
+        self._draw_view_bars()
         if not self._no_hud:
             self._draw_hud()
             if self._dbg_tile:
                 self._draw_tile_debug()
+
+    def _draw_view_bars(self) -> None:
+        """画面框外涂黑 (原版 640x480 框居中, 四周黑边)."""
+        bx, by, vw, vh = self.view_rect()
+        sw, sh = self.surface.get_size()
+        if by > 0:
+            pygame.draw.rect(self.surface, (0, 0, 0), (0, 0, sw, by))
+            pygame.draw.rect(self.surface, (0, 0, 0), (0, by + vh, sw, sh - by - vh))
+        if bx > 0:
+            pygame.draw.rect(self.surface, (0, 0, 0), (0, 0, bx, sh))
+            pygame.draw.rect(self.surface, (0, 0, 0), (bx + vw, 0, sw - bx - vw, sh))
 
     def _draw_tile_debug(self) -> None:
         """F3 调试叠加: 本格与四邻的 tile(网格A) / flag(网格B高16) / 覆盖层(低16) / 可走判定。
@@ -973,16 +996,16 @@ class WorldMapScene(Scene):
         money = self.save.money if self.save else 0
         npc = (f"角色 {self.npc_layer.dialogue_count}/{self.npc_layer.count}"
                if self.npc_layer.count else "无角色")
-        info = (f"地点: {loc}    金钱: {money}    地图: {self.location_base}    {npc}    "
-                f"位置: ({self.player_x},{self.player_y})    步数: {self.steps}")
-        self.surface.blit(self.font.render(info, True, self.HUD_TEXT), (10, 6))
-        party = self.font.render(f"队伍: {self.story.party_text()}", True, (200, 230, 255))
-        self.surface.blit(party, (sw - party.get_width() - 12, 6))
+        info = (f"地点: {loc}   金钱: {money}   地图: {self.location_base}   {npc}   "
+                f"位置: ({self.player_x},{self.player_y})   步数: {self.steps}")
+        self.surface.blit(self.small.render(info, True, self.HUD_TEXT), (10, 8))
+        party = self.small.render(f"队伍: {self.story.party_text()}", True, (200, 230, 255))
+        self.surface.blit(party, (sw - party.get_width() - 12, 8))
         self.surface.blit(
-            self.font.render(f"剧情: {self.story.progress_text()}", True, (255, 236, 130)),
+            self.small.render(f"剧情: {self.story.progress_text()}", True, (255, 236, 130)),
             (10, 32))
         keys = self.small.render(HUD_KEYS, True, (188, 188, 210))
-        self.surface.blit(keys, (sw - keys.get_width() - 12, HUD_H - 24))
+        self.surface.blit(keys, (sw - keys.get_width() - 12, sh - 50))
 
         # 面前角色的台词预告 (撞上去就播这段原版对白)
         hint = self.npc_layer.hint()
