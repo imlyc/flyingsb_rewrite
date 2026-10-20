@@ -142,6 +142,7 @@ venv/bin/python -m tools.extract_enemy_actions  # 读 exe 敌方行动表 → as
 venv/bin/python -m tools.extract_prologue       # 开场+序章对白 183 页 → assets/script/prologue.json
 venv/bin/python -m tools.extract_event_scenes   # 事件脚本的场景/角色站位 92 个 → assets/script/event_scenes.json
 venv/bin/python -m tools.extract_event_scripts  # 原版事件字节码 168 个事件 + 子脚本 → assets/script/events.json, assets/fc_tables.json
+venv/bin/python -m tools.extract_doors          # 门/机关表 409 项 (e2.00 开关门换瓦片) → assets/door_table.json
 ```
 
 - **序章演出 = 跑原版事件脚本**（`core/event_script.py` 解释器 + `core/dialog_engine.py` 气泡引擎 +
