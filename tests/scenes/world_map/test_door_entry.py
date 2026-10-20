@@ -19,12 +19,12 @@ DOORS = [(8, 13, 23), (15, 10, 24), (26, 14, 25), (34, 9, 26),
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((640, 480))
+    pygame.display.set_mode((800, 600))
     yield
 
 
 def _scene():
-    sc = WorldMapScene(pygame.Surface((640, 480)), AudioManager(), save=new_game_save())
+    sc = WorldMapScene(pygame.Surface((800, 600)), AudioManager(), save=new_game_save())
     sc.on_enter()
     sc.next_scene = None
     sc.enter_location(TOWN, auto_beat=False)

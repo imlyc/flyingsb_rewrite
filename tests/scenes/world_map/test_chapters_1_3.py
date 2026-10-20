@@ -17,7 +17,7 @@ from scenes.world_map.atlas import WorldAtlasScene
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((640, 480))
+    pygame.display.set_mode((800, 600))
     yield
 
 
@@ -66,7 +66,7 @@ def _advance_by_talk(sc: WorldMapScene, limit: int = 12) -> int:
 
 def test_chapters_1_to_3_full_flow(_pygame):
     save = new_game_save()
-    sc = WorldMapScene(pygame.Surface((640, 480)), AudioManager(), save)
+    sc = WorldMapScene(pygame.Surface((800, 600)), AudioManager(), save)
     sc.on_enter()
 
     # 开篇: 序章 + 第1章小森林 (无地点约束, 自动串播)

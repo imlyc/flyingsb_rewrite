@@ -12,12 +12,12 @@ from scenes.world_map.atlas import WorldAtlasScene, load_locations, load_markers
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((640, 480))
+    pygame.display.set_mode((800, 600))
     yield
 
 
 def _make(world, save):
-    return WorldAtlasScene(pygame.Surface((640, 480)), world)
+    return WorldAtlasScene(pygame.Surface((800, 600)), world)
 
 
 def _world_with(save):
@@ -97,7 +97,7 @@ def test_enter_location_marks_visited(_pygame):
     from core.save_manager import new_game_save
     from scenes.world_map.scene import WorldMapScene
     save = new_game_save()
-    sc = WorldMapScene(pygame.Surface((640, 480)), AudioManager(), save=save)
+    sc = WorldMapScene(pygame.Surface((800, 600)), AudioManager(), save=save)
     sc.on_enter()
     assert sc.enter_location("TFI0___P")
     assert 22 in save.world_visited

@@ -58,7 +58,7 @@ def test_dialogue_renders_portrait_without_crash():
     """带立绘的对白能画出来 (原版立绘优先于角色精灵)."""
     from scenes.dialogue import DialogueScene
     pygame.init()
-    surf = pygame.Surface((640, 480))
+    surf = pygame.Surface((800, 600))
     msgs = _beat("c3_masked").messages()
     hit = next(m for m in msgs if m.get("portraits"))
     ds = DialogueScene(surf, messages=[hit], title="t")

@@ -56,7 +56,7 @@ def test_launching_beat_switches_bgm():
             pass
 
     pygame.init()
-    sc = WorldMapScene(pygame.Surface((640, 480)), FakeAudio(), save=new_game_save())
+    sc = WorldMapScene(pygame.Surface((800, 600)), FakeAudio(), save=new_game_save())
     sc.on_enter()
     sc.enter_location("TOH0_00P")
     sc.next_scene = None

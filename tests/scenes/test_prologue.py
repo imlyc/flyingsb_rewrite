@@ -50,7 +50,7 @@ def test_director_plays_event0_then_esc_returns():
     """新序章 = 跑原版事件脚本: 第 0 事件在天界 (地图 469) 摆出樂神/孫悟空, 出气泡; ESC 跳过回世界图."""
     from scenes.prologue import PrologueScene
     pygame.init()
-    surf = pygame.display.set_mode((640, 480))
+    surf = pygame.display.set_mode((800, 600))
     ret = _Return(surf)
     closed = []
     pro = PrologueScene(surf, return_scene=ret, on_close=lambda: closed.append(1))
@@ -74,7 +74,7 @@ def test_director_runs_whole_prologue_headless():
     """整条链 ev0→ev9 无头跑完: 换 7 张图, 自动回到世界图 (不按键, 气泡按事件模式自动翻页)."""
     from scenes.prologue import PrologueScene
     pygame.init()
-    surf = pygame.display.set_mode((640, 480))
+    surf = pygame.display.set_mode((800, 600))
     ret = _Return(surf)
     pro = PrologueScene(surf, return_scene=ret)
     pro.on_enter()
@@ -96,7 +96,7 @@ def test_shift_fast_forward_skips_waits_and_tweens():
     if not available():
         pytest.skip("缺序章数据")
     pygame.init()
-    surf = pygame.display.set_mode((640, 480))
+    surf = pygame.display.set_mode((800, 600))
 
     def run(fast: bool, limit: int) -> int:
         set_fast(fast)

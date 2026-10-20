@@ -51,8 +51,9 @@ WORLD_SELECT_HUBS = {"T_LOC0_P"}
 ENABLE_OVERLAY = True
 
 # HUD: 固定三行 (①状态 ②剧情 ③按键提示), 避免右对齐内容与长文本叠字
-HUD_H = 64
-HUD_KEYS = "空格 对话  M 地图  I 背包  ESC 菜单  F1 枢纽  F2 世界  T 剧本"
+HUD_H = 84
+HUD_KEYS = ("[空格] 对话·开店    [M] 地图    [I] 背包    [ESC] 菜单    "
+            "F1 枢纽    F2 世界    T 剧本")
 
 # ---- 原版交互音效 (全局 sound_id, 见 core.sound_table / assets/audio_extracted) ----
 # id 0..167 = se_event (事件/语音), 168..360 = 战斗音效 ef_E*.wav
@@ -972,16 +973,16 @@ class WorldMapScene(Scene):
         money = self.save.money if self.save else 0
         npc = (f"角色 {self.npc_layer.dialogue_count}/{self.npc_layer.count}"
                if self.npc_layer.count else "无角色")
-        # 640 宽: 第一行 地点/金钱/位置 + 队伍(右对齐, 小字); 第二行 剧情(小字); 第三行 按键提示(小字, 右对齐)
-        info = f"{loc}  金 {money}  ({self.player_x},{self.player_y})  {npc}"
-        self.surface.blit(self.small.render(info, True, self.HUD_TEXT), (8, 4))
-        party = self.small.render(f"队伍 {self.story.party_text()}", True, (200, 230, 255))
-        self.surface.blit(party, (sw - party.get_width() - 8, 4))
+        info = (f"地点: {loc}    金钱: {money}    地图: {self.location_base}    {npc}    "
+                f"位置: ({self.player_x},{self.player_y})    步数: {self.steps}")
+        self.surface.blit(self.font.render(info, True, self.HUD_TEXT), (10, 6))
+        party = self.font.render(f"队伍: {self.story.party_text()}", True, (200, 230, 255))
+        self.surface.blit(party, (sw - party.get_width() - 12, 6))
         self.surface.blit(
-            self.small.render(f"剧情 {self.story.progress_text()}", True, (255, 236, 130)),
-            (8, 24))
+            self.font.render(f"剧情: {self.story.progress_text()}", True, (255, 236, 130)),
+            (10, 32))
         keys = self.small.render(HUD_KEYS, True, (188, 188, 210))
-        self.surface.blit(keys, (sw - keys.get_width() - 8, HUD_H - 20))
+        self.surface.blit(keys, (sw - keys.get_width() - 12, HUD_H - 24))
 
         # 面前角色的台词预告 (撞上去就播这段原版对白)
         hint = self.npc_layer.hint()

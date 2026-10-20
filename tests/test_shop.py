@@ -12,7 +12,7 @@ from core.prices import buy_price, sell_price
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((640, 480))
+    pygame.display.set_mode((800, 600))
     yield
 
 
@@ -20,7 +20,7 @@ def _scene(base="TAS0_09P", money=100000):
     from scenes.shop import ShopScene
     save = new_game_save()
     save.money = money
-    return ShopScene(pygame.Surface((640, 480)), None, base, save), save
+    return ShopScene(pygame.Surface((800, 600)), None, base, save), save
 
 
 def _key(sc, k):

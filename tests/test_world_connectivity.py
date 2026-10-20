@@ -40,7 +40,7 @@ def test_five_fingers_gate_declared():
 
 def _make_scene():
     pygame.init()
-    surf = pygame.Surface((640, 480))
+    surf = pygame.Surface((800, 600))
     from core.audio_manager import AudioManager
     scene = WorldMapScene(surf, AudioManager(), save=new_game_save())
     scene.on_enter()

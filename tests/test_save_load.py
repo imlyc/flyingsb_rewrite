@@ -12,7 +12,7 @@ from core.save_manager import new_game_save
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((640, 480))
+    pygame.display.set_mode((800, 600))
     yield
 
 
@@ -28,7 +28,7 @@ def _world(items=((128, 1),)):
     save = new_game_save()
     for iid, n in items:
         save.inventory.add(iid, n)
-    sc = WorldMapScene(pygame.Surface((640, 480)), AudioManager(), save=save)
+    sc = WorldMapScene(pygame.Surface((800, 600)), AudioManager(), save=save)
     sc.on_enter()
     sc.next_scene = None
     return sc
@@ -71,7 +71,7 @@ def test_loaded_world_scene_rebuilds(_pygame, tmp_saves):
     data = game_save.load_game(1)
     from scenes.pause import PauseScene
     from core.audio_manager import AudioManager
-    pause = PauseScene(pygame.Surface((640, 480)), None, AudioManager(), mode="load")
+    pause = PauseScene(pygame.Surface((800, 600)), None, AudioManager(), mode="load")
     new_scene = pause._build_world(data)
     assert new_scene.location_base == "TFI0___P"
     assert (new_scene.player_x, new_scene.player_y) == (20, 21)
@@ -84,7 +84,7 @@ def test_pause_menu_save_and_escape(_pygame, tmp_saves):
     sc.enter_location("TBB0___P", auto_beat=False)
     sc.next_scene = None
     from scenes.pause import PauseScene
-    pause = PauseScene(pygame.Surface((640, 480)), sc, sc.audio)
+    pause = PauseScene(pygame.Surface((800, 600)), sc, sc.audio)
     pause.draw()
     # 选中"保存存档" → Enter 进槽位界面
     pause.cursor = pause._items().index("保存存档")
@@ -109,7 +109,7 @@ def test_pause_menu_has_inventory(_pygame, tmp_saves):
     sc.enter_location("TBB0___P", auto_beat=False)
     sc.next_scene = None
     from scenes.pause import PauseScene
-    pause = PauseScene(pygame.Surface((640, 480)), sc, sc.audio)
+    pause = PauseScene(pygame.Surface((800, 600)), sc, sc.audio)
     assert "背包物品" in pause._items()
     pause.cursor = pause._items().index("背包物品")
     pause.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))

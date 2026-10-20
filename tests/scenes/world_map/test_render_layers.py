@@ -50,7 +50,7 @@ def test_draw_is_row_interleaved(_pygame):
     from core.save_manager import new_game_save
     from scenes.world_map.scene import WorldMapScene
 
-    surf = pygame.Surface((640, 480))
+    surf = pygame.Surface((800, 600))
     sc = WorldMapScene(surf, AudioManager(), new_game_save())
     sc.on_enter(); sc.next_scene = None
     assert sc.enter_location("TFI0___P", spawn=(23, 24), auto_beat=False)   # 木桥中段
