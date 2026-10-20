@@ -65,6 +65,7 @@ class Actor:
         self.frame = 6                    # 帧号 (图集内 row*cols+col / fm 组内序号)
         self.motion = None                # 跳/飞补间: dict(kind, t, n, ...)
         self.spawned = False
+        self.reserved: tuple[int, int] | None = None   # 正在走的那一步的目标格 (原版起步时就占格, 别人不能再进)
 
     @property
     def tx(self) -> int:
@@ -79,6 +80,7 @@ class Actor:
         self.py = y * TILE_H + TILE_H / 2
         self.motion = None
         self.off_ticks = 0
+        self.reserved = None
         if 0 <= z <= 1:
             self.z = z
         if 0 <= d <= 7:
@@ -481,9 +483,15 @@ class PrologueScene(Scene, EventHost):
 
     def fc_step(self, fc: int, d: int) -> int:
         a = self._actor(fc)
-        ok, z, _, _ = self._can_step(a.tx, a.ty, a.z, d)
+        ok, z, nx, ny = self._can_step(a.tx, a.ty, a.z, d)
         if not ok:
             return 0
+        # 原版 40.00 → FUN_004b4f56: 目标格在占格表 DAT_00810118 里标了 0x10000 (任何可见对象站着/正要走进去) 就挡,
+        # 挡住的那步原地踏步. ev4 里迪特被美娜挡在 (6,6), 美娜的 <WALK6> 也进不了迪特那格.
+        for h, o in self.actors.items():
+            if h != fc and o.visible and o.z == z and (nx, ny) in ((o.tx, o.ty), o.reserved):
+                return 0
+        a.reserved = (nx, ny)
         code = (d << 8) | 1
         if z > a.z:
             code |= 4
@@ -541,8 +549,12 @@ class PrologueScene(Scene, EventHost):
         goal = (x, y)
         if (sx, sy) == goal:
             return [face | 0x100] if 0 <= face <= 7 else []
-        blocked = {(o.tx, o.ty) for h, o in self.actors.items()
-                   if h != fc and o.visible and o.z == sz and (o.tx, o.ty) != goal}
+        blocked = set()
+        for h, o in self.actors.items():
+            if h != fc and o.visible and o.z == sz:
+                for t in ((o.tx, o.ty), o.reserved):
+                    if t is not None and t != goal:
+                        blocked.add(t)
         from collections import deque
         back = {0: 1, 1: 0, 2: 3, 3: 2}
         dist: dict[tuple[int, int], int] = {goal: 0}
