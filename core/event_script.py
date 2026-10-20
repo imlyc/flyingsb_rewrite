@@ -686,13 +686,15 @@ class EventVM:
             self.host.fc_show(leader, True)
 
     def _wait_or_store(self, mode: int, hd: int, o0) -> bool:
-        """44/46/47 类: mode -1 不管; 0 → 0xd0; 1 → 0xcc (下次同类 mode 1 指令先等它); 否则写变量."""
-        if mode == 0:
+        """44/46/47 类 (FUN_0047a959 尾部): 第 0 操作数是**变量**就把任务句柄写进去 (不看它现在的值 ——
+        02.03 等完会把它清 0, 下次再用同一变量时值是 0, 不能当成 mode 0);
+        是立即数才按 mode: -1 不管; 0 → 0xd0; 1 → 0xcc (下次同类 mode 1 指令先等它)."""
+        if o0 is not None and o0.kind == "var":
+            self.write(o0, hd)
+        elif mode == 0:
             self.set_local(0xD0, hd)
         elif mode == 1:
             self.set_local(0xCC, hd)
-        elif mode != -1 and mode != 0xFFFFFFFF and o0 is not None and o0.kind == "var":
-            self.write(o0, hd)
         return False
 
     # ---- 指令 ----

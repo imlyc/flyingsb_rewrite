@@ -524,12 +524,13 @@ class PrologueScene(Scene, EventHost):
     def fc_path(self, fc: int, x: int, y: int, d: int) -> list[int]:
         """BFS 四向寻路 (原版 FUN_0049d659 是 A*; 演出里路都很短). 末尾按 d 转向."""
         a = self._actor(fc)
+        face = d                          # 到达后朝向 (下面的循环变量会覆盖 d, 别直接用)
         if self.map is None:
             return []
         start = (a.tx, a.ty, a.z)
         goal = (x, y)
         if (a.tx, a.ty) == goal:
-            return [d | 0x100] if 0 <= d <= 7 else []
+            return [face | 0x100] if 0 <= face <= 7 else []
         from collections import deque
         prev: dict[tuple, tuple] = {start: None}
         q = deque([start])
@@ -556,8 +557,8 @@ class PrologueScene(Scene, EventHost):
             steps.append(d | 0x8000)
             cur = p
         steps.reverse()
-        if 0 <= d <= 7:
-            steps.append(d | 0x100)
+        if 0 <= face <= 7:
+            steps.append(face | 0x100)
         return steps
 
     def _motion(self, a: Actor, kind: str, x1: float, y1: float, ticks: int, h: float = 0.0) -> int:
