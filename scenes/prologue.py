@@ -151,6 +151,10 @@ class PrologueScene(Scene, EventHost):
         self.fade_ticks = 0
         self.fade_total = 0
         self.fade_step = 0
+        # 硬件调色板的"非渐变"状态 (ed.04 黑板 / ed.05 白板 / 1f.00 送工作板): 盖在地图和精灵上, 气泡仍可见
+        self.pal_rgb = (0, 0, 0)
+        self.pal_alpha = 0.0
+        self.pal_work = (1.0, 0)          # ed.08 的 (a/100, b): 工作板 = 场景板×a + b
         self.caption_text: str | None = None
         self.bubbles: list[DialogTask] = []
         self._img_cache: dict[str, pygame.Surface | None] = {}
@@ -292,6 +296,10 @@ class PrologueScene(Scene, EventHost):
             self.cam = [f + (t - f) * k for f, t in zip(self.cam_from, self.cam_to)]
 
     def fade(self, target: str, frames: int, step: int = 0) -> None:
+        # 硬件板当前若是 ed/1f 送上去的黑/白/暗板, 渐变从它开始 (ev0 开头 ed.04 黑 → ee.10 淡入)
+        if self.pal_alpha > self.fade_alpha:
+            self.fade_alpha, self.fade_rgb = self.pal_alpha, self.pal_rgb
+        self.pal_alpha = 0.0
         if target == "scene":
             to, rgb = 0.0, self.fade_rgb
         else:
@@ -315,14 +323,32 @@ class PrologueScene(Scene, EventHost):
     def wait_fade(self) -> bool:
         return self.fade_ticks > 0
 
-    def palette(self, kind: str) -> None:
-        if kind == "black":
-            self.fade_rgb, self.fade_alpha, self.fade_ticks = (0, 0, 0), 255.0, 0
-        elif kind in ("default", "restore"):
-            self.fade_alpha, self.fade_ticks = 0.0, 0
+    def _set_pal(self, rgb: tuple[int, int, int], alpha: float) -> None:
+        self.pal_rgb, self.pal_alpha = rgb, alpha
+        self.fade_alpha, self.fade_ticks = 0.0, 0          # 送板 = 硬件板立刻换掉, 渐变作废
+
+    def palette(self, kind: str, *args: int) -> None:
+        if kind == "apply":                      # ed.00 场景板送硬件 → 画面正常
+            self._set_pal((0, 0, 0), 0.0)
+        elif kind == "black":                    # ed.04 黑板
+            self._set_pal((0, 0, 0), 255.0)
+        elif kind == "white":                    # ed.05 白板
+            self._set_pal((255, 255, 255), 255.0)
+        elif kind == "store":                    # ed.01 工作板 ← 场景板
+            self.pal_work = (1.0, 0)
+        elif kind == "blend" and len(args) >= 2:  # ed.08 [a, b]: 工作板 = 场景板 × a/100 + b (每通道)
+            self.pal_work = (args[0] / 100.0, args[1])
 
     def native(self, fn: int, args: list[int]) -> None:
-        if fn == 0x40B0C5:                       # 渐变到自定义调色板 (序章结尾压暗): 近似为半黑
+        if fn == 0x40A342 and len(args) >= 3:   # 送一段调色板到硬件 [板, 起, 数] (ev2 梦境: 工作暗板 / 黑板)
+            buf = args[0]
+            if 0x743B58 <= buf < 0x743F58:         # 工作板: 原版送的是板内偏 16 项 (0x743b98) 到 112..255,
+                self._set_pal((0, 0, 0), 255.0)     # 地图色全黑 (Wine 实测 ev2 梦境对白时画面纯黑, 只剩气泡)
+            elif 0x53C290 <= buf < 0x53C690:       # 黑板
+                self._set_pal((0, 0, 0), 255.0)
+            elif 0x5403D4 <= buf < 0x5407D4:       # 白板
+                self._set_pal((255, 255, 255), 255.0)
+        elif fn == 0x40B0C5:                       # 渐变到自定义调色板 (序章结尾压暗): 近似为半黑
             self.fade_rgb = (0, 0, 0)
             self.fade_from, self.fade_to = self.fade_alpha, 170.0
             spd = args[3] if len(args) > 3 else 0
@@ -778,6 +804,12 @@ class PrologueScene(Scene, EventHost):
         else:
             for a in sorted(visible, key=lambda t: t.py):
                 self._draw_actor(a, cx, cy)
+        # 硬件板是黑/白/暗板 (ed.04/05, 1f.00): 盖住地图精灵, 气泡在上面照常显示
+        if self.pal_alpha > 0:
+            ov = pygame.Surface(surf.get_size())
+            ov.fill(self.pal_rgb)
+            ov.set_alpha(int(max(0, min(255, self.pal_alpha))))
+            surf.blit(ov, (0, 0))
         self._draw_bubbles()
         # 调色板渐变叠层
         if self.fade_alpha > 0:

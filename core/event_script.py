@@ -410,7 +410,7 @@ class EventHost:
         self.log(f"[ev] camera {x},{y} {frames}f rel={relative}" + (f" follow fc{follow}" if follow != -1 else ""))
     def fade(self, target: str, frames: int, step: int = 0) -> None:
         self.log(f"[ev] fade→{target} {frames}f" + (f" step{step}" if step else ""))
-    def palette(self, kind: str) -> None: self.log(f"[ev] palette {kind}")
+    def palette(self, kind: str, *args: int) -> None: self.log(f"[ev] palette {kind} {list(args)}")
     def wait_fade(self) -> bool: return False
     def caption(self, text: str | None) -> None: self.log(f"[ev] caption {text!r}")
     # 角色 (FC)
@@ -1166,9 +1166,13 @@ class EventVM:
         elif op == 0xEC:
             if h.wait_fade():
                 return True
-        elif op == 0xED:
-            h.palette({0: "save", 1: "store", 2: "restore", 3: "clear", 4: "default", 5: "black",
-                       8: "blend", 10: "tint"}.get(sub, f"ed.{sub:02x}"))
+        elif op == 0xED:                                 # 调色板 (FUN_00497711)
+            # 00 把场景调色板 0x868ac0 送硬件 (画面正常) / 01 工作板 0x743b58 ← 场景板 / 02 场景板 ← 工作板 /
+            # 03 场景板 ← 硬件 / 04 送黑板 0x53c290 (全黑) / 05 送白板 0x5403d4 / 08 [a, b] 工作板 = 场景板×a% + b
+            # (不送硬件; 之后由 1f.00 [FUN_0040a342, 板, 起, 数] 送) / 0a 取硬件部分项
+            kind = {0: "apply", 1: "store", 2: "restore", 3: "clear", 4: "black", 5: "white",
+                    8: "blend", 10: "tint"}.get(sub, f"ed.{sub:02x}")
+            h.palette(kind, *[signed(R(x)) for x in o[:2]])
         elif op == 0xEE:                                 # 调色板渐变 (FUN_0040b0c5/0040b169)
             # 0/3 → 黑 (0x53c290), 1/4 → 白 (0x5403d4), 2/5 → 白(0 号留黑), 0x10/0x11 → 场景调色板.
             # 0/1/2/0x10: 操作数 = 速度 → 线性插值 steps (负数 = 帧数, 正数 ×3/50, 至少 1), 共 steps+1 帧
