@@ -537,10 +537,10 @@ class PrologueScene(Scene, EventHost):
         self.actors.pop(handle, None)
 
     def fc_path(self, fc: int, x: int, y: int, d: int) -> list[int]:
-        """原版寻路 (FUN_0049d659 → FUN_0049d80a 从**终点**泛洪距离场, FUN_0049d1bd 从起点回溯):
-        四向, 每格按 上/下/左/右 的固定顺序取第一个距离 -1 的邻格; 别的可见演员 (同层) 占的格算障碍.
-        所以同样长度的路会贴着"上优先"走, 且会绕开站着的人 (ev2 迪特绕桌子时萊琪兒站在 (9,10), 走左列).
-        末尾按 d 转向."""
+        """原版寻路 (FUN_0049d659 → FUN_0049d80a 从**起点**泛洪距离场; FUN_0049d1bd 从**终点**回溯到起点,
+        每格按 上/下/左/右 的固定顺序取第一个距离 -1 的邻格, 最后把步子反过来). 四向.
+        泛洪时队伍角色/NPC 占的格算障碍 (flags 0x10/0x20), 58.xx 生成的对象不算.
+        (Wine 3fps 核对过: ev2 迪特从 (9,13) 先左一格再沿第 8 列上去, 就是这个"终点回溯"的结果.) 末尾按 d 转向."""
         a = self._actor(fc)
         face = d                          # 到达后朝向 (下面的循环变量会覆盖 d, 别直接用)
         if self.map is None:
@@ -551,42 +551,45 @@ class PrologueScene(Scene, EventHost):
             return [face | 0x100] if 0 <= face <= 7 else []
         blocked = set()
         for h, o in self.actors.items():
-            if h != fc and o.visible and o.z == sz:
+            if h != fc and h < 0x10000 and o.visible and o.z == sz:
                 for t in ((o.tx, o.ty), o.reserved):
                     if t is not None and t != goal:
                         blocked.add(t)
         from collections import deque
-        back = {0: 1, 1: 0, 2: 3, 3: 2}
-        dist: dict[tuple[int, int], int] = {goal: 0}
-        q = deque([goal])
-        while q:
+        dist: dict[tuple[int, int], int] = {(sx, sy): 0}
+        q = deque([(sx, sy)])
+        while q and goal not in dist:
             cx, cy = q.popleft()
             dc = dist[(cx, cy)]
-            for dd in (0, 1, 2, 3):                      # 原版泛洪顺序 上/下/左/右
+            for dd in (0, 1, 2, 3):                      # 泛洪顺序 上/下/左/右
                 nx, ny = cx + DIR_DELTA[dd][0], cy + DIR_DELTA[dd][1]
                 if (nx, ny) in dist or (nx, ny) in blocked:
                     continue
-                ok, _nz, ax, ay = self._can_step(nx, ny, sz, back[dd])   # 从邻格走回来这一步要能走
-                if not ok or (ax, ay) != (cx, cy):
+                ok, _nz, ax, ay = self._can_step(cx, cy, sz, dd)
+                if not ok or (ax, ay) != (nx, ny):
                     continue
                 dist[(nx, ny)] = dc + 1
                 q.append((nx, ny))
             if len(dist) > 4000:
                 break
-        if (sx, sy) not in dist:
+        if goal not in dist:
             return []
-        steps: list[int] = []
-        cx, cy = sx, sy
-        while (cx, cy) != goal:
+        back = {0: 1, 1: 0, 2: 3, 3: 2}
+        rev: list[int] = []
+        cx, cy = goal
+        while (cx, cy) != (sx, sy):
             cur = dist[(cx, cy)]
-            for dd in (0, 1, 2, 3):                      # 回溯也是 上/下/左/右 取第一个
+            for dd in (0, 1, 2, 3):                      # 回溯顺序 上/下/左/右, 取第一个距离 -1 的邻格
                 nx, ny = cx + DIR_DELTA[dd][0], cy + DIR_DELTA[dd][1]
                 if dist.get((nx, ny)) == cur - 1:
-                    steps.append(dd | 0x8000)
-                    cx, cy = nx, ny
-                    break
+                    ok, _nz, ax, ay = self._can_step(nx, ny, sz, back[dd])   # 真正走的方向: 邻格 → 这格
+                    if ok and (ax, ay) == (cx, cy):
+                        rev.append(back[dd] | 0x8000)
+                        cx, cy = nx, ny
+                        break
             else:
                 return []
+        steps = rev[::-1]
         if 0 <= face <= 7:
             steps.append(face | 0x100)
         return steps
