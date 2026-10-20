@@ -127,6 +127,11 @@ def make_enemy_by_type(etype: int) -> BattleUnit | None:
         exp_reward=max(0, int(e.get("exp", 0))),
         money_reward=max(0, int(e.get("money", 0))),
         sprite_key=None,
-        known_skills=list(e.get("skills", [])),
+        # enemy_table 的 skill0..3 是敌方招式表 (248 项) 下标, 以前被当成玩家技能 id 塞进 known_skills (牛魔王的
+        # 招式 0..3 变成了大金刚/青龙/白虎/酷酷猫) —— 2026-10-20 改掉: 招式进 enemy_moves, known_skills 留空
+        # (248 项敌方招式演出另做; 现在只用它配普攻音效).
+        known_skills=[],
+        enemy_moves=[int(e[k]) for k in ("skill0", "skill1", "skill2", "skill3")
+                     if 0 <= int(e.get(k, -1)) < 248],
         ai_group=max(0, int(e.get("ai_group", 0))),
     )

@@ -111,7 +111,8 @@ def test_skill_bytecode_compiles():
 
 
 def test_skill_cost():
-    assert skill_cost(0x20) == 175
+    assert skill_cost(0x20) == 150     # 垂直斬 (exe +8 字段; 175 是旧的错位值 = 0x21 的)
+    assert skill_cost(0x00) == 22      # 大金剛
     assert skill_cost(0xFF) == 0
 
 

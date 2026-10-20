@@ -185,6 +185,13 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         battle.engine.swing_sound = swing
         attacker.pending_draw_sound = draw if draw is not None else -1
         attacker.pending_draw_signal = -1000 if (cid is not None and cid < 8) else -1001
+    elif skill_id is None and attacker.enemy_moves:
+        # 敌人普攻 = 招式表第 0 项: exe 处理函数里 play 的挥击音 + 登记的命中音 (core.battle.exe_sounds)
+        from core.battle.exe_sounds import enemy_move_attack_sounds
+        draw, swing = enemy_move_attack_sounds(attacker.enemy_moves[0])
+        battle.engine.swing_sound = swing if swing >= 0 else PLAYER_MELEE_SWING_SOUND
+        attacker.pending_draw_sound = draw
+        attacker.pending_draw_signal = -1000
     else:
         battle.engine.swing_sound = -1
     attacker.pending_attack_target = defender

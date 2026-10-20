@@ -147,6 +147,9 @@ class BattleUnit:
     # 已学技能 id 列表 (顺序 = 显示顺序 = 习得顺序). 玩家创建时由 setup.py 按
     # core.skills.CHARACTER_SKILL_POOL 初始化, 敌方留空. 后续 level-up 解锁动这个字段.
     known_skills: list[int] = field(default_factory=list)
+    # 原版敌人表 skill0..3 = **敌方招式表** (assets/enemy_actions.json, 248 项) 的下标, 不是玩家技能 id;
+    # 第 0 项多为普攻 (音效由 core.battle.exe_sounds.ENEMY_MOVE_SOUNDS 给)
+    enemy_moves: list[int] = field(default_factory=list)
 
     @property
     def is_attacking(self) -> bool:
