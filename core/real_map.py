@@ -200,6 +200,15 @@ class RealMap:
         else:
             self.ts_cols_s = self.ts_rows_s = 0
         self.pcpos = self._read_pcpos()
+        # 分层卷动 (原版 FUN_004b42b0 / FUN_004b439e): 每层 [中心(格,16.16), 环绕标志, 比例(16.16), 自动速度, 计数].
+        # 载图时默认 中心=(w/2,h/2) 比例=1 → 两层跟镜头 1:1; .mfo 的 "scroll L = ..." 行覆盖 (序章云图 TCL0:
+        # 层 0 中心 (0,24) 比例 y 0.3125 = 远景云层慢速视差; 天空图 TDS5 等: 比例 0.3125 + 环绕).
+        # 活动层 (角色/镜头所在, 画在精灵间) = 地图表 flags >> 1 (FUN_004b851c: DAT_007eb554).
+        row = map_table().get(self.base) or {}
+        self.active_layer = (row.get("flags", 0) >> 1) & 1
+        self.scroll = self._read_scroll()
+        self.parallax = self.active_layer != 0 or any(
+            sc != self._default_scroll(L) for L, sc in enumerate(self.scroll))
         # "高物件"瓦片 (cell type bit0: 墙/屋顶/树/桥): 原版 FUN_004b8aa9 在画完精灵后按
         # 基线 (y + 1 + level) 行再盖一遍 → 角色在它北边就被挡住. 按基线行分组.
         # 按**角色所在层**的属性判 (FUN_004b8aa9 用 param_1=层 读 cell): 站在桥上 (层 1) 时桥格
@@ -244,6 +253,79 @@ class RealMap:
             if m:
                 out.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
         return out
+
+    def _default_scroll(self, L: int) -> dict:
+        w, h = (self.w, self.h) if L == 0 else (self.w1, self.h1)
+        return {"half": (w // 2, h // 2), "wrap": (1, 1), "scale": (1.0, 1.0), "speed": (0.0, 0.0)}
+
+    def _read_scroll(self) -> list[dict]:
+        """.mfo 的 scroll 行 → 每层卷动参数 (FUN_004b42b0 的 11 个参数顺序:
+        偏移x,y(载图后由 FUN_004b439e 重算, 忽略), 中心x,y (16.16 格), 环绕x,y (-1 = 环绕), 比例x,y (16.16),
+        自动速度x,y (16.16 像素/帧), 计数)."""
+        out = [self._default_scroll(0), self._default_scroll(1)]
+        path = MAPS_DIR / f"{self.base}.mfo"
+        if not path.exists():
+            return out
+        for line in path.read_text(encoding="cp949", errors="replace").splitlines():
+            m = re.match(r"\s*scroll\s+(\d+)\s*=\s*(.+)", line)
+            if not m:
+                continue
+            L = int(m.group(1))
+            try:
+                v = [int(t.strip(), 0) for t in m.group(2).split("//")[0].split(",")]
+            except ValueError:
+                continue
+            if L > 1 or len(v) < 10:
+                continue
+            s16 = lambda x: x - (1 << 32) if x >= 0x80000000 else x
+            out[L] = {"half": (s16(v[2]) >> 16, s16(v[3]) >> 16),
+                      "wrap": (s16(v[4]), s16(v[5])),
+                      "scale": (s16(v[6]) / 65536.0, s16(v[7]) / 65536.0),
+                      "speed": (s16(v[8]) / 65536.0, s16(v[9]) / 65536.0)}
+        return out
+
+    def layer_center(self, L: int, cam_cx: float, cam_cy: float, t: int = 0) -> tuple[float, float]:
+        """层 L 的画面中心 (像素) — FUN_004b439e: 镜头中心相对活动层中心的位移按比例缩放, 加上该层中心和自动卷动."""
+        a, sl = self.scroll[self.active_layer], self.scroll[L]
+        dx = cam_cx - a["half"][0] * TILE_W
+        dy = cam_cy - a["half"][1] * TILE_H
+        ox = sl["half"][0] * TILE_W + dx * (sl["scale"][0] / (a["scale"][0] or 1.0)) + sl["speed"][0] * t
+        oy = sl["half"][1] * TILE_H + dy * (sl["scale"][1] / (a["scale"][1] or 1.0)) + sl["speed"][1] * t
+        w, h = (self.w, self.h) if L == 0 else (self.w1, self.h1)
+        if sl["wrap"][0] == -1 and w:
+            ox %= w * TILE_W
+        if sl["wrap"][1] == -1 and h:
+            oy %= h * TILE_H
+        return ox, oy
+
+    def draw_layer(self, surface: pygame.Surface, L: int, cam_x: int, cam_y: int,
+                   rows: tuple[int, int] | None = None) -> None:
+        """只画第 L 层的瓦片, 原点 (cam_x, cam_y) 为该层自己的卷动原点 (视差时各层不同); 环绕层按模平铺."""
+        grid = self.grid if L == 0 else self.grid1
+        w, h = (self.w, self.h) if L == 0 else (self.w1, self.h1)
+        if not grid or not w or not h:
+            return
+        sc = self.scroll[L]
+        sw, sh = surface.get_size()
+        x0, x1 = cam_x // TILE_W, (cam_x + sw) // TILE_W + 1
+        y0, y1 = cam_y // TILE_H, (cam_y + sh) // TILE_H + 1
+        if sc["wrap"][0] != -1:
+            x0, x1 = max(0, x0), min(w, x1)
+        if sc["wrap"][1] != -1:
+            y0, y1 = max(0, y0), min(h, y1)
+        if rows is not None:
+            y0, y1 = max(y0, rows[0]), min(y1, rows[1])
+        ts, cols, maxt = self.tileset, self.ts_cols, self.ts_cols * self.ts_rows
+        for y in range(y0, y1):
+            row = (y % h) * w
+            for x in range(x0, x1):
+                idx = grid[row + (x % w)]
+                if idx >= maxt or (L == 1 and idx == 0):
+                    continue
+                if self.mat and idx < len(self.mat) and self.mat[idx] == MAT_EMPTY:
+                    continue
+                src = pygame.Rect((idx % cols) * TILE_W, (idx // cols) * TILE_H, TILE_W, TILE_H)
+                surface.blit(ts, (x * TILE_W - cam_x, y * TILE_H - cam_y), src)
 
     # ---- 查询 ----
     def in_bounds(self, x: int, y: int) -> bool:

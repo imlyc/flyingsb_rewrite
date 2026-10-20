@@ -158,6 +158,7 @@ class PrologueScene(Scene, EventHost):
         self._task_n = 0x30000
         self._in_runner = False
         self._acc = 0.0
+        self._frame = 0                   # 画面帧计数 (分层自动卷动用, FUN_004b439e 的 t)
         self._skip_hint = 0
         self.log_lines: list[str] = []
         # 导演
@@ -209,6 +210,7 @@ class PrologueScene(Scene, EventHost):
         while self._acc >= TICK_MS:
             self._acc -= TICK_MS
             self.step()
+            self._frame += 1
 
     def step(self) -> None:
         """跑一个原版 tick: 脚本 → 演员补间 → 镜头/渐变."""
@@ -695,13 +697,41 @@ class PrologueScene(Scene, EventHost):
         r = pygame.Rect((f % cols) * fw, (f // cols) * fh, fw, fh)
         return img.subsurface(r), ax, ay
 
+    def _cam_center(self) -> tuple[float, float]:
+        """镜头中心 (像素), 按原版 FUN_004b19d5 夹到地图内: 视口 (非整个窗口) 不得越过第 0 层最外一圈瓦片;
+        视口比地图 (去掉一圈) 还宽就定在地图正中."""
+        sw, sh = self.surface.get_size()
+        vw, vh = (min(self.view[0], sw), min(self.view[1], sh)) if self.view else (sw, sh)
+        cx, cy = self.cam
+        m = self.map
+        if m is not None:
+            W, H = m.w * TILE_W, m.h * TILE_H
+            if vw < W - 2 * TILE_W:
+                ox = cx - vw // 2
+                shift = 0
+                if ox < TILE_W:
+                    shift += TILE_W - ox
+                if ox + vw >= W - TILE_W:
+                    shift -= (ox + vw) - (W - TILE_W) + 1
+                cx += shift
+            else:
+                cx = W / 2
+            if vh < H - 2 * TILE_H:
+                oy = cy - vh // 2
+                shift = 0
+                if oy < TILE_H:
+                    shift += TILE_H - oy
+                if oy + vh >= H - TILE_H:
+                    shift -= (oy + vh) - (H - TILE_H) + 1
+                cy += shift
+            else:
+                cy = H / 2
+        return cx, cy
+
     def _cam_origin(self) -> tuple[int, int]:
         sw, sh = self.surface.get_size()
-        cx, cy = self.cam[0] - sw / 2, self.cam[1] - sh / 2
-        if self.map is not None:
-            cx = max(0, min(cx, max(0, self.map.w * TILE_W - sw)))
-            cy = max(0, min(cy, max(0, self.map.h * TILE_H - sh)))
-        return int(cx), int(cy)
+        cx, cy = self._cam_center()
+        return int(cx - sw / 2), int(cy - sh / 2)
 
     def _screen_pos(self, a: Actor) -> tuple[float, float]:
         cx, cy = self._cam_origin()
@@ -717,7 +747,25 @@ class PrologueScene(Scene, EventHost):
         by_row: dict[int, list[Actor]] = {}
         for a in visible:
             by_row.setdefault(int((a.py + a.off[1]) // TILE_H), []).append(a)
-        if m is not None:
+        if m is not None and m.parallax:
+            # 分层卷动 (序章云图): 非活动层按各自视差原点整张画在底下, 活动层按行与精灵交错
+            sw = surf.get_width()
+            ccx, ccy = self._cam_center()
+            act = m.active_layer
+            for L in (0, 1):
+                if L != act:
+                    ox, oy = m.layer_center(L, ccx, ccy, self._frame)
+                    m.draw_layer(surf, L, int(ox - sw / 2), int(oy - sh / 2))
+            y0 = max(0, cy // TILE_H)
+            y1 = min(m.h, (cy + sh) // TILE_H + 1)
+            lead_z = act
+            for y in range(y0, y1):
+                m.draw_layer(surf, act, cx, cy, rows=(y, y + 1))
+                for a in sorted(by_row.get(y, ()), key=lambda t: t.py):
+                    self._draw_actor(a, cx, cy)
+                    lead_z = a.z
+                m.draw_tall(surf, cx, cy, y, lead_z)
+        elif m is not None:
             y0 = max(0, cy // TILE_H)
             y1 = min(m.h, (cy + sh) // TILE_H + 1)
             lead_z = 0
