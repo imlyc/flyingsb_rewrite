@@ -145,6 +145,45 @@ def _dit_battle(skill_id, enemy_pos):
     return played
 
 
+def _sam_battle(skill_id, enemy_pos):
+    import random
+    from core.battle.data import BattleMap, BattleUnit
+    from core.battle.tactics import TacticsBattle
+    p = BattleUnit(name="三藏法师", level=1, max_hp=30, hp=30, max_mp=999, mp=999, sg=0,
+                   attack=20, defence=5, agile=20, move=0, is_player=True)
+    p.x, p.y = 10, 10
+    e = BattleUnit(name="e", level=1, max_hp=500, hp=500, max_mp=0, mp=0, sg=0,
+                   attack=10, defence=0, agile=5, move=0, is_player=False)
+    e.x, e.y = enemy_pos
+    b = TacticsBattle(players=[p], enemies=[e], battle_map=BattleMap(20, 20), rng=random.Random(0),
+                      player_positions=[(p.x, p.y)], enemy_positions=[(e.x, e.y)])
+    p.facing = (0, -1)
+    played = []
+    b.engine.on('sound_play', lambda ent, sid: played.append(sid))
+    assert b.enter_attack_aim(skill_id=skill_id)
+    assert b.confirm_attack_aim()
+    for _ in range(600):
+        b.engine.tick()
+        if b._pending_turn_end:
+            break
+    assert b._pending_turn_end
+    return played
+
+
+def test_pumpkin_break_sounds():
+    """南瓜破 0x14: -1001 播 169, -1000 登记 191 → IMPACT 播."""
+    played = _sam_battle(0x14, (10, 9))
+    assert played.count(169) == 1 and played.count(191) >= 1
+    assert played.index(169) < played.index(191)
+
+
+def test_three_hit_sounds():
+    """不敗三擊 0x16: 三击各 -1001 播 185, 命中各播 189."""
+    played = _sam_battle(0x16, (10, 9))
+    assert played.count(185) == 3 and played.count(189) == 3
+    assert played[0] == 185
+
+
 def test_vertical_slash_sounds_via_signal_routing():
     """垂直斬 0x20: jump -1001 播 281, jump -1000 登记 282 → IMPACT 播."""
     played = _dit_battle(0x20, (10, 9))
