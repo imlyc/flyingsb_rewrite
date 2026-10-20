@@ -54,8 +54,9 @@ def main() -> int:
         scene.draw()
         pygame.display.flip()
 
-        # 场景切换 (见 switch_scene 的说明: 不能清新场景预挂的 next_scene)
-        if scene.next_scene is not None:
+        # 场景切换 (见 switch_scene 的说明: 不能清新场景预挂的 next_scene).
+        # 连着切: 新场景若已预挂了下一个 (新游戏 → 世界地图 → 自动序章), 中间那个不画一帧 (否则小森林闪一下)
+        while scene.next_scene is not None:
             scene = switch_scene(scene)
 
     audio.stop_bgm()
