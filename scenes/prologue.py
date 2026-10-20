@@ -393,6 +393,8 @@ class PrologueScene(Scene, EventHost):
             return a.tx
         if field == 0x12C:
             return a.ty
+        if field == 0x130:
+            return a.base_sheet
         if field in (0x20, 0x24, 0x28):
             return int(a.off[(field - 0x20) // 4] * 65536) & 0xFFFFFFFF
         if field == 0x8:
@@ -414,6 +416,8 @@ class PrologueScene(Scene, EventHost):
             a.set_dir(v)
         elif field == 0x114:
             a.dir_target = v & 7
+        elif field == 0x130:                  # 图集基号 (4a.09 / 20.05)
+            a.base_sheet = v
         elif field in (0x20, 0x24, 0x28):
             i = (field - 0x20) // 4
             a.off[i] = v / 65536.0

@@ -1034,8 +1034,10 @@ class EventVM:
                 d = signed(R(o[1])) if len(o) > 1 else -1
                 if d != -1:
                     h.fc_dir(fc, d)
-            elif sub == 9 and len(o) > 1:
-                h.fc_frame(fc, R(o[1]))
+            elif sub == 9 and len(o) > 1:                   # obj+0x130 = 图集基号 (序章 4a.09 [SON, 8] = 无头盔 CSON000)
+                h.fc_set(fc, 0x130, R(o[1]))
+            elif sub == 8:                                   # 0x44 = obj+0x130
+                self.set_local(0x44, h.fc_get(fc, 0x130))
             elif sub in (4, 5, 0x14, 0x15):
                 pass                                        # 激活/碰撞标志, 演出里无关
             else:
@@ -1235,8 +1237,14 @@ class EventVM:
                     self.globals[G_PARTY_LEADER] = leader
                     h.party("leader", leader)
                     h.fc_show(leader, True)                  # 末尾 FUN_00498daa(leader, 1)
-            elif sub == 9:
-                h.party("remove", R(o[0]))
+            elif sub == 9:                                   # FUN_004998d3(mask, 0): 只补人不踢人
+                mask = R(o[0])
+                for fc in [PARTY_SLOT_FC[i] for i in range(10) if mask >> i & 1]:
+                    h.party("add", fc)
+            elif sub == 0x10:                                # FUN_00499c8e: 隐藏全部队员 (之后脚本用 42.01 逐个摆出来)
+                mask = self.globals.get(G_PARTY_MASK, 0)
+                for fc in [PARTY_SLOT_FC[i] for i in range(10) if mask >> i & 1]:
+                    h.fc_show(fc, False)
             elif sub == 2:                                   # FUN_004994d9: 换队长 (新队长一定显示)
                 fc = R(o[0])
                 self.globals[G_PARTY_LEADER] = fc
