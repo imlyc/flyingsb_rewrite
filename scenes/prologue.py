@@ -359,6 +359,13 @@ class PrologueScene(Scene, EventHost):
     def caption(self, text: str | None) -> None:
         self.caption_text = text
 
+    def door(self, door_id: int, state: int) -> None:
+        """e2.00: 门表里的门在当前图上就换成开/关的那组瓦片 (原版 FUN_004b82f4 直接改地图)."""
+        d = realm.door_table().get(door_id)
+        if d is None or self.map is None or self.map_row is None or d["map"] != self.map_row["id"]:
+            return
+        self.map.patch_cells(d["x"], d["y"], d["w"], d["h"], d["open"] if state else d["closed"])
+
     # ================= EventHost: 演员 =================
     def _actor(self, fc: int, create: bool = True) -> Actor | None:
         a = self.actors.get(fc)

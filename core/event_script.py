@@ -462,6 +462,7 @@ class EventHost:
     def bgm_volume(self, vol: int, frames: int) -> None: self.log(f"[ev] bgm_volume {vol} {frames}f")
     # 系统
     def event_begin(self) -> None: self.log("[ev] event_begin")
+    def door(self, door_id: int, state: int) -> None: self.log(f"[ev] door {door_id} {'open' if state else 'close'}")
     def event_end(self) -> None: self.log("[ev] event_end")
     def key_pressed(self) -> bool: return True
     def party(self, action: str, fc: int) -> None: self.log(f"[ev] party {action} fc{fc}")
@@ -1496,7 +1497,9 @@ class EventVM:
                 self.mq.clear()
                 self.scheduler.kill_all_dialogs()
         elif op == 0xE2:
-            if sub == 4 and o and R(o[0]) == 1000 and self.scheduler is not None:
+            if sub == 0 and len(o) >= 2:                     # 门/机关 (FUN_005324ce): [门号, 1 开 / 0 关] → 换瓦片
+                h.door(R(o[0]), R(o[1]))
+            elif sub == 4 and o and R(o[0]) == 1000 and self.scheduler is not None:
                 if self.scheduler.auto_dialog == 0:
                     self.scheduler.auto_dialog = 10      # DAT_007d70d8: 事件里气泡 ';' 自动翻页 (10×100ms)
         elif op == 0x6F and o:                           # 全局走路延时 DAT_007d8080 (00 设 / 01 加)

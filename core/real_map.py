@@ -213,13 +213,7 @@ class RealMap:
         # 基线 (y + 1 + level) 行再盖一遍 → 角色在它北边就被挡住. 按基线行分组.
         # 按**角色所在层**的属性判 (FUN_004b8aa9 用 param_1=层 读 cell): 站在桥上 (层 1) 时桥格
         # 在层 1 的属性是普通地面, 不再盖人; 站在桥下 (层 0) 时桥格是高物件, 盖人.
-        self._tall: list[dict[int, list[tuple[int, int]]]] = [{}, {}]
-        for L, cells in ((0, self.cells), (1, self.cells1 if self._layer1 else [])):
-            for i, v in enumerate(cells):
-                if v & CELL_TALL:
-                    y = i // self.w
-                    r = min(self.h - 1, y + ((v >> 2) & 7))
-                    self._tall[L].setdefault(r, []).append((i % self.w, y))
+        self._rebuild_tall()
         # 层 1 有自己的瓦片 (天空图等) 才用它画, 否则 (五指村的桥) 画层 0 的瓦片
         self._layer1_has_tiles = self._layer1 and any(self.grid1)
         # 默认通行层: 出生点所在层 (有第 1 层数据时才允许 1); 场景按玩家当前层传 layer 参数
@@ -253,6 +247,38 @@ class RealMap:
             if m:
                 out.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
         return out
+
+    def _rebuild_tall(self) -> None:
+        self._tall: list[dict[int, list[tuple[int, int]]]] = [{}, {}]
+        for L, cells in ((0, self.cells), (1, self.cells1 if self._layer1 else [])):
+            for i, v in enumerate(cells):
+                if v & CELL_TALL:
+                    y = i // self.w
+                    r = min(self.h - 1, y + ((v >> 2) & 7))
+                    self._tall[L].setdefault(r, []).append((i % self.w, y))
+
+    def patch_cells(self, x0: int, y0: int, w: int, h: int, cells: list[list[int]]) -> None:
+        """门/机关 (FUN_004b82f4): 把 w×h 格的 [层0瓦片, 层0属性, 层1瓦片, 层1属性] 写进地图并重算通行."""
+        table = attr_table()
+        k = 0
+        for j in range(h):
+            for i in range(w):
+                x, y = x0 + i, y0 + j
+                if k >= len(cells):
+                    return
+                t0, a0, t1, a1 = cells[k]
+                k += 1
+                if not self.in_bounds(x, y):
+                    continue
+                idx = y * self.w + x
+                self.grid[idx], self.attr[idx] = t0, a0
+                self.cells[idx] = decode_cell(a0, table)
+                if self._layer1:
+                    self.grid1[idx], self.attr1[idx] = t1, a1
+                    self.cells1[idx] = decode_cell(a1, table)
+                    self.tail[idx] = (t1, a1)
+        self._rebuild_tall()
+        self._layer1_has_tiles = self._layer1 and any(self.grid1)
 
     def _default_scroll(self, L: int) -> dict:
         w, h = (self.w, self.h) if L == 0 else (self.w1, self.h1)
@@ -536,6 +562,21 @@ class RealMap:
                      rows: tuple[int, int] | None = None) -> None:
         """兼容旧接口: 压精灵的逻辑已全部在 draw_tall 里, 这里不再画东西."""
         return
+
+
+_DOORS: dict[int, dict] | None = None
+
+
+def door_table() -> dict[int, dict]:
+    """exe 门表 (tools/extract_doors): id → {map, x, y, w, h, open, closed}."""
+    global _DOORS
+    if _DOORS is None:
+        path = ROOT / "assets" / "door_table.json"
+        _DOORS = {}
+        if path.exists():
+            for r in json.loads(path.read_text(encoding="utf-8")):
+                _DOORS[r["id"]] = r
+    return _DOORS
 
 
 def load(base: str) -> RealMap:
