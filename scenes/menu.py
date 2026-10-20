@@ -128,7 +128,8 @@ class TitleScene(Scene):
             # 复刻原版: 新游戏主角 **美娜** 开局 (其余角色后续入队); 序章末尾车坏在小森林 (TBB0___P, id 476),
             # 玩家从那里接手, 出村(南) -> 五指村 (见 world_graph._EXTRA_TRANSITIONS)
             scene = WorldMapScene(self.surface, self.audio, save=new_game_save())
-            scene.enter_location("TBB0___P", auto_beat=False)
+            # 序章 ev9 结尾 42.01 把美娜放在 (10,8) (车坏处), 不是 .mfo 的东口 pcpos (22,9)
+            scene.enter_location("TBB0___P", spawn=(10, 8), auto_beat=False)
             return scene
 
         if not prologue_scene.available():
