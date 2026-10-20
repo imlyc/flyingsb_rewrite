@@ -110,6 +110,15 @@ def test_yuetu_sounds():
     assert SFX_YT_BEAST in _exe_ids(0x07, 'play')
 
 
+def test_mfeng_sounds():
+    from core.son_transform import SFX_MF_LAND, SFX_MF_FEATHER, SFX_SMOKE
+    played, solo, stopped = _run_son_skill(0x09)
+    assert played.count(SFX_MF_LAND) == 1
+    assert played.index(SFX_MF_LAND) > played.index(SFX_SMOKE)
+    assert solo.count(SFX_MF_FEATHER) == 31, "羽毛期 end-0x1e..end 共 31 tick 每 tick 一次"
+    assert {SFX_MF_LAND, SFX_MF_FEATHER} == _exe_ids(0x09, 'play')
+
+
 def test_luanwu_sounds():
     from core.son_transform import SFX_LUANWU_START, SFX_LUANWU_HIT, LUANWU_DURATION, LUANWU_REACT_INTERVAL
     played, solo, stopped = _run_son_skill(0x08)

@@ -1552,6 +1552,8 @@ MF_FEATHER_FRAME_TICKS = 2      # 羽毛 3 帧循环 tick
 MF_FEATHER_HEIGHT = 128         # 羽毛起始高度 px (exe victim.z + 0x80)
 MF_FEATHER_GRAVITY = 0.25       # 轻重力 (exe 0x4000)
 MF_FEATHER_LIFE = 63            # 羽毛寿命 tick (exe frame > 0x3f) 或落地消失
+SFX_MF_LAND = 0xef              # 大凤凰落定音 (E071): exe FUN_004f8ce6 state 0 落到悬停高度时播
+SFX_MF_FEATHER = 0x111          # 羽毛光点音 (E105): 最后 0x1e tick **每 tick** 播 (同 buffer 重启 = 连续)
 _MF_DESCEND = 0
 _MF_HOLD = 1
 _MF_RISE = 2
@@ -1700,6 +1702,7 @@ def mfeng_beast_think(e: "Entity", eng: "Engine") -> None:
         if e.z >= -(MF_HOVER_HEIGHT << 16):       # 降到悬停高度 (仍在空中)
             e.z = -(MF_HOVER_HEIGHT << 16)
             ud['hold_tick'] = 0
+            _sfx(battle, SFX_MF_LAND)
             e.state_code = _MF_HOLD
     elif e.state_code == _MF_HOLD:
         ud['hold_tick'] += 1
@@ -1710,6 +1713,7 @@ def mfeng_beast_think(e: "Entity", eng: "Engine") -> None:
                 _mfeng_revive(battle, ud['allies'])   # 只复活死亡同伴回满 (与羽毛同时, 一次)
             for u in ud['allies']:                    # 羽毛只撒在被复活的死亡同伴身上
                 _spawn_mfeng_feather(battle, u)
+            _sfx(battle, SFX_MF_FEATHER, solo=True)   # exe 每 tick 播 0x111 (solo = 播完再续)
         if t >= MF_HOLD_TICKS:
             ud['coord'].user_data['mf_leave'] = True   # 通知祥云飘出
             e.state_code = _MF_RISE
