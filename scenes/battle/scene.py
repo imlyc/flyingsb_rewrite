@@ -10,7 +10,7 @@
 操作:
   方向键   走 1 格 + 转面向 (走不了就只转身); 走过的格子计入本回合可达范围
   Enter    攻击当前面向格子上的敌人 (近战范围内). 没敌人则无动作.
-  ESC      调出行动菜单 (上=攻击 / 右=技能 / 下=结束 / 左=道具)
+  ESC      调出行动菜单 (上=技能 / 左=道具 / 右=设置 / 下=回合结束)
            菜单内方向键直接选项, ESC 关闭
   X        撤销移动, 把角色拉回本回合起点
   朝向格高亮: 浅白 = 空格, 浅红 = 上面有敌人 (可 Enter 攻击)
@@ -110,6 +110,10 @@ class BattleScene(Scene):
         self.audio = audio
         self.battle = battle
         self.world_map = world_map
+        # 道具栏: 剧情战斗 = 存档的 inventory; 竞技场的 "world_map" 是 terrain 没有 save → None
+        # (子类可自行塞一个沙盒 Inventory). 道具菜单/使用都只走这个引用, 不再碰 world_map.save.
+        save = getattr(world_map, 'save', None)
+        self.inventory = getattr(save, 'inventory', None)
         self.return_scene = return_scene
         self.font = load_chinese_font(18)
         self.small = load_chinese_font(13)
@@ -235,7 +239,7 @@ class BattleScene(Scene):
     def use_consumable(self, item_id: int) -> None:
         """对当前单位使用消耗品 (回血/回蓝), 关闭菜单."""
         u = self.battle.current
-        if u is None or not u.is_player:
+        if u is None or not u.is_player or self.inventory is None:
             self._item_submenu = False
             return
         hp, mp = item_effect(item_id)
@@ -244,7 +248,7 @@ class BattleScene(Scene):
             return
         u.hp = min(u.max_hp, u.hp + hp)
         u.mp = min(u.max_mp, u.mp + mp)
-        self.world_map.save.inventory.remove(item_id, 1)
+        self.inventory.remove(item_id, 1)
         self._item_submenu = False
         self._menu_open = False
         self._input_gated = False
@@ -256,8 +260,7 @@ class BattleScene(Scene):
         self.battle._log(f"{u.name} 使用 {get_item_name(item_id)} {' '.join(bits)}")
 
     def _draw_item_menu(self) -> None:
-        inv = self.world_map.save.inventory
-        items = inv.consumables()
+        items = self.inventory.consumables() if self.inventory is not None else []
         w, h = self.surface.get_size()
         pw, ph = 380, 320
         x, y = 30, h - ph - 30

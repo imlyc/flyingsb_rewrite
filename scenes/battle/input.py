@@ -139,8 +139,7 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
 
     # 道具二级菜单: ↑↓ 选消耗品 / Enter 使用 / ESC 回退到一级
     if scene._item_submenu:
-        inv = scene.world_map.save.inventory
-        items = inv.consumables()
+        items = scene.inventory.consumables() if scene.inventory is not None else []
         if key in (pygame.K_ESCAPE, pygame.K_x):
             scene._item_submenu = False
             scene._menu_open = True

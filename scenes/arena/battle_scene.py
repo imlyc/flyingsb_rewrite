@@ -89,6 +89,9 @@ class ArenaBattleScene(BattleScene):
         super().__init__(surface, audio, battle, world_map=terrain, return_scene=return_scene)
 
         self._terrain = terrain
+        # 沙盒道具栏 (不存档): 让竞技场也能测道具菜单/回复流程
+        from core.inventory import Inventory
+        self.inventory = Inventory({299: 3, 300: 2, 302: 3, 305: 1})   # 恢复药/良药/药草/仙桃
         # 控制台
         self._console_open = False
         self._console_level = 0       # 0=顶层命令 / 1=选敌人
