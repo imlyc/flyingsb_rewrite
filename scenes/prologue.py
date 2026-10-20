@@ -27,7 +27,10 @@ from scenes.menu import load_chinese_font
 ROOT = Path(__file__).resolve().parent.parent
 SPRITES = ROOT / "assets" / "sprites"
 FC_TABLES = ROOT / "assets" / "fc_tables.json"
-TICK_MS = 25                      # 1 原版 tick: 主循环受渲染限制, Wine 实测 24.5ms (见 project_frame_timing)
+FADE_STEP_MS = 16                 # 调色板渐变一步 = 原版 pacer 的 16ms (DAT_00540064), 与 tick 长度无关
+TICK_MS = 18                      # 1 脚本 tick. 原版: 脚本解释器 FUN_00467cbc 每圈主循环跑 DAT_00540050 (= 这圈过了几个
+                                  # 16ms, 上限 3) 次, 只有 02.00 这类"硬等" (DAT_007d76ec=2) 才每圈只走 1 次; 序章场景轻,
+                                  # Wine 主循环 ≈16–20ms. 按 3fps 截图校: 迪特 10 格 3.3s / 三次白闪间隔 3.27s → 18ms 最接近
 FIRST_EVENT = 0
 LAST_EVENT = 9                    # 序章链 ev0..ev9 (之后玩家接管)
 
@@ -320,10 +323,13 @@ class PrologueScene(Scene, EventHost):
         self.fade_from = self.fade_alpha
         self.fade_to = to
         self.fade_step = step
+        # 原版主循环每圈按 DAT_00540050 (= 这圈过了几个 16ms) 推进渐变 (FUN_0040b169(DAT_00540050)), 所以渐变是
+        # **按 16ms 的真实时间**走的, 不随 tick 长度变慢: 我们 tick 25ms → 每 tick 走 25/16 步 (Wine 24.5ms 实测同理)
         if step > 0:
-            self.fade_ticks = self.fade_total = max(1, int(math.ceil(abs(to - self.fade_alpha) / step)))
+            steps = max(1, int(math.ceil(abs(to - self.fade_alpha) / step)))
         else:
-            self.fade_ticks = self.fade_total = max(1, frames)
+            steps = max(1, frames)
+        self.fade_ticks = self.fade_total = max(1, round(steps * FADE_STEP_MS / TICK_MS))
 
     def _tick_fade(self) -> None:
         if self.fade_ticks > 0:
@@ -370,7 +376,8 @@ class PrologueScene(Scene, EventHost):
             self.fade_rgb = (0, 0, 0)
             self.fade_from, self.fade_to = self.fade_alpha, 170.0
             spd = args[3] if len(args) > 3 else 0
-            self.fade_ticks = self.fade_total = max(1, (spd * 3 // 50) + 1 if spd >= 0 else -spd)
+            steps = max(1, (spd * 3 // 50) + 1 if spd >= 0 else -spd)
+            self.fade_ticks = self.fade_total = max(1, round(steps * FADE_STEP_MS / TICK_MS))
             self.fade_step = 0
 
     def caption(self, text: str | None) -> None:
