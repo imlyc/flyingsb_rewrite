@@ -173,10 +173,11 @@ class TitleScene(Scene):
         w, h = self.surface.get_size()
 
         title = self.title_font.render("幻想西游记", True, self.TITLE_COLOR)
-        self.surface.blit(title, title.get_rect(center=(w // 2, h // 3)))
+        self.surface.blit(title, title.get_rect(center=(w // 2, h // 4)))
 
-        start_y = h // 2 + 20
-        spacing = 60
+        # 菜单项从中线略上开始, 行距按条数算, 最后一行离底边 ≥ 40px
+        spacing = min(56, (h - 40 - (h // 2 - 30)) // max(1, len(self.items)))
+        start_y = h // 2 - 30
         for i, (label, _) in enumerate(self.items):
             highlight = (i == self.selected)
             color = self.ITEM_HIGHLIGHT if highlight else self.ITEM_COLOR
