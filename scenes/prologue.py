@@ -522,41 +522,52 @@ class PrologueScene(Scene, EventHost):
         self.actors.pop(handle, None)
 
     def fc_path(self, fc: int, x: int, y: int, d: int) -> list[int]:
-        """BFS 四向寻路 (原版 FUN_0049d659 是 A*; 演出里路都很短). 末尾按 d 转向."""
+        """原版寻路 (FUN_0049d659 → FUN_0049d80a 从**终点**泛洪距离场, FUN_0049d1bd 从起点回溯):
+        四向, 每格按 上/下/左/右 的固定顺序取第一个距离 -1 的邻格; 别的可见演员 (同层) 占的格算障碍.
+        所以同样长度的路会贴着"上优先"走, 且会绕开站着的人 (ev2 迪特绕桌子时萊琪兒站在 (9,10), 走左列).
+        末尾按 d 转向."""
         a = self._actor(fc)
         face = d                          # 到达后朝向 (下面的循环变量会覆盖 d, 别直接用)
         if self.map is None:
             return []
-        start = (a.tx, a.ty, a.z)
+        sx, sy, sz = a.tx, a.ty, a.z
         goal = (x, y)
-        if (a.tx, a.ty) == goal:
+        if (sx, sy) == goal:
             return [face | 0x100] if 0 <= face <= 7 else []
+        blocked = {(o.tx, o.ty) for h, o in self.actors.items()
+                   if h != fc and o.visible and o.z == sz and (o.tx, o.ty) != goal}
         from collections import deque
-        prev: dict[tuple, tuple] = {start: None}
-        q = deque([start])
-        found = None
+        back = {0: 1, 1: 0, 2: 3, 3: 2}
+        dist: dict[tuple[int, int], int] = {goal: 0}
+        q = deque([goal])
         while q:
-            cx, cy, cz = q.popleft()
-            if (cx, cy) == goal:
-                found = (cx, cy, cz)
-                break
-            for d in (0, 1, 2, 3):
-                ok, nz, nx, ny = self._can_step(cx, cy, cz, d)
-                if not ok or (nx, ny, nz) in prev:
+            cx, cy = q.popleft()
+            dc = dist[(cx, cy)]
+            for dd in (0, 1, 2, 3):                      # 原版泛洪顺序 上/下/左/右
+                nx, ny = cx + DIR_DELTA[dd][0], cy + DIR_DELTA[dd][1]
+                if (nx, ny) in dist or (nx, ny) in blocked:
                     continue
-                prev[(nx, ny, nz)] = ((cx, cy, cz), d)
-                q.append((nx, ny, nz))
-            if len(prev) > 4000:
+                ok, _nz, ax, ay = self._can_step(nx, ny, sz, back[dd])   # 从邻格走回来这一步要能走
+                if not ok or (ax, ay) != (cx, cy):
+                    continue
+                dist[(nx, ny)] = dc + 1
+                q.append((nx, ny))
+            if len(dist) > 4000:
                 break
-        if found is None:
+        if (sx, sy) not in dist:
             return []
         steps: list[int] = []
-        cur = found
-        while prev[cur] is not None:
-            p, d = prev[cur]
-            steps.append(d | 0x8000)
-            cur = p
-        steps.reverse()
+        cx, cy = sx, sy
+        while (cx, cy) != goal:
+            cur = dist[(cx, cy)]
+            for dd in (0, 1, 2, 3):                      # 回溯也是 上/下/左/右 取第一个
+                nx, ny = cx + DIR_DELTA[dd][0], cy + DIR_DELTA[dd][1]
+                if dist.get((nx, ny)) == cur - 1:
+                    steps.append(dd | 0x8000)
+                    cx, cy = nx, ny
+                    break
+            else:
+                return []
         if 0 <= face <= 7:
             steps.append(face | 0x100)
         return steps
