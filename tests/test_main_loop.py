@@ -21,7 +21,7 @@ from scenes.world_map.scene import WorldMapScene
 def test_switch_keeps_pending_scene_of_new_scene():
     """切到新场景时, 新场景预挂的 next_scene 必须保留."""
     pygame.init()
-    surface = pygame.Surface((800, 600))
+    surface = pygame.Surface((640, 480))
 
     class Old:
         def __init__(self):
@@ -51,7 +51,7 @@ def test_switch_keeps_pending_scene_of_new_scene():
 def test_new_game_auto_plays_prologue():
     """标题 → 新游戏: 序章自动弹出; 播完 PROLOGUE 置位, 回到五指村."""
     pygame.init()
-    surface = pygame.Surface((800, 600))
+    surface = pygame.Surface((640, 480))
     title = TitleScene(surface, AudioManager())
     title.on_enter()
     assert title.next_scene is None

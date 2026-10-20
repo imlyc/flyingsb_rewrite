@@ -16,7 +16,7 @@ def _msg(text="测试台词", portraits=None, bgm=None, speaker=None):
 
 def _scene(msgs, **kw):
     pygame.init()
-    return CutsceneScene(pygame.Surface((800, 600)), messages=msgs, **kw)
+    return CutsceneScene(pygame.Surface((640, 480)), messages=msgs, **kw)
 
 
 def test_fade_in_then_stable():
@@ -85,7 +85,7 @@ def test_per_line_bgm_switches_only_on_change():
 
 
 def test_draw_with_and_without_backdrop():
-    bak = pygame.Surface((800, 600))
+    bak = pygame.Surface((640, 480))
     bak.fill((30, 40, 60))
     for backdrop in (None, bak):
         msgs = [_msg(portraits=[3026], bgm=15)]
@@ -101,7 +101,7 @@ def test_world_map_uses_cutscene_for_portrait_beats():
     from core.story import BEATS
 
     pygame.init()
-    sc = WorldMapScene(pygame.Surface((800, 600)), AudioManager(), save=new_game_save())
+    sc = WorldMapScene(pygame.Surface((640, 480)), AudioManager(), save=new_game_save())
     sc.on_enter()
     sc.enter_location("TOH0_00P")
     sc.next_scene = None

@@ -81,7 +81,7 @@ def test_event_npc_talkable_in_scene():
     from scenes.dialogue import DialogueScene
 
     pygame.init()
-    surf = pygame.Surface((800, 600))
+    surf = pygame.Surface((640, 480))
     scene = WorldMapScene(surf, AudioManager(), save=new_game_save())
     scene.on_enter()
     # 模拟已推进到"蒙面人现身之后、悟空未救出" (且已完成序章, 避免开篇演出抢场)

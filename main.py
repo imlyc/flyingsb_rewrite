@@ -10,7 +10,7 @@ from core.audio_manager import AudioManager
 from scenes.base import Scene
 from scenes.menu import TitleScene
 
-WINDOW_SIZE = (800, 600)
+WINDOW_SIZE = (640, 480)          # 原版逻辑分辨率; 显示时整数倍放大 (pygame.SCALED)
 FPS = 60
 
 
@@ -31,7 +31,7 @@ def switch_scene(scene: Scene) -> Scene:
 def main() -> int:
     pygame.init()
     pygame.display.set_caption("幻想西游记")
-    surface = pygame.display.set_mode(WINDOW_SIZE)
+    surface = pygame.display.set_mode(WINDOW_SIZE, pygame.SCALED)
     clock = pygame.time.Clock()
 
     audio = AudioManager()

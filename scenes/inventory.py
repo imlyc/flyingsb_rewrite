@@ -38,9 +38,9 @@ _STAT_LABEL = {"pow": "力量", "wis": "智慧", "agi": "敏捷",
 FULL = 9999
 
 # 版面 (窗口矩形)
-LIST_RECT = (16, 16, 372, 500)
-DETAIL_RECT = (400, 16, 384, 330)
-EQUIP_RECT = (400, 356, 384, 160)
+LIST_RECT = (12, 12, 296, 428)            # 640x480 版面: 左列表 / 右上说明 / 右下队伍装备
+DETAIL_RECT = (318, 12, 310, 262)
+EQUIP_RECT = (318, 284, 310, 156)
 ROW_H = 28
 ROWS = 14
 
@@ -87,9 +87,9 @@ class InventoryScene:
         self.save = save
         self.next_scene = None
 
-        self.font = load_chinese_font(20)
-        self.title_font = load_chinese_font(26)
-        self.small = load_chinese_font(16)
+        self.font = load_chinese_font(17)
+        self.title_font = load_chinese_font(22)
+        self.small = load_chinese_font(14)
 
         self.mode = "list"          # "list" | "equip"
         self.sel = 0                # 当前选中的背包物品下标

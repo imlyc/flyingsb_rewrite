@@ -12,7 +12,7 @@ from core import party as party_mod
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((800, 600))
+    pygame.display.set_mode((640, 480))
     yield
 
 
@@ -21,7 +21,7 @@ def _inv(items=((128, 1), (305, 1))):
     save = new_game_save()
     for iid, n in items:
         save.inventory.add(iid, n)
-    sc = InventoryScene(pygame.Surface((800, 600)), None, None, save)
+    sc = InventoryScene(pygame.Surface((640, 480)), None, None, save)
     return sc, save
 
 

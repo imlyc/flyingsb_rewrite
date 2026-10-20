@@ -16,7 +16,7 @@ def _scene():
     from core.save_manager import new_game_save
     from scenes.world_map.scene import WorldMapScene
     pygame.init()
-    surf = pygame.Surface((800, 600))
+    surf = pygame.Surface((640, 480))
     sc = WorldMapScene(surf, AudioManager(), save=new_game_save())
     sc.on_enter()
     assert sc.enter_location("TFI0___P")
@@ -95,7 +95,7 @@ def _msgs(text):
 
 def test_typewriter_reveals_progressively():
     pygame.init()
-    surf = pygame.Surface((800, 600))
+    surf = pygame.Surface((640, 480))
     ds = DialogueScene(surf, messages=_msgs("一" * 100), title="t")
     assert ds._reveal == 0.0
     ds.update(1000)                      # 45 字符/秒 → 1 秒约 45 字
@@ -105,7 +105,7 @@ def test_typewriter_reveals_progressively():
 
 def test_space_first_completes_then_advances():
     pygame.init()
-    surf = pygame.Surface((800, 600))
+    surf = pygame.Surface((640, 480))
     ds = DialogueScene(surf, messages=_msgs("二" * 100), title="t")
     _press = lambda: ds.handle_event(
         pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE))
@@ -120,7 +120,7 @@ def test_space_first_completes_then_advances():
 def test_dialogue_draws_speaker_sprite_without_crash():
     """说话角色有原版精灵 → 立绘能画出来 (含待机动画取样)."""
     pygame.init()
-    surf = pygame.Surface((800, 600))
+    surf = pygame.Surface((640, 480))
     ds = DialogueScene(surf, messages=_msgs("测试一句台词"), title="t")
     unit = ds._speaker_unit("孙悟空")
     assert unit is not None, "孙悟空应有角色精灵"

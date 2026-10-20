@@ -240,7 +240,7 @@ class PauseScene(Scene):
                     self.surface.blit(cur, (SLOT_PANEL.x + 22, y + 4))
             info_d = None
             if i >= game_save.SLOT_COUNT:
-                label, info, money, date = "原版全剧情存档", "光盘原版 Save1.dat", "", ""
+                label, info, money, date = "原版存档", "光盘全剧情 Save1.dat", "", ""
                 members = []
             else:
                 info_d = game_save.slot_summary(i)

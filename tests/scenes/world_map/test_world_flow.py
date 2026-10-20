@@ -15,12 +15,12 @@ from scenes.world_map.atlas import WorldAtlasScene
 @pytest.fixture(scope="module")
 def _pygame():
     pygame.init()
-    pygame.display.set_mode((800, 600))
+    pygame.display.set_mode((640, 480))
     yield
 
 
 def _scene():
-    return WorldMapScene(pygame.Surface((800, 600)), AudioManager(), new_game_save())
+    return WorldMapScene(pygame.Surface((640, 480)), AudioManager(), new_game_save())
 
 
 def test_new_game_starts_in_xiaos森林(_pygame):
