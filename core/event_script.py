@@ -1245,6 +1245,8 @@ class EventVM:
                 mask = R(o[0])
                 for fc in [PARTY_SLOT_FC[i] for i in range(10) if mask >> i & 1]:
                     h.party("add", fc)
+            elif sub == 1 and o:                             # 当前主角 (队长) 的 FC 号写进变量 (FUN_004b9a41)
+                self.write(o[0], self.globals.get(G_PARTY_LEADER, -1) & 0xFFFFFFFF)
             elif sub == 0x10:                                # FUN_00499c8e: 隐藏全部队员 (之后脚本用 42.01 逐个摆出来)
                 mask = self.globals.get(G_PARTY_MASK, 0)
                 for fc in [PARTY_SLOT_FC[i] for i in range(10) if mask >> i & 1]:

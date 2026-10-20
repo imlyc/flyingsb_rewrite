@@ -31,9 +31,10 @@ TICK_MS = 25                      # 1 原版 tick: 主循环受渲染限制, Win
 FIRST_EVENT = 0
 LAST_EVENT = 9                    # 序章链 ev0..ev9 (之后玩家接管)
 
-DIR_ROWS = (0, 1, 2, 3, 3, 2, 2, 3)          # 0x65302C: 朝向 → 图集行 (0 背 1 正 2 左 3 右)
-# 8 向 (0 上 1 下 2 左 3 右 4 左上 5 右上 6 左下 7 右下) → 格位移
-DIR_DELTA = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (-1, -1), 5: (1, -1), 6: (-1, 1), 7: (1, 1)}
+DIR_ROWS = (0, 1, 2, 3, 3, 2, 2, 3)          # 0x65302C: 朝向 → 图集行 (0 背 1 正 2 左 3 右), 走路动画用
+STAND_FRAME = (0, 6, 12, 18, 5, 11, 17, 23)  # FUN_00498ed1: 朝向 → 站立帧 (斜向 4..7 = 各行第 5 格)
+# 8 向 (0 上 1 下 2 左 3 右 4 右上 5 左下 6 左上 7 右下, 与坡道朝向码/站立帧表一致) → 格位移
+DIR_DELTA = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (1, -1), 5: (-1, 1), 6: (-1, -1), 7: (1, 1)}
 
 
 def available() -> bool:
@@ -87,7 +88,7 @@ class Actor:
         self.dir = d & 7
         self.dir_target = self.dir
         if self.mode == 2 and self.sheet == 0:
-            self.frame = DIR_ROWS[self.dir] * 6
+            self.frame = STAND_FRAME[self.dir]
 
     def tick(self) -> None:
         if fast_forward():                 # Shift: 位移/跳跃补间直接到位 (FUN_0049a818 置 0x754e)
