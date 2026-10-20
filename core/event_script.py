@@ -412,6 +412,8 @@ class EventHost:
         self.log(f"[ev] fade→{target} {frames}f" + (f" step{step}" if step else ""))
     def palette(self, kind: str, *args: int) -> None: self.log(f"[ev] palette {kind} {list(args)}")
     def wait_fade(self) -> bool: return False
+    def transition(self, kind: int, closing: bool, ms: int, fc: int) -> None:
+        self.log(f"[ev] transition {kind} {'close' if closing else 'open'} {ms}ms fc{fc}")
     def caption(self, text: str | None) -> None: self.log(f"[ev] caption {text!r}")
     # 角色 (FC)
     # ---- FC 行为 (返回句柄的: 0 = 立刻完成; 否则 task_alive(hd) 查询) ----
@@ -1510,7 +1512,12 @@ class EventVM:
             fc = self.fc(R(o[0])) if (sub == 1 and o) else self.fc_default
             d = h.fc_get(fc, 0x110) & 7
             h.fc_anim(fc, 0x20000, (0, 6, 12, 18, 5, 11, 17, 23)[d], 0)
-        elif op in (0x80, 0xE6, 0xEF, 0x9C, 0xF1, 0x52, 0x4C, 0x4D):
+        elif op == 0xEF and len(o) >= 2:                 # 转场 (FUN_00498110): [1 收/0 放, 毫秒, 对象]; Shift 下跳过
+            # 00 以对象为中心缩放 (FUN_00403071) / 01 平移 / 02 碎块 / 03 百叶 (FUN_00403390/3497/378e, 全屏)
+            # 04 圆形光圈 (FUN_0040398e, 圆心 = 对象屏幕位置)
+            if not fast_forward():
+                h.transition(sub, bool(R(o[0])), R(o[1]), self.fc(R(o[2])) if len(o) > 2 else -1)
+        elif op in (0x80, 0xE6, 0x9C, 0xF1, 0x52, 0x4C, 0x4D):
             if op == 0x9C:                               # 对象在屏幕内? (走路脚本: 屏外的步子是瞬移)
                 self.set_local(0x44, 1 if h.fc_on_screen(self.fc(R(o[0])) if o else self.fc_default) else 0)
         else:

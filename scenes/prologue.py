@@ -159,6 +159,8 @@ class PrologueScene(Scene, EventHost):
         self.pal_alpha = 0.0
         self.pal_work = (1.0, 0)          # ed.08 的 (a/100, b): 工作板 = 场景板×a + b
         self.caption_text: str | None = None
+        # ef 转场: kind 0 缩放 / 4 圆形光圈; closing=True 从全屏收到点, False 从点放开; 进度 t/n (tick)
+        self.trans: dict | None = None
         self.bubbles: list[DialogTask] = []
         self._img_cache: dict[str, pygame.Surface | None] = {}
         self._tasks: dict[int, Actor] = {}
@@ -227,6 +229,11 @@ class PrologueScene(Scene, EventHost):
             a.tick()
         self._tick_camera()
         self._tick_fade()
+        if self.trans is not None:
+            if self.trans["t"] < self.trans["n"]:
+                self.trans["t"] += 1
+            elif not self.trans["closing"]:
+                self.trans = None                 # 放开到全屏后就没事了; 收完的保持遮黑直到下一个转场/切图
         self.bubbles = [d for d in r.dialogs if d.visible() or d.alive]
         if ended or (r.main is not None and r.main.done and r.history and r.history[-1] >= LAST_EVENT
                      and not r.scheduler.any_dialog()):
@@ -252,6 +259,7 @@ class PrologueScene(Scene, EventHost):
         else:
             self.map = realm.load(row["map"])
         self.map_row = row
+        self.trans = None
         self.actors = {fc: a for fc, a in self.actors.items() if fc < 0x10000}
         for a in self.actors.values():
             a.visible = False
@@ -324,7 +332,14 @@ class PrologueScene(Scene, EventHost):
             self.fade_alpha = self.fade_from + (self.fade_to - self.fade_from) * k
 
     def wait_fade(self) -> bool:
-        return self.fade_ticks > 0
+        return self.fade_ticks > 0 or (self.trans is not None and self.trans["t"] < self.trans["n"])
+
+    def transition(self, kind: int, closing: bool, ms: int, fc: int) -> None:
+        a = self.actors.get(fc)
+        n = max(1, int(ms / TICK_MS))
+        self.trans = {"kind": kind, "closing": closing, "t": 0, "n": n, "fc": fc if a is not None else -1}
+        if a is None:
+            self.trans["cx"], self.trans["cy"] = self.surface.get_width() / 2, self.surface.get_height() / 2
 
     def _set_pal(self, rgb: tuple[int, int, int], alpha: float) -> None:
         self.pal_rgb, self.pal_alpha = rgb, alpha
@@ -863,9 +878,43 @@ class PrologueScene(Scene, EventHost):
             if bx > 0:
                 pygame.draw.rect(surf, (0, 0, 0), (0, 0, bx, sh))
                 pygame.draw.rect(surf, (0, 0, 0), (sw - bx, 0, bx, sh))
+        self._draw_transition()
         if self.caption_text:
             t = self.font.render(self.caption_text, True, (240, 230, 200))
             surf.blit(t, ((surf.get_width() - t.get_width()) // 2, 40))
+
+    def _draw_transition(self) -> None:
+        tr = self.trans
+        if tr is None:
+            return
+        surf = self.surface
+        sw, sh = surf.get_size()
+        k = tr["t"] / tr["n"]                              # 0 → 1
+        a = self.actors.get(tr["fc"])
+        if a is not None:
+            cx, cy = self._screen_pos(a)
+            cy -= TILE_H                                     # 对象的"屏幕位置"是脚点上方一格 (FUN_00499095 的 -0x26)
+        else:
+            cx, cy = tr.get("cx", sw / 2), tr.get("cy", sh / 2)
+        cx = max(0.0, min(float(sw), cx)); cy = max(0.0, min(float(sh), cy))
+        shrink = k if tr["closing"] else 1.0 - k            # 0 = 全开, 1 = 全收
+        if tr["kind"] == 4:                                  # 圆形光圈 (FUN_00403b89): 半径从角距离收到 0
+            rmax = math.hypot(max(cx, sw - cx), max(cy, sh - cy))
+            r = rmax * (1.0 - shrink)
+            if r <= 0:
+                surf.fill((0, 0, 0))
+                return
+            mask = pygame.Surface((sw, sh))
+            mask.fill((0, 0, 0))
+            pygame.draw.circle(mask, (255, 0, 255), (int(cx), int(cy)), int(r))
+            mask.set_colorkey((255, 0, 255))
+            surf.blit(mask, (0, 0))
+        else:                                                # 缩放 (FUN_004031c2 ZoomBlt): 全屏矩形 → 对象处的小矩形
+            zoom = 1.0 + shrink * 7.0
+            w, h = sw / zoom, sh / zoom
+            x0 = max(0.0, min(sw - w, cx - w / 2)); y0 = max(0.0, min(sh - h, cy - h / 2))
+            sub = surf.subsurface(pygame.Rect(int(x0), int(y0), max(1, int(w)), max(1, int(h)))).copy()
+            surf.blit(pygame.transform.scale(sub, (sw, sh)), (0, 0))
 
     def _draw_actor(self, a: Actor, cx: int, cy: int) -> None:
         sp = self._actor_sprite(a)
