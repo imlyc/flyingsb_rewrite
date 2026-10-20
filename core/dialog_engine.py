@@ -16,7 +16,7 @@
   `<->` 关窗  `<+>` 开窗  `<Dn>` 停 n×100ms  `<W=n>`/`<W±n>` 打字速度 (ms/字)  `*..*` 高亮
   `<possub_U/D/L/R>` 气泡位置偏好 (小键盘数字序列 8642 等)  `<WIDTHxx>` 宽度档  `<CSn>` 脸
   `<DIRn[:x]>` 转向  `<WALKd,n[:x]>` 走  `<W?>` 等动作完  `<SEn>` 音效  `<BGMn>` 换曲
-  `<TRANS>/<SOLID>/<WA>` 窗样式  `<FnT/B>` 字号  `<B>/<T>` 粗体  `<PUSH>/<POP>` 存/取样式
+  `<WA>` 等动作完  `<TRANS>/<SOLID>` 窗样式  `<FnT/B>` 字号  `<B>/<T>` 粗体  `<PUSH>/<POP>` 存/取样式
 """
 from __future__ import annotations
 
@@ -251,8 +251,8 @@ def _parse_tag(body: str) -> Tok | None:
             v = int(m.group())
             return Tok("speed", v if u[1] == "=" else (v if u[1] == "+" else -v), int(u[1] != "="))
         return None
-    if u == "WA":
-        return Tok("style", 3)
+    if u == "WA":                       # 等上一个动作 (<DIRn>/<WALK>) 做完: 全库 1237 处, 758 处紧跟 <DIR>
+        return Tok("wait_task")
     if u == "TRANS":
         return Tok("style", 0)
     if u == "SOLID":

@@ -505,7 +505,7 @@ class EventVM:
         self.host = host
         self.name = name
         self.scripts = scripts or {}
-        self.fc_default = fc_default        # ctx+0xfc: 本任务的默认角色 (子任务 = 所属 FC)
+        self._fc_default = fc_default       # ctx+0xf8: 本任务的默认角色 (子任务 = 所属 FC); 2c.00 [0xf8, X] 可改
         self.scheduler = scheduler
         if fc_default != -1:
             self.locals = {0xF8: fc_default, 0xFC: fc_default}
@@ -555,6 +555,17 @@ class EventVM:
 
     def next_pc(self) -> int:
         return self.pc + 1
+
+    @property
+    def fc_default(self) -> int:
+        """ctx+0xf8: 脚本可以用 2c.00 [lvar 0xf8, X] 换默认角色 (ev2 把克隆体当礼服光效用), 所以读局部变量."""
+        v = self.locals.get(0xF8)
+        return self._fc_default if v is None else (v if v < (1 << 31) else -1)
+
+    @fc_default.setter
+    def fc_default(self, v: int) -> None:
+        self._fc_default = v
+        self.locals[0xF8] = v
 
     def addr_of(self, i: int) -> int:
         return self.cmds[i].addr if i < len(self.cmds) else self.cmds[-1].addr + self.cmds[-1].size
