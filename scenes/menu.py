@@ -82,8 +82,8 @@ class TitleScene(Scene):
     def __init__(self, surface: pygame.Surface, audio: AudioManager):
         super().__init__(surface)
         self.audio = audio
-        self.title_font = load_chinese_font(52)
-        self.item_font = load_chinese_font(28)
+        self.title_font = load_chinese_font(64)
+        self.item_font = load_chinese_font(36)
         self.items: list[tuple[str, callable]] = [
             ("竞技场", self._action_arena),
             ("剧情回放", self._action_script_viewer),
@@ -173,11 +173,10 @@ class TitleScene(Scene):
         w, h = self.surface.get_size()
 
         title = self.title_font.render("幻想西游记", True, self.TITLE_COLOR)
-        self.surface.blit(title, title.get_rect(center=(w // 2, h // 4)))
+        self.surface.blit(title, title.get_rect(center=(w // 2, h // 3)))
 
-        # 640x480: 菜单项从屏幕中线略上开始, 行距按条数算, 保证最后一行离底边 ≥ 30px
-        spacing = min(46, (h - 30 - (h // 2 - 20)) // max(1, len(self.items)))
-        start_y = h // 2 - 20
+        start_y = h // 2 + 20
+        spacing = 60
         for i, (label, _) in enumerate(self.items):
             highlight = (i == self.selected)
             color = self.ITEM_HIGHLIGHT if highlight else self.ITEM_COLOR
