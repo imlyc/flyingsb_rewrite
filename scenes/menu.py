@@ -122,11 +122,33 @@ class TitleScene(Scene):
     def _action_new_game(self) -> None:
         # 延迟 import 避免 menu <-> world_map 循环导入
         from scenes.world_map.scene import WorldMapScene
-        # 复刻原版: 新游戏主角 **美娜** 开局 (其余角色后续入队)
-        scene = WorldMapScene(self.surface, self.audio, save=new_game_save())
-        # 序章前先在小森林 (TBB0___P, id 476) 起步, 出村(南) -> 五指村 (见 world_graph._EXTRA_TRANSITIONS)
-        scene.enter_location("TBB0___P")
-        self.next_scene = scene
+        from scenes import prologue as prologue_scene
+
+        def world_after_prologue() -> WorldMapScene:
+            # 复刻原版: 新游戏主角 **美娜** 开局 (其余角色后续入队); 序章末尾车坏在小森林 (TBB0___P, id 476),
+            # 玩家从那里接手, 出村(南) -> 五指村 (见 world_graph._EXTRA_TRANSITIONS)
+            scene = WorldMapScene(self.surface, self.audio, save=new_game_save())
+            scene.enter_location("TBB0___P", auto_beat=False)
+            return scene
+
+        if not prologue_scene.available():
+            scene = world_after_prologue()
+            scene.enter_location("TBB0___P")          # 没有序章数据: 走旧的对白版开篇
+            self.next_scene = scene
+            return
+        # 标题直接进序章; 演完 (或 ESC 跳过) 再建世界地图, 并把"序章"节点记为已完成
+        pro = prologue_scene.PrologueScene(self.surface, return_scene=None, audio=self.audio)
+
+        def on_close() -> None:
+            scene = world_after_prologue()
+            beat = scene.story.current()
+            if beat is not None and beat.id == "intro":
+                scene.story.apply_presave(beat, scene.save)
+                scene._after_beat(beat)
+            pro.next_scene = scene
+
+        pro.on_close = on_close
+        self.next_scene = pro
 
     def _action_load_save(self) -> None:
         # 打开读档界面 (3 个 remake 存档槽 + 可选的原版全剧情存档)
