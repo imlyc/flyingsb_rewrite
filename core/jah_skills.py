@@ -17,8 +17,8 @@ IMPACT (-100) 时 dispatcher 对每个 victim spawn 演出 entity, 演出里 -25
   0x3c 冰河醉雨  FUN_004d72b1/4d728e/4d71ce: 每敌 100t 内每 2t 一颗小冰锥 (FUN_004d6f6a, =青龙), 每 20t 受击;
        t=128 大冰锥 (FUN_004d70fc) 落地结算. (青龙神兽的雨, 无神兽)
   0x3d 吸精大法  FUN_0050e529/50e375/50e256/50e12a/50de1d: 每敌一颗光球在敌人头上 (高 92px), 前 40t 每 2t 从周围
-       (±32..63, ±24..47 px) 冒一粒 e00(247) 光粒飞向球; t>86 播 293, 球以 8px/t 飞向施法者; 到达后 32 粒光粒在施法者
-       周围 60t 后聚拢, 再等 64t: MP 吸取结算 + 敌受击 (197) + 施法者头上飘回 MP 数. 施放播 294.
+       (±32..63, ±24..47 px, 高 0-63) 冒一粒 e00(247) 光粒 (4 套三帧循环之一) 每 tick 升 2px 到 92px 再以 8/6px 飞向球; t>86 播 293, 球以 8px/t 飞向施法者; 到达后 32 粒光粒 (高 92px, 每 tick 降 1px) 在施法者
+       周围 60t 后以 8/6px 聚拢, 再等 64t: MP 吸取结算 + 敌受击 (197) + 施法者头上飘回 MP 数. 施放播 294.
   0x3e 化精為氣  FUN_0050ee16/50eb21/50eab0/50ea66: 自身: ejaha05(286) 帧 7,6,0-5,7 (1t) + 302; 状态位 0x80000
        (下次受击伤害转 MP, 一次性, 见 core.battle.status.ST_HUAJING).
   0x3f 冰柱冰身  FUN_0050efc2/50ef5b/50ee2b: 每敌 ejaha01 帧 0-5 冰柱困住; t>80 (首敌 174) 柱隐 + 受击 + 6 碎冰;
@@ -90,7 +90,9 @@ XIJING_PARTICLE_TICKS = 40
 XIJING_DEPART = 87                  # >0x56
 XIJING_SPEED_H, XIJING_SPEED_V = 8, 6
 XIJING_BURST_N = 32
-XIJING_BURST_FALL = 60              # 光粒下落 0x3b 后聚拢
+XIJING_BURST_FALL = 60              # 光粒下落 0x3b 后聚拢 (每 tick -1px)
+XIJING_PARTICLE_RISE = 2            # 敌侧光粒每 tick 升 2px (0x20000) 直到 92px
+PARTICLE_FRAME_SETS = ((30, 31, 32), (33, 34, 35), (36, 37, 38), (39, 40, 41))   # e00, PTR_DAT_00656abc[rand&3] 循环段
 XIJING_SETTLE = 64                  # 0x40
 RAIN_TICKS = 100
 RAIN_INTERVAL = 2
@@ -138,6 +140,27 @@ def _hit(battle, caster, victim, fx: bool = True, sound: int | None = None) -> N
         _sfx(battle, sound)
 
 
+HUAJING_HIT_FX2 = [('fm', 215, 8, 4), ('fm', 215, 9, 4), ('exit',)]   # @0x655ad0 (et00 帧 8-9), 化精 -250 的第 2 特效
+
+
+def _hit_huajing(battle, caster, victim) -> None:
+    """化精大法 -250 (FUN_0050d6f6): 受击 + 方向 starburst (655c10[dir]) + **et00 8-9** (&DAT_00655ad0, 代替普通的 655b18 红刺) + 301."""
+    from core.battle import combat
+    from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
+    from core.sprites.base import TILE_W, TILE_H
+    if not victim.alive:
+        return
+    combat.set_reaction(victim, "hit", None)
+    spec = combat.hit_effect_specs(victim, caster.name)[0]
+    cx = victim.x * TILE_W + TILE_W // 2
+    cy = victim.y * TILE_H + TILE_H // 2
+    ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
+    oy = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX) - HIT_EFFECT_Y_BASELINE_PX
+    combat._spawn_effect_entity(battle, cx + ox, cy + oy, spec)
+    combat._spawn_skill_extra_effect(battle, cx, cy - HIT_EFFECT_Y_BASELINE_PX, HUAJING_HIT_FX2)
+    _sfx(battle, SFX_HUAJING_HIT)
+
+
 def _shatter(battle, x, y) -> None:
     from core.son_transform import _spawn_ice_shatter
     _spawn_ice_shatter(battle, x, y, big=True)         # 6 块 (exe 调 6 次 FUN_004d6dc3)
@@ -171,24 +194,46 @@ def _fx_entity(battle, think_fn, x, y, z_px: int = 0, atlas: int | None = None, 
     return e
 
 
-def _aim(e: "Entity", tx, ty, tz_px: int, speed_h: int, speed_v: int) -> None:
-    """设 e 的 vx/vy/vz 让它以主轴定速 (exe +0x16c/170 按 facing 主轴定速, 副轴按到达时间等分) 飞到 (tx,ty,tz)."""
+def _aim_axis(e: "Entity", tx, ty, tz_px: int, axis: str, speed: int) -> None:
+    """exe 投射物速度设定 (FUN_004d788d / 50d480 / 50e375): **主轴定速** ±speed px/tick (符号朝目标),
+    其它轴 = 位移 / (主轴位移 / speed) (整除, 至少 1), 即按主轴到达 tick 数等分. 到达判定见 _fly."""
     dx, dy, dz = tx - e.x, ty - e.y, -(tz_px * FP) - e.z
-    if abs(dx) >= abs(dy):
-        steps = max(1, abs(dx) // (speed_h * FP))
-    else:
-        steps = max(1, abs(dy) // (speed_v * FP))
+    major = dx if axis == 'x' else dy
+    steps = max(1, abs(major) // (speed * FP))
+    sign = 1 if major >= 0 else -1
     e.vx, e.vy, e.vz = dx // steps, dy // steps, dz // steps
-    e.user_data['fly_steps'] = int(steps)
+    if axis == 'x':
+        e.vx = sign * speed * FP
+    else:
+        e.vy = sign * speed * FP
+    e.user_data.update(fly_axis=axis, fly_target=(tx, ty, -(tz_px * FP)), fly_steps=int(steps))
+
+
+def _aim(e: "Entity", tx, ty, tz_px: int, speed_h: int, speed_v: int) -> None:
+    """主轴 = |dx|>|dy| ? x : y (exe FUN_0050d480/50e375/50df5a 用 abs 比较), 速度 speed_h / speed_v."""
+    dx, dy = tx - e.x, ty - e.y
+    if abs(dx) >= abs(dy):
+        _aim_axis(e, tx, ty, tz_px, 'x', speed_h)
+    else:
+        _aim_axis(e, tx, ty, tz_px, 'y', speed_v)
 
 
 def _fly(e: "Entity") -> bool:
-    """按 _aim 的速度走一步; 到达返回 True."""
+    """按 _aim 的速度走一步 (exe FUN_004cdbc2: 每轴独立走, 越过目标即钳到目标). 主轴到达返回 True."""
+    ud = e.user_data
+    tx, ty, tz = ud['fly_target']
     e.x += e.vx
     e.y += e.vy
     e.z += e.vz
-    e.user_data['fly_steps'] -= 1
-    return e.user_data['fly_steps'] <= 0
+    ud['fly_steps'] -= 1
+    if ud['fly_axis'] == 'x':
+        done = (e.vx >= 0 and e.x >= tx) or (e.vx < 0 and e.x <= tx)
+    else:
+        done = (e.vy >= 0 and e.y >= ty) or (e.vy < 0 and e.y <= ty)
+    if done or ud['fly_steps'] <= 0:
+        e.x, e.y, e.z = tx, ty, tz
+        return True
+    return False
 
 
 # ------------------------------------------------------------------ 0x39 流星冰鑽
@@ -216,7 +261,7 @@ def _spawn_drill(battle, caster, victim, coord, last: bool) -> None:
                    DRILL_START_Z, DS_ICE, 3)
     d = facing_to_atk_index(caster.facing)
     vx, vy = _ground(victim)
-    _aim(e, vx, vy, DRILL_TARGET_Z, DRILL_SPEED_H, DRILL_SPEED_V)
+    _aim_axis(e, vx, vy, DRILL_TARGET_Z, 'y' if d < 2 else 'x', DRILL_SPEED_V if d < 2 else DRILL_SPEED_H)
     e.user_data.update(drill=True, caster=caster, victim=victim, coord=coord, last=last)
     battle.engine.attach_seq(e, tuple_to_bytecode(DRILL_SEQ_UD if d < 2 else DRILL_SEQ_LR))
     _sfx(battle, SFX_ICE_DRILL)
@@ -251,12 +296,11 @@ def _pillar_up_think(e: "Entity", eng: "Engine") -> None:
     battle, caster, v = ud['battle'], ud['caster'], ud['victim']
     t = ud['tick']
     ud['tick'] += 1
-    if t % PILLAR_UP_HIT_INTERVAL == 0 and t < PILLAR_UP_END:
-        _hit(battle, caster, v, sound=SFX_HIT)
+    if t % PILLAR_UP_HIT_INTERVAL == 0 and t <= PILLAR_UP_END:
+        _hit(battle, caster, v, sound=SFX_HIT)          # t=0,20,40,60,80 (80 与结算同 tick)
     if t == PILLAR_UP_END:
         if ud['first']:
             _sfx(battle, SFX_ICE_BIG)
-        _hit(battle, caster, v, fx=False)
         _shatter(battle, e.x, e.y)
         ud['coord'].user_data['pending'] -= 1
         eng.destroy(e)
@@ -300,7 +344,7 @@ def _huajing_orb_think(e: "Entity", eng: "Engine") -> None:
             _aim(e, vx, vy + FP, ORB_TARGET_Z, ORB_SPEED_H, ORB_SPEED_V)
             e.state_code = 10
     elif e.state_code == 10 and _fly(e):
-        _hit(ud['battle'], ud['caster'], ud['victim'], sound=SFX_HUAJING_HIT)
+        _hit_huajing(ud['battle'], ud['caster'], ud['victim'])
         ud['coord'].user_data['pending'] -= 1
         eng.destroy(e)
 
@@ -354,28 +398,39 @@ def spawn_ice_rain(battle, attacker, target_tile) -> "Entity":
 
 # ------------------------------------------------------------------ 0x3d 吸精大法
 def _particle_think(e: "Entity", eng: "Engine") -> None:
-    """光粒: 飞向目标 (exe FUN_0050df5a/50dc59 简化: 直线到达即灭)."""
+    """光粒 (exe FUN_0050df5a 敌侧 / FUN_0050dc59 施法者侧): 先竖向漂 (升到 92px / 降 60 tick),
+    再按主轴 8px·副轴 6px 飞向目标 (x,y), z 不变; 到达即灭. 帧: e00 三帧 1 tick 循环."""
     ud = e.user_data
     if 'particle' not in ud:
         return
     ud['tick'] += 1
-    e.frame_idx = ud['frames'][(ud['tick'] // 2) % len(ud['frames'])]
+    e.frame_idx = ud['frames'][ud['tick'] % 3]
     if e.state_code == 0:
-        if ud['tick'] >= ud['wait']:
-            tx, ty, tz = ud['target']()
-            _aim(e, tx, ty, tz, XIJING_SPEED_H, XIJING_SPEED_V)
+        if ud['rise']:
+            e.z -= XIJING_PARTICLE_RISE * FP
+            ready = e.z <= -(ORB_Z * FP)
+            if ready:
+                e.z = -(ORB_Z * FP)
+        else:
+            e.z += FP                                   # 降 1px/tick
+            ready = ud['tick'] > XIJING_BURST_FALL - 1
+        if ready:
+            tx, ty = ud['target']
+            _aim(e, tx, ty, -e.z // FP, XIJING_SPEED_H, XIJING_SPEED_V)
             e.state_code = 10
     elif e.state_code == 10 and _fly(e):
         eng.destroy(e)
 
 
-def _spawn_particle(battle, cx, cy, target_fn, wait: int) -> None:
+def _spawn_particle(battle, cx, cy, target_xy, rise: bool) -> None:
+    """随机落点: x ±(32..63) px, y ±(24..47) px (exe rand&0x1f+0x20 / rand%0x18+0x18, 符号各随机)."""
     rng = battle.rng
     ox = (rng.randint(0, 31) + 32) * (1 if rng.randint(0, 1) else -1)
     oy = (rng.randint(0, 23) + 24) * (1 if rng.randint(0, 1) else -1)
-    p = _fx_entity(battle, _particle_think, cx + ox * FP, cy + oy * FP, rng.randint(0, 63), E00, 30)
-    p.user_data.update(particle=True, target=target_fn, wait=wait,
-                       frames=(30, 31, 32, 33, 34, 35)[rng.randint(0, 3):][:3])
+    z0 = rng.randint(0, 63) if rise else ORB_Z
+    p = _fx_entity(battle, _particle_think, cx + ox * FP, cy + oy * FP, z0, E00, 30)
+    p.user_data.update(particle=True, target=target_xy, rise=rise,
+                       frames=PARTICLE_FRAME_SETS[rng.randint(0, 3)])
 
 
 def _xijing_orb_think(e: "Entity", eng: "Engine") -> None:
@@ -389,7 +444,7 @@ def _xijing_orb_think(e: "Entity", eng: "Engine") -> None:
     if e.state_code == 0:
         if t < XIJING_PARTICLE_TICKS and t & 1:
             vx, vy = _ground(v)
-            _spawn_particle(battle, vx, vy, lambda e=e: (e.x, e.y, -e.z // FP), 0)
+            _spawn_particle(battle, vx, vy, (vx, vy), rise=True)      # 飞向敌人脚下坐标 (= 光球 x,y)
         if t > XIJING_DEPART:
             _sfx(battle, SFX_XIJING_DEPART)
             cx, cy = _ground(caster)
@@ -399,7 +454,7 @@ def _xijing_orb_think(e: "Entity", eng: "Engine") -> None:
         if _fly(e):
             cx, cy = _ground(caster)
             for _ in range(XIJING_BURST_N):
-                _spawn_particle(battle, cx, cy, lambda cx=cx, cy=cy: (cx, cy, ORB_Z), XIJING_BURST_FALL)
+                _spawn_particle(battle, cx, cy, (cx, cy), rise=False)
             ud['settle_at'] = t + XIJING_SETTLE
             e.state_code = 20
     elif e.state_code == 20 and t >= ud['settle_at']:

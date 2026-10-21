@@ -101,7 +101,7 @@ def test_ice_drill_schedule_and_hits():
 def test_pillar_up_timeline():
     b, p, e, played = _battle(0x3a)
     end = _run(b)
-    assert played.count(J.SFX_HIT) == 4           # t=0,20,40,60 (80 为结算, 不播 189)
+    assert played.count(J.SFX_HIT) == 5           # t=0,20,40,60,80 (exe tick%20==0 与 t=80 结算同 tick)
     assert J.SFX_ICE_BIG in played
     assert end >= 17 + J.PILLAR_UP_END
 
@@ -149,3 +149,31 @@ def test_xiuluo_land_sound_and_dragon_cones():
     b, p, e, played = _battle(0x41)
     _run(b)
     assert played.index(257) < played.index(J.SFX_ICE_BIG)
+
+
+def test_drill_axis_follows_caster_facing():
+    """exe FUN_004d788d: 施法者朝上/下 → vy=∓24 定速; 朝左/右 → vx=∓32 定速 (与目标相对位置无关)."""
+    b, p, e, played = _battle(0x39)
+    drills = []
+    for _ in range(40):
+        b.engine.tick()
+        drills += [x for x in b.engine.entities if x.user_data.get('drill') and x not in drills]
+        if drills:
+            break
+    assert drills
+    d = drills[0]
+    assert abs(d.vy) == J.DRILL_SPEED_V * J.FP, "朝上: 竖向 24px/tick 定速"
+
+
+def test_xijing_particles_rise_then_fly_with_exe_frames():
+    b, p, e, played = _battle(0x3d)
+    seen = set(); rose = False
+    for _ in range(120):
+        b.engine.tick()
+        for x in b.engine.entities:
+            if x.user_data.get('particle') and (x.flags & 0x800):
+                seen.add(x.user_data['frames'])
+                if x.user_data['rise'] and x.state_code == 0 and x.z < 0:
+                    rose = True
+    assert seen and seen <= set(J.PARTICLE_FRAME_SETS)
+    assert rose
