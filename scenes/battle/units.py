@@ -244,8 +244,14 @@ def _resolve_attack_frame(scene: "BattleScene", u, cs):
     # mode2/IDLE 路径 (op 0x06, atlas_slot | 0x20000): slot = per-unit ps_ atlas 家族编号
     # (exe per-unit remap: slot N → ps_XXX10N, 如孙悟空槽 5 = ps_CSON105 翻跟头, 槽 2 = ps_CSON102
     # 施法姿). ps_ 战斗精灵统一 64×96 网格, 脚锚 (32, 84). frame_idx 顺序编号 col=i%cols, row=i//cols.
-    if ent.atlas_slot & 0x20000:
-        key = u.sprite_key[:-2] + f"{slot_lo:02d}"
+    # mode1 (op 0x05, atlas_slot | 0x10000): ps_ 登记表 **绝对下标** (exe FUN_004b3663 直接 0x5b0008[slot]),
+    # 如紫河施法 106 = ps_CJAH002; 同样 64×96 网格.
+    if (ent.atlas_slot & 0x30000) in (0x10000, 0x20000):
+        if ent.atlas_slot & 0x20000:
+            key = u.sprite_key[:-2] + f"{slot_lo:02d}"
+        else:
+            from core.grid_atlas_table import grid_atlas_key
+            key = grid_atlas_key(slot_lo) or ""
         try:
             sheet = get_fm_surface(key)
             cols = max(1, sheet.get_width() // 64)

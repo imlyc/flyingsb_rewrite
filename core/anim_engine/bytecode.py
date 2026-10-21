@@ -12,7 +12,8 @@ def tuple_to_bytecode(tuple_seq: list) -> bytes:
     把现有的 raw_attack_seqs.py 的 tuple seq 转成 bytecode.
     支持 op tuple:
       ('fm', slot, frame, ticks)         → op 0x04
-      ('idle', slot, frame, ticks)       → op 0x06
+      ('idle', slot, frame, ticks)       → op 0x06  (mode2: 角色相对 ps_ 槽)
+      ('fm_mode1', slot, frame, ticks)   → op 0x05  (mode1: ps_ 登记表绝对下标)
       ('move', dx, dy, ticks)            → op 0x0b (dz=0)
       ('move', dx, dy, dz, ticks)        → op 0x0b
       ('sound', id, op_hex)              → 0x11 (0x0411) / 0x12 (0x0413 实际是 SET_SWING_SOUND? 见下)
@@ -31,6 +32,10 @@ def tuple_to_bytecode(tuple_seq: list) -> bytes:
         if kind == 'fm':
             _, slot, frame, ticks = t
             out += encode_op(0x04, slot, frame, ticks)
+        elif kind == 'fm_mode1':
+            # op 0x05: ps_ 网格登记表 (0x5b0008) 绝对下标 (见 core.grid_atlas_table), 帧 = 网格序号
+            _, slot, frame, ticks = t
+            out += encode_op(0x05, slot, frame, ticks)
         elif kind == 'idle':
             _, slot, frame, ticks = t
             out += encode_op(0x06, slot, frame, ticks)

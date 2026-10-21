@@ -1,6 +1,7 @@
 """紫河 9 技能演出 (skill_id 0x39..0x41), 2026-10-20 按 exe 逆向 (Ghidra, dispatcher 0x50cd9a..0x50f9c1).
 
-共同点: 施法 seq 表 @0x679948 (4 方向, mode1 槽 106 → 紫河 g0 atlas cjah0_g0=34, 2 帧 5+12 tick, 然后 IMPACT);
+共同点: 施法 seq 表 @0x679948 (4 方向, op 0x05 mode1 槽 106 = ps_ 登记表绝对下标 → ps_CJAH002 抬手姿, 每方向第 2,3 格
+5+12 tick, 然后 IMPACT);
 IMPACT (-100) 时 dispatcher 对每个 victim spawn 演出 entity, 演出里 -250 = 受击 (reaction + 标准命中特效 + 音),
 -200 = 结算 (伤害 / MP). 我们: IMPACT → SKILL_IMPACT_SPAWN → 这里 spawn 一个 coordinator (不渲染) + 各 victim
 的演出 entity; 全部演完 coordinator 发 SIG_IMPACT_2 (→ tactics 结算 _pending_damage_range 里所有敌人) + SIG_END.
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from core.anim_engine.entity import Entity
 
 FP = 65536
-JAH_CAST_ATLAS = 34                 # cjah0_g0 (exe mode1 槽 106 → 紫河形态 0 的 g0)
+JAH_CAST_SLOT = 106                 # mode1 (op 0x05) = ps_ 登记表 0x5b0008 绝对下标 106 = ps_CJAH002 (4×4 抬手施法姿)
 DS_ICE = 232
 EJAHA01, EJAHA02, EJAHA05, EJAHA07, EJAHA08 = 284, 285, 286, 287, 288
 E00 = 247                           # 光粒 (吸精)
@@ -58,9 +59,10 @@ SFX_HUAQI = 302                     # 0x12e 化精為氣
 SFX_XIULUO_SPAWN = 214              # 0xd6 修羅 大冰 spawn
 SFX_XIULUO_LAND = 291               # 0x123 修羅 落地
 
-# 施法 seq (exe @0x679948, 4 方向): 紫河 g0 帧 (2,3)/(6,7)/(10,11)/(14,15), 5+12 tick, IMPACT, EXIT
+# 施法 seq (exe @0x679948, 4 方向): op 0x05 槽 106 (ps_CJAH002 每方向一行 4 格) 第 2,3 格 = 抬手,
+# 行 = 方向 (上/下/左/右), 5+12 tick, IMPACT, EXIT. ⚠ 不是 fm 攻击图 (cjah0_g0 是挥砍).
 SKILL_JAH_CAST: list[list[tuple]] = [
-    [('fm', JAH_CAST_ATLAS, b, 5), ('fm', JAH_CAST_ATLAS, b + 1, 12), ('impact',), ('exit',)]
+    [('fm_mode1', JAH_CAST_SLOT, b, 5), ('fm_mode1', JAH_CAST_SLOT, b + 1, 12), ('impact',), ('exit',)]
     for b in (2, 6, 10, 14)
 ]
 # ds_ice 冰钻 seq (exe @0x656c18 上下 / @0x656bbc 左右)

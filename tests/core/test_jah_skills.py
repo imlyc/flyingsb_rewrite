@@ -59,7 +59,12 @@ def _run(b, n=900):
 
 
 def test_cast_seq_matches_exe():
-    assert J.SKILL_JAH_CAST[0] == [('fm', 34, 2, 5), ('fm', 34, 3, 12), ('impact',), ('exit',)]
+    assert J.SKILL_JAH_CAST[0] == [('fm_mode1', 106, 2, 5), ('fm_mode1', 106, 3, 12), ('impact',), ('exit',)]
+    from core.grid_atlas_table import grid_atlas_key, GRID_ATLAS
+    assert grid_atlas_key(106) == "ps_CJAH002" and GRID_ATLAS[106][1:3] == (4, 4)
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    bc = tuple_to_bytecode(J.SKILL_JAH_CAST[0])
+    assert bc[0] == 0x05 and bc[10] == 0x05
     assert [s[0][2] for s in J.SKILL_JAH_CAST] == [2, 6, 10, 14]
     from core.skill_seq import SKILL_SEQS, SKILL_IMPACT_SPAWN
     for sid in range(0x39, 0x42):
@@ -71,7 +76,7 @@ def test_effect_frames_within_atlases():
                 J.XIULUO_LAND_SEQ, J.DRAGON_SEQ, J.SKILL_JAH_CAST[3]):
         for t in seq:
             if t[0] == 'fm':
-                name = {34: 'cjah0_g0', 232: 'ds_ice', 284: 'ejaha01', 285: 'ejaha02', 286: 'ejaha05',
+                name = {232: 'ds_ice', 284: 'ejaha01', 285: 'ejaha02', 286: 'ejaha05',
                         287: 'ejaha07', 288: 'ejaha08', 247: 'e00'}[t[1]]
                 assert t[2] < len(FM_FRAMES[name]), (name, t)
 
