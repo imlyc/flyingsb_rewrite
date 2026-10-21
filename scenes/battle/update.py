@@ -182,7 +182,7 @@ def _ingest_damage_events(scene: "BattleScene", now: int) -> None:
         # 同位置先前的 float 全部 demote (instant remove), 只留新一发
         scene._floats = [f for f in scene._floats
                          if abs(f.world_x - wx) > 4 or abs(f.world_y - wy) > 4]
-        ft = FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss, heal=ev.heal)
+        ft = FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss, heal=ev.heal or ev.mp)
         # 绑定受击单位 → 飘字自驱发"闪烁"信号给它 (仿原版数字 entity 发 signal). 含已死单位.
         ft.target_unit = next((u for u in scene.battle.all_units
                                if u.x == ev.x and u.y == ev.y), None)

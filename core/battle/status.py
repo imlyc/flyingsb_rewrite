@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 ST_DOUZHUAN = 0x4000     # 斗轉星移 (英雄樂章 0x2d 也给同一位)
 ST_FANHE = 0x8000        # 返荷杖
+ST_HUAJING = 0x80000     # 化精為氣 (bit 19, 一次性: 受击时清位, 伤害转 MP; 不在回合递减范围内)
 TIMED_STATUS_BITS = tuple(1 << b for b in range(8, 18))   # exe 清位掩码 0xfffc00ff 覆盖 bit 8..17
 
 

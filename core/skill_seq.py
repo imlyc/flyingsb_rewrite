@@ -825,7 +825,13 @@ SKILL_SEQS_SAO = [list(SKILL_SAO_CAST) for _ in range(4)]   # 4 方向同一条
 SKILL_STATUS_EFFECTS: dict[int, tuple[int, int]] = {
     0x1e: (0x4000, 2),   # 斗轉星移: 受伤归零
     0x1f: (0x8000, 2),   # 返荷杖: 受伤归零 + 攻击者扣其攻击力
+    0x3e: (0x80000, 0),  # 化精為氣: 下次受击伤害转 MP (一次性, 不计回合; 受击时清位)
 }
+
+
+# MP 类技能 (紫河): IMPACT_2 结算时不扣 HP, 走 combat._apply_mp_drain. 'zero' = 敌 MP 减到 0 (化精大法),
+# 'absorb' = 吸到自己 (吸精大法). 数值见 combat (exe FUN_004a6efe case 3 近似).
+SKILL_MP_DRAIN: dict[int, str] = {0x3b: 'zero', 0x3d: 'absorb'}
 
 
 SKILL_SEQS: dict[int, list[list[tuple]]] = {
@@ -837,6 +843,9 @@ SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x18: SKILL_SAM_GOD_FIST,         # 三藏 三藏神拳 (A 类 5 IMPACT, 3 段切换)
     0x1e: SKILL_SEQS_SAO,             # 沙悟净 斗轉星移 (自身状态, 结印 cast)
     0x1f: SKILL_SEQS_SAO,             # 沙悟净 返荷杖 (自身状态, 结印 cast)
+    # 紫河 9 技能: 共用施法 seq @0x679948 (cjah0_g0 2 帧), 全是 B 类 (IMPACT → core.jah_skills spawn)
+    **{sid: __import__('core.jah_skills', fromlist=['SKILL_JAH_CAST']).SKILL_JAH_CAST
+       for sid in range(0x39, 0x42)},
     0x20: SKILL_VERTICAL_SLASH,       # 蒙面人 垂直斬
     0x21: SKILL_CAST_CDIT1_M1,        # 赤雲波 (B 类, IMPACT 时 spawn projectile, 不直接掉血)
     0x22: SKILL_CAST_CDIT1_M1,        # 火龍斬 (B 类, 共享 cast seq, IMPACT 时 spawn effect)
@@ -1034,7 +1043,15 @@ def _spawn_phoenix(battle, attacker, target_tile):
     return spawn_phoenix_effect(battle, attacker, target_tile)
 
 
+def _jah(sid):
+    def _f(battle, attacker, target_tile):
+        from core.jah_skills import JAH_IMPACT_SPAWN
+        return JAH_IMPACT_SPAWN[sid](battle, attacker, target_tile)
+    return _f
+
+
 SKILL_IMPACT_SPAWN: dict[int, "callable"] = {
+    **{sid: _jah(sid) for sid in range(0x39, 0x42)},   # 紫河 9 技能 (core.jah_skills)
     0x17: _spawn_phoenix,    # 三藏 凤凰掌
     0x21: _spawn_cloudwave,
     0x22: _spawn_huolong,

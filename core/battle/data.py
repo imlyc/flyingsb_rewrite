@@ -25,6 +25,7 @@ class DamageEvent:
     y: int
     miss: bool = False
     heal: bool = False    # True = 回血事件 (生命之火等), 飘字显示 +N 绿色
+    mp: bool = False      # True = MP 变化 (化精/吸精/化精為氣), damage = 变化量, remaining_hp = 之后的 MP
 
 
 @dataclass
@@ -126,6 +127,7 @@ class BattleUnit:
     pending_draw_signal: int = -1000   # 起手音触发的 seq 信号 (cid<8 组=-1000, cid>=8 组=-1001)
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
+    pending_impact2: bool = False             # B 类技能: 投射物落地 (SIG_IMPACT_2) 的结算中 (不再 spawn)
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
                                               # 之前的 IMPACT 只放 hit-fx + reaction (视觉反馈)
     # === 原版式双值 HP (working buffer + committed) + 事件(signal)驱动提交 ===

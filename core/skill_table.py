@@ -3,8 +3,8 @@ dump_skill_flags.java 生成; 2026-10-20). ⚠ 表真正起点比名称锚点早
 [4]=? [5]=? [6]=pattern [7]=action template [8]=dispatcher [9]=ptr [10]=next.
 
 flags 位 (从 FUN_004a6efe 技能结算函数读法推): 0x01 = 攻击 (对敌), 0x20 = ?, 0x40 = 回复 HP, 0x80 = 状态类 (加/解状态),
-0x4000/0x8000 = 结算用修饰, 0x10000 = 复活判定, 0x800000 = 回复量按百分比, 0x01000000 = 目标为我方,
-0x02000000/0x03000000/... 高字节 = 效果类别.
+0x4000/0x8000 = 结算用修饰, 0x10000 = 复活判定, 0x800000 = 回复量按百分比;
+高字节 = 效果类别 (1 回复/状态, 2 封魔, 3 MP 类, 4 地雷, 5 召唤), 不是目标阵营.
 """
 from __future__ import annotations
 
@@ -90,8 +90,11 @@ def skill_flags(skill_id: int | None) -> int:
 
 
 def skill_targets_allies(skill_id: int | None) -> bool:
-    """目标是我方 (回复/复活/加状态/解状态)."""
-    return bool(skill_flags(skill_id) & SKILL_FLAG_ALLY)
+    """目标是我方 (回复/复活/加状态/解状态): 没有 0x01 (对敌) 且带 0x40/0x80 (回复/状态).
+    ⚠ 高字节不是"我方"位而是效果类别 (1 回复/状态, 2 封魔, 3 MP 类 化精/吸精, 4 地雷, 5 召唤):
+    化精大法 0x03000001 / 封魔 0x02000041 都是对敌."""
+    f = skill_flags(skill_id)
+    return not (f & SKILL_FLAG_ATTACK) and bool(f & (SKILL_FLAG_HEAL | SKILL_FLAG_STATUS))
 
 
 def is_status_skill(skill_id: int | None) -> bool:

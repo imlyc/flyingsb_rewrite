@@ -119,13 +119,14 @@ class TacticsBattle:
                 snd = SKILL_IMPACT2_SOUNDS.get(caster.pending_skill_id, -1)
                 if snd >= 0:
                     self.engine._emit('sound_play', source_entity, snd)
-                # 让 apply_pending_attack 走最终结算分支: 把 count 提到 total 之上, 强制 last
+                # 让 apply_pending_attack 走最终结算分支: 把 count 提到 total 之上, 强制 last;
+                # pending_impact2 让它跳过 "再 spawn 投射物" (skill_id 保留, MP/状态类分支还要看它)
                 caster.pending_impact_count = caster.pending_impact_total - 1
-                # 临时清 skill_id 让 has_impact_spawn 检查失败 (= 不再 spawn 第 2 个投射物)
-                saved_sid = caster.pending_skill_id
-                caster.pending_skill_id = None
-                combat.apply_pending_attack(self, caster)
-                caster.pending_skill_id = saved_sid
+                caster.pending_impact2 = True
+                try:
+                    combat.apply_pending_attack(self, caster)
+                finally:
+                    caster.pending_impact2 = False
                 # B 类 cast seq 没 SIG_END, post_attack_anim 不会自动触发 — 这里手动收尾
                 self.post_attack_anim(caster)
             return
