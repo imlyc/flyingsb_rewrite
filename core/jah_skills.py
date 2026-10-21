@@ -18,7 +18,8 @@ IMPACT (-100) 时 dispatcher 对每个 victim spawn 演出 entity, 演出里 -25
   0x3c 冰河醉雨  FUN_004d72b1/4d728e/4d71ce: 每敌 100t 内每 2t 一颗小冰锥 (FUN_004d6f6a, =青龙), 每 20t 受击;
        t=128 大冰锥 (FUN_004d70fc) 落地结算. (青龙神兽的雨, 无神兽)
   0x3d 吸精大法  FUN_0050e529/50e375/50e256/50e12a/50de1d: 每敌一颗光球在敌人头上 (高 92px), 前 40t 每 2t 从周围
-       (±32..63, ±24..47 px, 高 0-63) 冒一粒 e00(247) 光粒 (4 套三帧循环之一) 每 tick 升 2px 到 92px 再以 8/6px 飞向球; t>86 播 293, 球以 8px/t 飞向施法者; 到达后 32 粒光粒 (高 92px, 每 tick 降 1px) 在施法者
+       (±32..63, ±24..47 px, 高 0-63) 冒一粒 e00(247) 光粒 (4 套三帧循环之一), 升起期间 (每 tick 升 2px 到 92px) 以 2/1.5px·tick² 无阻尼弹簧绕光球来回摆,
+       到位后再以 8/6px 直线飞入球; t>86 播 293, 球以 8px/t 飞向施法者; 到达后 32 粒光粒 (高 92px, 每 tick 降 1px, 同样弹簧绕施法者摆) 在施法者
        周围 60t 后以 8/6px 聚拢, 再等 64t: MP 吸取结算 + 敌受击 (197) + 施法者头上飘回 MP 数. 施放播 294.
   0x3e 化精為氣  FUN_0050ee16/50eb21/50eab0/50ea66: 自身: ejaha05(286) 帧 7,6,0-5,7 (1t) + 302; 状态位 0x80000
        (下次受击伤害转 MP, 一次性, 见 core.battle.status.ST_HUAJING).
@@ -94,6 +95,8 @@ XIJING_SPEED_H, XIJING_SPEED_V = 8, 6
 XIJING_BURST_N = 32
 XIJING_BURST_FALL = 60              # 光粒下落 0x3b 后聚拢 (每 tick -1px)
 XIJING_PARTICLE_RISE = 2            # 敌侧光粒每 tick 升 2px (0x20000) 直到 92px
+PARTICLE_ACCEL_X = 2 * FP           # +0x178 = 0x20000: 漂浮期每 tick 朝目标 x 加速 2px (无阻尼弹簧 → 绕光球来回摆)
+PARTICLE_ACCEL_Y = 3 * FP // 2      # +0x17c = 0x18000: y 方向 1.5px
 PARTICLE_FRAME_SETS = ((30, 31, 32), (33, 34, 35), (36, 37, 38), (39, 40, 41))   # e00, PTR_DAT_00656abc[rand&3] 循环段
 XIJING_SETTLE = 64                  # 0x40
 RAIN_TICKS = 100
@@ -408,6 +411,12 @@ def _particle_think(e: "Entity", eng: "Engine") -> None:
     ud['tick'] += 1
     e.frame_idx = ud['frames'][ud['tick'] % 3]
     if e.state_code == 0:
+        # 漂浮期 (exe FUN_004c3211 flags 0x31 分支): vx += ±2px 朝目标, vy += ±1.5px 朝目标, 不钳位 → 围绕光球来回摆动
+        tx, ty = ud['target']
+        e.vx += PARTICLE_ACCEL_X if e.x < tx else -PARTICLE_ACCEL_X
+        e.x += e.vx
+        e.vy += PARTICLE_ACCEL_Y if e.y < ty else -PARTICLE_ACCEL_Y
+        e.y += e.vy
         if ud['rise']:
             e.z -= XIJING_PARTICLE_RISE * FP
             ready = e.z <= -(ORB_Z * FP)
@@ -417,7 +426,7 @@ def _particle_think(e: "Entity", eng: "Engine") -> None:
             e.z += FP                                   # 降 1px/tick
             ready = ud['tick'] > XIJING_BURST_FALL - 1
         if ready:
-            tx, ty = ud['target']
+            # 升到位 / 60 tick 后: 改直线 (FUN_004cdbc2, 加速度清 0) 8/6px 飞向目标, 到达即灭
             _aim(e, tx, ty, -e.z // FP, XIJING_SPEED_H, XIJING_SPEED_V)
             e.state_code = 10
     elif e.state_code == 10 and _fly(e):

@@ -182,3 +182,20 @@ def test_xijing_particles_rise_then_fly_with_exe_frames():
                     rose = True
     assert seen and seen <= set(J.PARTICLE_FRAME_SETS)
     assert rose
+
+
+def test_xijing_particles_oscillate_around_orb_before_diving():
+    """exe FUN_004c3211 弹簧: 漂浮期光粒 x 会多次越过光球 x (来回摆), 之后才直线飞入."""
+    b, p, e, played = _battle(0x3d)
+    crossings = {}
+    last_side = {}
+    for _ in range(80):
+        b.engine.tick()
+        for x in b.engine.entities:
+            if x.user_data.get('particle') and (x.flags & 0x800) and x.state_code == 0:
+                tx = x.user_data['target'][0]
+                side = x.x >= tx
+                if x.id in last_side and side != last_side[x.id]:
+                    crossings[x.id] = crossings.get(x.id, 0) + 1
+                last_side[x.id] = side
+    assert crossings and max(crossings.values()) >= 2, crossings
