@@ -208,7 +208,11 @@ def _coord_finish(e: "Entity", eng: "Engine") -> None:
     ud['defer_end'] = True
     eng._signal(e, SIG_IMPACT_2)
     ud['unit'] = ud['caster']
-    ud['end_at'] = ud['tick'] + POST_SETTLE_TICKS
+    # 化精為氣 (自身状态, 无受击/飘字): 实录 特效播完 (+36) 下一 tick 施法者就回待机, 不等 37 也不保持到渐亮结束
+    instant = ud['caster'].pending_skill_id == 0x3e
+    ud['end_at'] = ud['tick'] + (0 if instant else POST_SETTLE_TICKS)
+    if instant:
+        ud['caster'].cast_hold = False
     e.think_fn = _coord_end_think
 
 
