@@ -26,9 +26,12 @@ IMPACT (-100) 时 dispatcher 对每个 victim spawn 演出 entity, 演出里 -25
   0x3f 冰柱冰身  FUN_0050efc2/50ef5b/50ee2b: 每敌 ejaha01 帧 0-5 冰柱困住; t>80 (首敌 174) 柱隐 + 受击 + 6 碎冰;
        t>100 受击 + 结算. 施放播 238.
   0x40 修羅勾魂  FUN_0050f5c0/50f50e/50f4bc/50f458/50f3fd: 首敌头顶 500px 高落下一块 ejaha07(287) 帧 18 大冰
-       (48px/t), 播 214; 落地播 291 + 原地播 ejaha07 帧 0-17 (3t); 播完全敌受击 + 结算.
-  0x41 冰龍升天  FUN_0050f9c1/50f959/50f8fe: 施法者脚下 ejaha08(288) 0-15 (1t, tick1 播 257) 冰龙; 播完每敌一根
-       大冰锥 (FUN_004d70fc, 174) 落地结算.
+       (48px/t, 11t 落地), 播 214; 落地播 291 + 原地播 ejaha07 帧 0-17 (ticks=3 → 实机 4t/帧, 共 72t); 播完 -200 全敌受击 + 结算.
+       实录 2026-10-22 (jah_40_xiuluo_F22498): 结算后 4 位飘字 +39 施法者放手, 再渐亮.
+  0x41 冰龍升天  FUN_0050f9c1/50f959/50f8fe: **瞄准光标格** ejaha08(288) 0-15 (ticks=1 → 实机 2t/帧, 共 32t; tick1 播 257) 冰龙; 播完每敌一根
+       大冰锥 (FUN_004d70fc: 敌 (x, y+1px) z 500 vz -48 帧 DAT_00656bb8[rand%3], 播 0xae) 10t 落地 → 24 碎冰 + -200/-250 结算.
+       实录 2026-10-22 (jah_41_icedragon_F24404): 龙 +18..+50, 锥 +50..+60, 碎冰 +60 (17t 匀速上飘), 4 位飘字 +39 放手, 再渐亮.
+  碎冰 (FUN_004d6dc3/4d6d46) 与 飘字 (FUN_004d05d8/4d0488/4d0330) 反编译见 reverse_engineering/icedragon_decomp.txt.
 """
 from __future__ import annotations
 
@@ -83,8 +86,8 @@ DRILL_TARGET_Z = 48                 # 0x300000
 DRILL_SPEED_V, DRILL_SPEED_H = 24, 32
 PILLAR_UP_HIT_INTERVAL = 20
 PILLAR_UP_END = 80
-PILLAR_TRAP_HIDE = 81               # >0x50
-PILLAR_TRAP_END = 101               # >100
+PILLAR_TRAP_HIDE = 82               # exe tick>0x50 → 柱 state 10 持续 70 tick (实录 st 0×12 10×70 20×20)
+PILLAR_TRAP_END = 102               # exe tick>100 → 柱寿命 102, 死时发 -250+-200
 ORB_Z = 92                          # 0x5c0000
 ORB_HOLD = 61                       # 化精 球悬停: exe tick==0x3c 切态, 实录 state0 共 61 tick
 ORB_SPEED_H, ORB_SPEED_V = 32, 24
@@ -105,7 +108,7 @@ RAIN_REACT_INTERVAL = 20
 RAIN_BIG_AT = 128
 XIULUO_HEIGHT = 500                 # 0x1f40000
 XIULUO_VZ = 48
-CONE_LAND_TICKS = 12                # 大冰锥 500px / 48px/t ≈ 11t, 多等 1
+CONE_LAND_TICKS = 10                # 大冰锥 (预扣一步后 452px) / 48px/t = 10t 落地, 落地当 tick 结算 (实录 +60)
 
 
 # ------------------------------------------------------------------ helpers
@@ -196,7 +199,23 @@ def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
     return e
 
 
-POST_SETTLE_TICKS = 37              # 实录: 结算 → 施法者恢复待机 = 58 tick (含 21 tick 渐亮) ⇒ 37 = 等伤害/MP 数字飘字 (-20) + 受击 seq 完
+# 结算 (-200) 后 dispatcher 在 state 0x1e 等 **飘字 -20**: FUN_004d05d8 每敌生成 spawner (FUN_004d0488), 每 2 tick 出 1 位数字实体
+# (FUN_004d0330, slot 214), 末位数字 state 0 (20t 落) + state 1 (10t 弹) 结束时发 -20 → 下一 tick 进 0x28 渐亮.
+# 末位数字生成 = 结算 + (1|2 池序奇偶) + 2×(位数-1), 再 +31 ⇒ 结算 → idle 标志 = 30 + 2×位数 (+0/1)
+# (实录 修羅 4 位 +39, 冰龍 4 位 +39, 冰身 2 位 +34, 擎天 3 位 +37 (渐亮起点), 化精 3 位 +35).
+POST_SETTLE_BASE_TICKS = 30
+POST_SETTLE_PER_DIGIT = 2
+# 施法者何时放下手 (flags |= 0x10000 → 待机帧): 每个 dispatcher 模板不同 — 这些在进 0x28 渐亮**前**放手 (实录 idle 在渐亮开始 tick),
+# 其余 (冰錐/擎天/化精/冰雨/吸精) 在渐亮**结束**后才放手.
+IDLE_BEFORE_FADE = {0x3e, 0x3f, 0x40, 0x41}
+
+
+def _float_digits(battle, n0: int) -> int:
+    """结算新增飘字里最大位数 (MISS 4 字符; 无飘字 0)."""
+    nd = 0
+    for ev in battle.damage_events[n0:]:
+        nd = max(nd, 4 if getattr(ev, 'miss', False) else len(str(int(ev.damage))))
+    return nd
 
 
 def _coord_finish(e: "Entity", eng: "Engine") -> None:
@@ -206,12 +225,16 @@ def _coord_finish(e: "Entity", eng: "Engine") -> None:
         return
     ud['done'] = True
     ud['defer_end'] = True
+    battle = ud['battle']
+    n0 = len(battle.damage_events)
     eng._signal(e, SIG_IMPACT_2)
     ud['unit'] = ud['caster']
-    # 化精為氣 (自身状态, 无受击/飘字): 实录 特效播完 (+36) 下一 tick 施法者就回待机, 不等 37 也不保持到渐亮结束
-    instant = ud['caster'].pending_skill_id == 0x3e
-    ud['end_at'] = ud['tick'] + (0 if instant else POST_SETTLE_TICKS)
-    if instant:
+    sid = ud['caster'].pending_skill_id
+    nd = _float_digits(battle, n0)
+    # 化精為氣 (自身状态, 无飘字): 实录 特效播完 (+36) 下一 tick 施法者就回待机; 其它按飘字位数等 -20
+    ud['end_at'] = ud['tick'] + (0 if nd == 0 else POST_SETTLE_BASE_TICKS + POST_SETTLE_PER_DIGIT * nd)
+    ud['idle_before_fade'] = sid in IDLE_BEFORE_FADE
+    if nd == 0:
         ud['caster'].cast_hold = False
     e.think_fn = _coord_end_think
 
@@ -220,6 +243,8 @@ def _coord_end_think(e: "Entity", eng: "Engine") -> None:
     ud = e.user_data
     ud['tick'] += 1
     if ud['tick'] >= ud['end_at']:
+        if ud.get('idle_before_fade'):
+            ud['caster'].cast_hold = False          # 进渐亮前就放手 (tactics 见 cast_hold=False 不再保持到渐亮结束)
         eng._signal(e, SIG_END)
         eng.destroy(e)
 
@@ -625,9 +650,12 @@ def _dragon_think(e: "Entity", eng: "Engine") -> None:
         if not e.is_playing():
             from core.son_transform import _spawn_ice_cone, EICE_CONE_BIG, ICE_CONE_HEIGHT
             battle = ud['battle']
+            # exe -150 → 每敌 FUN_004d70fc: 锥 = 敌 (x, y+1px), z 500, vz -48, 帧 DAT_00656bb8[rand%3].
+            # 锥在池中排在龙之后, 生成当 tick 就先走一步 (实录首帧 z=452), 我们新实体当 tick 不 think → 预扣一步.
+            from core.son_transform import ICE_CONE_VZ
             for v in ud['victims']:
                 vx, vy = _ground(v)
-                _spawn_ice_cone(battle, vx, vy + (4 * FP), ICE_CONE_HEIGHT,
+                _spawn_ice_cone(battle, vx, vy + FP, ICE_CONE_HEIGHT - ICE_CONE_VZ,
                                 EICE_CONE_BIG[battle.rng.randint(0, 2)], big=True)
             ud['land_at'] = ud['tick'] + CONE_LAND_TICKS
             e.flags &= ~0x40
@@ -642,7 +670,10 @@ def spawn_ice_dragon(battle, attacker, target_tile) -> "Entity":
     victims = _victims(battle, attacker)
     coord = _spawn_coord(battle, attacker, victims, _pillar_coord_think)
     coord.user_data['pending'] = 1
-    x, y = _ground(attacker)
+    # exe FUN_0050f959(caster.tile + 光标偏移 DAT_007e3d08/0c): 龙在**瞄准光标格** (实录 d=(0,+4 格)), 不是施法者脚下
+    from core.sprites.base import TILE_W, TILE_H
+    tx, ty = target_tile
+    x, y = (tx * TILE_W + TILE_W // 2) * FP, (ty * TILE_H + TILE_H // 2) * FP
     d = _fx_entity(battle, _dragon_think, x, y + FP, 0, EJAHA08, 0)
     d.user_data.update(dragon=True, caster=attacker, victims=victims, coord=coord)
     battle.engine.attach_seq(d, tuple_to_bytecode(DRAGON_SEQ))

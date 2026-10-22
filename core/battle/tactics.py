@@ -565,7 +565,8 @@ class TacticsBattle:
         self._pending_damage_range = None
         if was_skill:
             from core.battle.skill_dim import end_skill_dim
-            # 渐亮 (projectile 实体, 回合切换等它完); 实录: 施法者在渐亮**结束**才回待机 (exe 收尾 0x28 fade 后 |= 0x10000)
+            # 渐亮 (projectile 实体, 回合切换等它完). 施法者放手时机按 dispatcher 模板: 多数在渐亮**结束** (0x28 后 |= 0x10000);
+            # 少数 (core.jah_skills.IDLE_BEFORE_FADE) 在进渐亮前已由协调实体把 cast_hold 清掉 → 这里 hold=False 不再保持
             ent = end_skill_dim(self, on_done=(lambda: setattr(attacker, 'cast_hold', False)) if hold else None)
             if ent is not None and hold:
                 attacker.cast_hold = True

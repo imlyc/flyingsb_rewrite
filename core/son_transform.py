@@ -560,20 +560,23 @@ _ICE_SHATTER = 1
 
 
 def _spawn_ice_shatter(battle, x, y, big: bool) -> None:
-    """冰锥落地碎裂: 撒 N 个小冰块 (frames 12-23), 四散 + 渐隐 (exe FUN_004d6dc3, 大锥6/小锥4)."""
+    """冰锥落地碎裂: 撒小冰块 (frames 12-23), 匀速四散 + 后半程闪烁 (exe FUN_004d6dc3 每调一次 4 片).
+    大冰锥落地 FUN_004d7058 连调 6 次 = 24 片 (冰龍升天实录 3 根锥 72 片, 不分命中与否); 小冰锥 1 次 = 4 片.
+    exe 每片: 位置 = 锥落点 (无抖动, z=0); vx = rand%3000/500-3 ∈[-3,3) px/t, vy = rand%2000/500-2 ∈[-2,2),
+    vz = rand%3000/1000 ∈[0,3) 向上; FUN_004c3211 (无 flag 1) = 纯 pos += vel, **无重力**: 实录 17 tick 直线上飘 (z 最高 ~49)."""
     rng = battle.rng
-    n = 6 if big else 4
+    n = 24 if big else 4
     for _ in range(n):
         e = battle.engine.spawn(think_fn=ice_shatter_think)
         e.atlas_slot = EICE_ATLAS
         e.frame_idx = EICE_SHATTER[rng.randint(0, len(EICE_SHATTER) - 1)]
         e.flags |= 0x40
-        e.x = x + (rng.randint(-10, 10) << 16)
-        e.y = y + (rng.randint(-6, 6) << 16)
-        e.z = -(rng.randint(0, 12) << 16)
-        e.vx = rng.randint(-30000, 30000)
-        e.vy = rng.randint(-20000, 20000)
-        e.vz = -(rng.randint(10000, 50000))     # 上抛
+        e.x = x
+        e.y = y
+        e.z = 0
+        e.vx = (rng.randint(0, 2999) << 16) // 500 - (3 << 16)
+        e.vy = (rng.randint(0, 1999) << 16) // 500 - (2 << 16)
+        e.vz = -((rng.randint(0, 2999) << 16) // 1000)     # 上飘 (我们 z 负=高)
         e.user_data['kind'] = 'hit_effect'
         e.user_data['projectile'] = True
         e.user_data['shatter'] = True
@@ -581,17 +584,13 @@ def _spawn_ice_shatter(battle, x, y, big: bool) -> None:
 
 
 def ice_shatter_think(e: "Entity", eng: "Engine") -> None:
-    """碎冰块: 四散抛物 + 渐隐 (闪烁) 后消失."""
+    """碎冰块 (exe FUN_004d6d46): 匀速直线 (无重力) + tick≥9 起每 tick XOR 可见 (闪烁), tick 17 消失."""
     ud = e.user_data
     if 'shatter' not in ud:
         return
     e.x += e.vx
     e.y += e.vy
-    e.vz += 0x6000                        # 重力
     e.z += e.vz
-    if e.z > 0:
-        e.z = 0
-        e.vz = 0
     ud['tick'] += 1
     if ud['tick'] > ICE_SHATTER_RISE_TICKS:   # 后半程闪烁 (exe XOR visible)
         e.flags ^= 0x40
