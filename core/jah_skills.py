@@ -349,7 +349,8 @@ def spawn_ice_pillar_up(battle, attacker, target_tile) -> "Entity":
 
 # ------------------------------------------------------------------ 0x3b 化精大法
 def _orb_flicker(e: "Entity") -> None:
-    e.frame_idx = e.user_data['tick'] & 1            # ejaha02 帧 0/1 循环 (exe seq loop)
+    # ejaha02 帧 0/1 循环: seq 里 ticks=1 的帧实机占 2 tick (原版 dump 实录: 0 1×2 0×2 1×2 ...)
+    e.frame_idx = (e.user_data['tick'] // 2) & 1
 
 
 def _huajing_orb_think(e: "Entity", eng: "Engine") -> None:
@@ -423,7 +424,7 @@ def _particle_think(e: "Entity", eng: "Engine") -> None:
     if 'particle' not in ud:
         return
     ud['tick'] += 1
-    e.frame_idx = ud['frames'][ud['tick'] % 3]
+    e.frame_idx = ud['frames'][(ud['tick'] // 2) % 3]      # 三帧组每帧 2 tick (实录 30 31×2 32×2 ...)
     if e.state_code == 0:
         # 漂浮期 (exe FUN_004c3211 flags 0x31 分支): vx += ±2px 朝目标, vy += ±1.5px 朝目标, 不钳位 → 围绕光球来回摆动
         tx, ty = ud['target']
