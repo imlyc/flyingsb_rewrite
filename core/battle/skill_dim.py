@@ -47,8 +47,8 @@ def start_skill_dim(battle, on_done: Callable) -> "Entity":
     return _spawn(battle, +1, on_done)
 
 
-def end_skill_dim(battle) -> "Entity | None":
-    """技能收尾: 渐亮 DIM_TICKS. 没暗过就不做."""
+def end_skill_dim(battle, on_done: Callable | None = None) -> "Entity | None":
+    """技能收尾: 渐亮 DIM_TICKS 后调 on_done. 没暗过就不做 (返回 None)."""
     if getattr(battle, 'dim_level', 0.0) <= 0.0:
         return None
-    return _spawn(battle, -1, None)
+    return _spawn(battle, -1, on_done)

@@ -86,7 +86,7 @@ PILLAR_UP_END = 80
 PILLAR_TRAP_HIDE = 81               # >0x50
 PILLAR_TRAP_END = 101               # >100
 ORB_Z = 92                          # 0x5c0000
-ORB_HOLD = 60                       # 化精 球悬停 0x3c
+ORB_HOLD = 61                       # 化精 球悬停: exe tick==0x3c 切态, 实录 state0 共 61 tick
 ORB_SPEED_H, ORB_SPEED_V = 32, 24
 ORB_TARGET_Z = 32
 XIJING_PARTICLE_TICKS = 40
@@ -175,8 +175,10 @@ def _hit_huajing(battle, caster, victim) -> None:
 
 
 def _shatter(battle, x, y) -> None:
+    """冰柱碎裂: exe 调 6 次 FUN_004d6dc3, 每次 4 片 → 24 片 (实录 冰柱擎天 每根柱 24 个 eice 碎块)."""
     from core.son_transform import _spawn_ice_shatter
-    _spawn_ice_shatter(battle, x, y, big=True)         # 6 块 (exe 调 6 次 FUN_004d6dc3)
+    for _ in range(6):
+        _spawn_ice_shatter(battle, x, y, big=False)
 
 
 # 结算 (-200) 时 exe 是否重新挂受击 seq: 冰柱冰身/修羅/冰龍 的 -200 case 挂, 其它只飘数字 (受击在 -250 已放).
@@ -194,7 +196,7 @@ def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
     return e
 
 
-POST_SETTLE_TICKS = 17              # exe dispatcher state 0x1e 等每个目标的受击 seq 播完 (-10/-11/-12) 才进 0x28 收尾
+POST_SETTLE_TICKS = 37              # 实录: 结算 → 施法者恢复待机 = 58 tick (含 21 tick 渐亮) ⇒ 37 = 等伤害/MP 数字飘字 (-20) + 受击 seq 完
 
 
 def _coord_finish(e: "Entity", eng: "Engine") -> None:
@@ -410,7 +412,7 @@ def _rain_think(e: "Entity", eng: "Engine") -> None:
     vx, vy = _ground(v)
     if t < RAIN_TICKS and t % RAIN_INTERVAL == 0:
         _spawn_ice_cone(battle, vx + (rng.randint(-28, 28) * FP), vy + (rng.randint(-8, 16) * FP),
-                        ICE_SHARD_HEIGHT + rng.randint(0, 30), EICE_CONE_SMALL[rng.randint(0, 3)], big=False)
+                        ICE_SHARD_HEIGHT, EICE_CONE_SMALL[rng.randint(0, 3)], big=False)   # 实录: 起始高一律 104
     if t < RAIN_TICKS and t % RAIN_REACT_INTERVAL == 0:
         _hit(battle, caster, v)
     if t == RAIN_BIG_AT:

@@ -560,11 +560,15 @@ class TacticsBattle:
         """UI 在 attack_seq END 时调: 清攻击状态. *不立即* 切回合 — 标记 pending,
         scene 等所有动画 (伤害数字 + 死亡动画) 跑完才调 advance_turn_when_ready()."""
         was_skill = attacker.pending_skill_id is not None
+        hold = attacker.cast_hold
         combat.clear_pending_attack(attacker)
         self._pending_damage_range = None
         if was_skill:
             from core.battle.skill_dim import end_skill_dim
-            end_skill_dim(self)              # 渐亮 (projectile 实体, 回合切换等它完)
+            # 渐亮 (projectile 实体, 回合切换等它完); 实录: 施法者在渐亮**结束**才回待机 (exe 收尾 0x28 fade 后 |= 0x10000)
+            ent = end_skill_dim(self, on_done=(lambda: setattr(attacker, 'cast_hold', False)) if hold else None)
+            if ent is not None and hold:
+                attacker.cast_hold = True
         self._pending_turn_end = True
 
     def advance_turn_when_ready(self) -> None:

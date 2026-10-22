@@ -89,8 +89,9 @@ def main():
             out.append(effect_line(90 + ent.id, ent, t - born[ent.id]))
         if sounds:
             out.append("S " + " ".join(str(s) for s in sounds)); sounds.clear()
-        if b._pending_turn_end:
-            break
+        if b._pending_turn_end and not any((ent.flags & 0x800) and ent.user_data.get('projectile') and ent.state_code != 20
+                                           for ent in b.engine.entities):
+            break        # 收尾渐亮等 projectile 实体也结束 (施法者回待机的时刻才能对上)
     text = "\n".join(out) + "\n"
     if a.out == '-': sys.stdout.write(text)
     else: pathlib.Path(a.out).write_text(text); print('wrote', a.out, 'ticks', t + 1)

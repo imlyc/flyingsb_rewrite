@@ -549,11 +549,12 @@ EICE_ATLAS = 300
 EICE_CONE_SMALL = (0, 1, 2, 3)          # 小冰锥 (雨)
 EICE_CONE_BIG = (28, 31, 34)            # 大冰锥 (主, exe DAT_00656bb8)
 EICE_SHATTER = tuple(range(12, 24))     # 碎裂小冰块 (exe rand%0xc+0xc)
-ICE_SHARD_HEIGHT = 128                  # 小冰锥起始高度 (exe 0x800000=128px)
+ICE_SHARD_HEIGHT = 104                  # 小冰锥起始高度: 原版实录 (冰河醉雨 dump) 一律 z=104, 5 tick 落到 8
 ICE_SHARD_VZ = 24                       # 小冰锥下落 px/tick (exe +0x174=0xffe80000=-24)
 ICE_CONE_HEIGHT = 500                   # 大冰锥起始高度 (exe 0x1f40000=500px)
 ICE_CONE_VZ = 48                        # 大冰锥下落 px/tick (exe +0x174=0xffd00000=-48, ~10t 落地)
-ICE_SHATTER_TICKS = 12                  # 碎块停留 tick (exe think ~0x10)
+ICE_SHATTER_TICKS = 17                  # 碎块寿命: 原版实录 state0 9 tick (上抛) + state10 8 tick
+ICE_SHATTER_RISE_TICKS = 9
 _ICE_FALL = 0
 _ICE_SHATTER = 1
 
@@ -592,7 +593,7 @@ def ice_shatter_think(e: "Entity", eng: "Engine") -> None:
         e.z = 0
         e.vz = 0
     ud['tick'] += 1
-    if ud['tick'] > ICE_SHATTER_TICKS // 2:   # 后半程闪烁 (exe XOR visible)
+    if ud['tick'] > ICE_SHATTER_RISE_TICKS:   # 后半程闪烁 (exe XOR visible)
         e.flags ^= 0x40
     if ud['tick'] >= ICE_SHATTER_TICKS:
         eng.destroy(e)
