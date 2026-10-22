@@ -93,6 +93,7 @@ class TacticsBattle:
         # 屏幕震动偏移 (px): 玄武地震等由 engine entity 每 tick 写随机抖动, scene.draw 叠加到相机.
         # (0,0) = 不震. 见 core.son_transform earthquake_think (exe FUN_004d8b0c 抖相机原点).
         self.shake_offset: tuple[int, int] = (0, 0)
+        self.dim_level: float = 0.0          # 技能施放期间战场暗化 0..1 (core.battle.skill_dim)
         # 可见屏幕中心 (世界 px), 由 BattleScene 每帧发布. 满屏特效 (超亂舞滑板) 用它当
         # 框中心, 避免施法者靠地图/相机边缘时特效整体偏到半屏. None = 无 UI (headless 测试).
         self.view_center_world: tuple[int, int] | None = None
@@ -127,8 +128,10 @@ class TacticsBattle:
                     combat.apply_pending_attack(self, caster)
                 finally:
                     caster.pending_impact2 = False
-                # B 类 cast seq 没 SIG_END, post_attack_anim 不会自动触发 — 这里手动收尾
-                self.post_attack_anim(caster)
+                # B 类 cast seq 没 SIG_END, post_attack_anim 不会自动触发 — 这里手动收尾;
+                # 来源实体标 defer_end (紫河 coordinator) 则由它等受击 seq 播完后再发 SIG_END (带 unit) 收尾
+                if not source_entity.user_data.get('defer_end'):
+                    self.post_attack_anim(caster)
             return
         unit = source_entity.user_data.get('unit')
         if unit is None:
@@ -556,8 +559,12 @@ class TacticsBattle:
     def post_attack_anim(self, attacker: BattleUnit) -> None:
         """UI 在 attack_seq END 时调: 清攻击状态. *不立即* 切回合 — 标记 pending,
         scene 等所有动画 (伤害数字 + 死亡动画) 跑完才调 advance_turn_when_ready()."""
+        was_skill = attacker.pending_skill_id is not None
         combat.clear_pending_attack(attacker)
         self._pending_damage_range = None
+        if was_skill:
+            from core.battle.skill_dim import end_skill_dim
+            end_skill_dim(self)              # 渐亮 (projectile 实体, 回合切换等它完)
         self._pending_turn_end = True
 
     def advance_turn_when_ready(self) -> None:

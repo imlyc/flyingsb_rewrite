@@ -194,13 +194,28 @@ def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
     return e
 
 
+POST_SETTLE_TICKS = 17              # exe dispatcher state 0x1e 等每个目标的受击 seq 播完 (-10/-11/-12) 才进 0x28 收尾
+
+
 def _coord_finish(e: "Entity", eng: "Engine") -> None:
-    if e.user_data.get('done'):
+    """结算 (SIG_IMPACT_2) → 等受击 seq 播完 → SIG_END (带 unit, tactics 收尾). 期间 coordinator 存活 (projectile 门控)."""
+    ud = e.user_data
+    if ud.get('done'):
         return
-    e.user_data['done'] = True
+    ud['done'] = True
+    ud['defer_end'] = True
     eng._signal(e, SIG_IMPACT_2)
-    eng._signal(e, SIG_END)
-    eng.destroy(e)
+    ud['unit'] = ud['caster']
+    ud['end_at'] = ud['tick'] + POST_SETTLE_TICKS
+    e.think_fn = _coord_end_think
+
+
+def _coord_end_think(e: "Entity", eng: "Engine") -> None:
+    ud = e.user_data
+    ud['tick'] += 1
+    if ud['tick'] >= ud['end_at']:
+        eng._signal(e, SIG_END)
+        eng.destroy(e)
 
 
 def _fx_entity(battle, think_fn, x, y, z_px: int = 0, atlas: int | None = None, frame: int = 0) -> "Entity":

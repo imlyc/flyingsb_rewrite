@@ -222,10 +222,21 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
     attacker.entity.user_data = {'unit': attacker}
     # 施法姿保持 (见 BattleUnit.cast_hold): 有帧 op 的 seq 播完后停在最后一帧直到攻击收尾 (= exe 清 0x10000).
-    attacker.cast_hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in seq_tuples)
+    hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in seq_tuples)
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
     seq_bc = tuple_to_bytecode(seq_tuples)
-    battle.engine.attach_seq(attacker.entity, seq_bc)
+    if skill_id is not None:
+        # 技能: 先战场暗化 (exe dispatcher state 0 的调色板渐变, ≈480ms) 再挂 cast seq (case 10)
+        from core.battle.skill_dim import start_skill_dim
+        ent = attacker.entity
+
+        def _attach():
+            battle.engine.attach_seq(ent, seq_bc)
+            attacker.cast_hold = hold
+        start_skill_dim(battle, _attach)
+    else:
+        battle.engine.attach_seq(attacker.entity, seq_bc)
+        attacker.cast_hold = hold
 
 
 def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:

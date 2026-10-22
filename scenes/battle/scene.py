@@ -208,6 +208,12 @@ class BattleScene(Scene):
 
         # 1) 复用世界地图的地形
         self.world_map.draw_terrain(self.surface, cam_x, cam_y)
+        # 1.5) 技能暗化: 原版施法期间调色板只留角色/特效色段, 背景变黑 (core.battle.skill_dim)
+        dim = getattr(self.battle, 'dim_level', 0.0)
+        if dim > 0.0:
+            shade = pygame.Surface(self.surface.get_size(), pygame.SRCALPHA)
+            shade.fill((0, 0, 0, int(min(1.0, dim) * 255)))
+            self.surface.blit(shade, (0, 0))
         # 2) 移动 / 攻击高亮
         self._draw_overlays(cam_x, cam_y)
         # 2.5) 敌人身后的命中特效 (分身上方那只 = 站敌人身后, 应被敌人挡) → 单位之前画
