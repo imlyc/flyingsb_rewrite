@@ -5,7 +5,6 @@
   input.py    handle_event + 玩家长按 polling
   units.py    单位渲染 (live/dying/dead/blink/facing)
   hud.py      HUD/菜单/banner/日志/升级框
-  float_text  浮动伤害数字 widget
 
 操作:
   方向键   走 1 格 + 转面向 (走不了就只转身); 走过的格子计入本回合可达范围
@@ -35,7 +34,6 @@ from scenes.battle import hud as hud_mod
 from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
 from scenes.battle import update as update_mod
-from scenes.battle.float_text import FloatText
 from scenes.battle.hit_effect import draw_hit_effects
 
 if TYPE_CHECKING:
@@ -124,7 +122,6 @@ class BattleScene(Scene):
         self._enemy_turn_started_at: int | None = None
         self._enemy_pre_move_started_at: int | None = None
         self._battle_over_signaled = False
-        self._floats: list[FloatText] = []
         # anim_engine tick 累积器 (40ms/tick); update() 每帧累加 dt_ms
         self._eng_acc_ms: int = 0
         # FM op 触发时记录其总 ticks (用于 sub-frame 插值: cols > n 的 atlas)
@@ -140,8 +137,6 @@ class BattleScene(Scene):
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False
-        self._float_big = load_chinese_font(22)
-        self._float_small = load_chinese_font(14)
         # 行动菜单: ESC 弹出十字 4 选项 (上=技能, 左=道具, 右=设置, 下=回合结束)
         self._menu_open = False
         self._menu_font = load_chinese_font(16)
@@ -225,7 +220,6 @@ class BattleScene(Scene):
         # 5) 命中特效 (hit-spark anim_engine entity, 单位之上, 飘字之下)
         draw_hit_effects(self, cam_x, cam_y)
         # 6) 浮动伤害
-        hud_mod.draw_floats(self, cam_x, cam_y)
         # 6) HUD (不滚动)
         hud_mod.draw_hud(self)
         # 7) 日志 (L2 静态时让位给技能描述长条)

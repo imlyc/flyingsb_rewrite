@@ -62,6 +62,8 @@ class TacticsBattle:
         # 给 UI 的浮动伤害事件队列; UI 自己消费 + 计时
         from core.battle.data import DamageEvent  # 仅为类型, 实例由 combat 模块创建
         self.damage_events: list[DamageEvent] = []
+        self.float_pending: int = 0                  # 未落定飘字数 (= exe dispatcher +0x3e), core.battle.float_digits
+        self.float_events: list = []                 # ('flash'|'settled', unit), 场景每帧消费
         # 战斗胜利时填; UI 弹完才返回地图
         self.level_ups: list[LevelUpReport] = []
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)

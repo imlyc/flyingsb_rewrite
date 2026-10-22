@@ -19,7 +19,7 @@ import pygame
 from core.battle.data import Phase
 from core.sprites.base import TILE_W, TILE_H
 from scenes.battle import input as input_mod
-from scenes.battle.float_text import FloatText
+from core.battle.float_digits import floats_animating
 
 if TYPE_CHECKING:
     from scenes.battle.scene import BattleScene
@@ -58,9 +58,8 @@ def _watchdog_animating(scene: "BattleScene", now: int) -> None:
         return
     scene._anim_block_since = now + 60000       # 下一轮 60s 后才再报
     print(f"[watchdog] units_animating 已阻塞 >15s, phase={scene.battle.phase.name}, 阻塞原因:")
-    for f in scene._floats:
-        if not f.flash_started_at(now):
-            print(f"  - 飘字未进 flash: target={getattr(f.target_unit, 'name', None)}")
+    if floats_animating(scene.battle):
+        print(f"  - 飘字未落定: float_pending={scene.battle.float_pending}")
     for u in scene.battle.all_units:
         if u.hp <= 0 and (u.death_anim_time_ms < 0
                           or (not u.is_player and u.death_anim_time_ms < scene.ENEMY_DEATH_TOTAL_MS)
@@ -173,22 +172,8 @@ def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:
 
 
 def _ingest_damage_events(scene: "BattleScene", now: int) -> None:
-    """把 battle 的伤害事件转飘字, 立即 spawn (跟攻击动画 IMPACT 同步).
-    多段攻击: 每次 IMPACT 都 spawn, 但同位置先前的标记为非 final → 立即消失,
-    让最后一发占位 (= 最后一发才走完整 rise + hold + flash 生命周期)."""
-    for ev in scene.battle.damage_events:
-        wx = ev.x * TILE_W + TILE_W // 2
-        wy = ev.y * TILE_H + TILE_H // 2 - 10
-        # 同位置先前的 float 全部 demote (instant remove), 只留新一发
-        scene._floats = [f for f in scene._floats
-                         if abs(f.world_x - wx) > 4 or abs(f.world_y - wy) > 4]
-        ft = FloatText(ev.damage, ev.remaining_hp, wx, wy, now, miss=ev.miss, heal=ev.heal or ev.mp)
-        # 绑定受击单位 → 飘字自驱发"闪烁"信号给它 (仿原版数字 entity 发 signal). 含已死单位.
-        ft.target_unit = next((u for u in scene.battle.all_units
-                               if u.x == ev.x and u.y == ev.y), None)
-        scene._floats.append(ft)
+    """飘字数字实体已在 core (combat.push_damage_event → float_digits) 随伤害当场生成; 这里只清事件队列."""
     scene.battle.damage_events.clear()
-    scene._floats = [f for f in scene._floats if f.alive(now)]
 
 
 def _tick_reactions(scene: "BattleScene", dt_ms: int) -> None:
@@ -213,10 +198,14 @@ def _on_damage_flash(scene: "BattleScene", unit) -> None:
 
 
 def _tick_damage_signals(scene: "BattleScene", now: int) -> None:
-    """飘字 entity 自驱的"闪烁"信号 → 触发死亡 (替代每帧轮询). 每发数字首次进 flash 发一次."""
-    for f in scene._floats:
-        if f.target_unit is not None and f.take_flash_signal(now):
-            _on_damage_flash(scene, f.target_unit)
+    """飘字数字实体自驱的信号 (core.battle.float_digits → battle.float_events): 首位数字进闪烁 → 触发死亡."""
+    evs = getattr(scene.battle, 'float_events', None)
+    if not evs:
+        return
+    for kind, unit in evs:
+        if kind == 'flash' and unit is not None:
+            _on_damage_flash(scene, unit)
+    evs.clear()
 
 
 def _tick_death_animations(scene: "BattleScene", now: int, dt_ms: int) -> None:
@@ -313,10 +302,9 @@ def units_animating(scene: "BattleScene") -> bool:
     阶段允许下家行动. 死亡动画: 完整跑完才放行 (= 死亡时序晚于 flash 时, 等死亡完).
     """
     now = pygame.time.get_ticks()
-    # 飘字 gating: 任何一个还没进 flash 阶段 = 还在动
-    for f in scene._floats:
-        if not f.flash_started_at(now):
-            return True
+    # 飘字 gating: 末位数字还没落定 (exe dispatcher 等 -20 的同一判据)
+    if floats_animating(scene.battle):
+        return True
     for u in scene.battle.all_units:
         if u.hp <= 0:
             # 死亡动画跑完才放行

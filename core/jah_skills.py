@@ -199,23 +199,11 @@ def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
     return e
 
 
-# 结算 (-200) 后 dispatcher 在 state 0x1e 等 **飘字 -20**: FUN_004d05d8 每敌生成 spawner (FUN_004d0488), 每 2 tick 出 1 位数字实体
-# (FUN_004d0330, slot 214), 末位数字 state 0 (20t 落) + state 1 (10t 弹) 结束时发 -20 → 下一 tick 进 0x28 渐亮.
-# 末位数字生成 = 结算 + (1|2 池序奇偶) + 2×(位数-1), 再 +31 ⇒ 结算 → idle 标志 = 30 + 2×位数 (+0/1)
-# (实录 修羅 4 位 +39, 冰龍 4 位 +39, 冰身 2 位 +34, 擎天 3 位 +37 (渐亮起点), 化精 3 位 +35).
-POST_SETTLE_BASE_TICKS = 30
-POST_SETTLE_PER_DIGIT = 2
+# 结算 (-200) 后 dispatcher 在 state 0x1e 等 **飘字 -20** (+0x3e 计数归零): 飘字数字实体见 core.battle.float_digits
+# (末位数字弹两下落定时 -20; 实录 结算 → idle 标志 = 30 + 2×位数 (+0/1 池序)). 我们直接等 battle.float_pending == 0.
 # 施法者何时放下手 (flags |= 0x10000 → 待机帧): 每个 dispatcher 模板不同 — 这些在进 0x28 渐亮**前**放手 (实录 idle 在渐亮开始 tick),
 # 其余 (冰錐/擎天/化精/冰雨/吸精) 在渐亮**结束**后才放手.
 IDLE_BEFORE_FADE = {0x3e, 0x3f, 0x40, 0x41}
-
-
-def _float_digits(battle, n0: int) -> int:
-    """结算新增飘字里最大位数 (MISS 4 字符; 无飘字 0)."""
-    nd = 0
-    for ev in battle.damage_events[n0:]:
-        nd = max(nd, 4 if getattr(ev, 'miss', False) else len(str(int(ev.damage))))
-    return nd
 
 
 def _coord_finish(e: "Entity", eng: "Engine") -> None:
@@ -226,15 +214,12 @@ def _coord_finish(e: "Entity", eng: "Engine") -> None:
     ud['done'] = True
     ud['defer_end'] = True
     battle = ud['battle']
-    n0 = len(battle.damage_events)
     eng._signal(e, SIG_IMPACT_2)
     ud['unit'] = ud['caster']
     sid = ud['caster'].pending_skill_id
-    nd = _float_digits(battle, n0)
-    # 化精為氣 (自身状态, 无飘字): 实录 特效播完 (+36) 下一 tick 施法者就回待机; 其它按飘字位数等 -20
-    ud['end_at'] = ud['tick'] + (0 if nd == 0 else POST_SETTLE_BASE_TICKS + POST_SETTLE_PER_DIGIT * nd)
     ud['idle_before_fade'] = sid in IDLE_BEFORE_FADE
-    if nd == 0:
+    # 化精為氣 (自身状态, 无飘字): float_pending 已是 0 → 下一 tick 即 SIG_END, 施法者立刻回待机
+    if getattr(battle, 'float_pending', 0) == 0:
         ud['caster'].cast_hold = False
     e.think_fn = _coord_end_think
 
@@ -242,7 +227,7 @@ def _coord_finish(e: "Entity", eng: "Engine") -> None:
 def _coord_end_think(e: "Entity", eng: "Engine") -> None:
     ud = e.user_data
     ud['tick'] += 1
-    if ud['tick'] >= ud['end_at']:
+    if getattr(ud['battle'], 'float_pending', 0) == 0:          # exe 0x1e: +0x3e 计数归零 (所有飘字末位 -20)
         if ud.get('idle_before_fade'):
             ud['caster'].cast_hold = False          # 进渐亮前就放手 (tactics 见 cast_hold=False 不再保持到渐亮结束)
         eng._signal(e, SIG_END)

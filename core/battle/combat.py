@@ -19,6 +19,14 @@ from core.battle.data import (
 if TYPE_CHECKING:
     from core.battle.tactics import TacticsBattle
 
+
+def push_damage_event(battle, unit, ev: "DamageEvent", counts: bool = True) -> None:
+    """记事件 (场景/测试读) + 立即生成原版式飘字数字实体 (core.battle.float_digits; 无 engine 的假 battle 跳过).
+    heal (回复/MP 回复) = 白字一起下落; 伤害/MISS/MP 吸取 = 红字逐位弹跳. counts=False: 不计入回合门控 (见 float_digits)."""
+    battle.damage_events.append(ev)
+    from core.battle.float_digits import spawn_float
+    spawn_float(battle, unit, None if ev.miss else ev.damage, heal=bool(ev.heal), counts=counts)
+
 # 玩家普攻音效 (char_id → (起手/挥舞音, 命中音/swing); exe 玩家攻击 wrapper FUN_004f3230..975c).
 # 起手音在挥舞帧 (近似在攻击开始播); 命中音在 IMPACT 播 (= DAT_006566c0). 全局 sound_id.
 PLAYER_ATTACK_SOUNDS: dict[int, tuple[int, int]] = {
@@ -71,7 +79,7 @@ def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
     defender.hp = max(0, old_hp - dmg)
     defender.shown_hp_override = old_hp
     defender.settle_pending = True
-    battle.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
+    push_damage_event(battle, defender, DamageEvent(dmg, defender.hp, defender.x, defender.y))
     if not getattr(attacker, 'suppress_hit_reaction', False):
         set_reaction(defender, "hit", attacker if face_attacker else None)
     _emit_hit_effect(battle, attacker, defender)
@@ -157,7 +165,7 @@ def strike_skill(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     raw = attacker.attack - defender.defence + battle.rng.randint(-5, 5)
     dmg = max(1, raw * 2)
     defender.hp = max(0, defender.hp - dmg)
-    battle.damage_events.append(DamageEvent(dmg, defender.hp, defender.x, defender.y))
+    push_damage_event(battle, defender, DamageEvent(dmg, defender.hp, defender.x, defender.y))
     set_reaction(defender, "hit", attacker)
     battle._log(f"  {attacker.name} → {defender.name}: {dmg} 必杀伤害"
                 + (f" ({defender.hp}/{defender.max_hp})" if defender.alive else " [击倒]"))
@@ -332,7 +340,7 @@ def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
         before = t.hp
         t.hp = min(t.max_hp, t.hp + amt)
         healed = t.hp - before
-        battle.damage_events.append(DamageEvent(healed, t.hp, t.x, t.y, heal=True))
+        push_damage_event(battle, t, DamageEvent(healed, t.hp, t.x, t.y, heal=True))
         _emit_life_fire_effect(battle, t)
         battle.engine._emit('sound_play', None, 301)    # exe FUN_004fe111 case -210: 每 victim 回血数字旁播 0x12d
         battle._log(f"{attacker.name} → {t.name}: 回复 {healed} HP ({t.hp}/{t.max_hp})")
@@ -386,12 +394,13 @@ def _apply_mp_drain(battle: "TacticsBattle", attacker: BattleUnit, mode: str) ->
         amt = mp_drain_amount(battle, attacker, t, mode)
         amt = min(amt, t.mp) if mode == 'absorb' else amt
         t.mp = max(0, t.mp - amt)
-        battle.damage_events.append(DamageEvent(amt, t.mp, t.x, t.y, mp=True))
+        push_damage_event(battle, t, DamageEvent(amt, t.mp, t.x, t.y, mp=True))
         battle._log(f"{attacker.name} → {t.name}: {get_skill_name(attacker.pending_skill_id)} MP -{amt} ({t.mp})")
         total += amt
     if mode == 'absorb' and total > 0:
         attacker.mp = min(attacker.max_mp, attacker.mp + total)
-        battle.damage_events.append(DamageEvent(total, attacker.mp, attacker.x, attacker.y, heal=True, mp=True))
+        # exe 吸精 -200: 敌红字 + 施法者白字 (FUN_004d074e) 同 tick 生成, 但 +0x3e 只 +1 → 白字 (56t 才落定) 不拖回合 (实录 idle 在红字 -20 后)
+        push_damage_event(battle, attacker, DamageEvent(total, attacker.mp, attacker.x, attacker.y, heal=True, mp=True), counts=False)
         battle._log(f"{attacker.name}: MP +{total} ({attacker.mp}/{attacker.max_mp})")
 
 
@@ -432,7 +441,7 @@ def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: Batt
     reflect = has_status(target, ST_FANHE)
     # exe: 受击方有返荷杖时命中判定强制为命中 (bVar9), 反弹才有机会结算
     if not reflect and battle.rng.random() < miss_chance(attacker, target):
-        battle.damage_events.append(DamageEvent(0, target.hp, target.x, target.y, miss=True))
+        push_damage_event(battle, target, DamageEvent(0, target.hp, target.x, target.y, miss=True))
         set_reaction(target, "dodge", attacker if face_attacker else None)
         battle._log(f"{attacker.name} → {target.name}: MISS (闪避)")
         return
@@ -446,7 +455,7 @@ def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: Batt
         clear_status(target, ST_HUAJING)
         gain = min(dmg, max(0, target.max_mp - target.mp))
         target.mp += gain
-        battle.damage_events.append(DamageEvent(gain, target.mp, target.x, target.y, heal=True, mp=True))
+        push_damage_event(battle, target, DamageEvent(gain, target.mp, target.x, target.y, heal=True, mp=True))
         battle._log(f"{target.name}: 化精為氣 伤害 {dmg} → MP +{gain}")
         dmg = 0
     if reflect:

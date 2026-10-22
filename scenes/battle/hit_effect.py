@@ -35,7 +35,7 @@ def draw_hit_effects(scene: "BattleScene", cam_x: int, cam_y: int, behind: bool 
     # 收集可见的 hit_effect, 稳定按 draw_order 排序 (高的后画 = 上层)
     ents = [e for e in scene.battle.engine.entities
             if e.user_data.get('kind') == 'hit_effect'
-            and (e.is_playing() or e.user_data.get('projectile'))
+            and (e.is_playing() or e.user_data.get('projectile') or e.user_data.get('float'))
             and bool(e.user_data.get('behind_units')) == behind]
     ents.sort(key=lambda e: e.user_data.get('draw_order', 0))
     for ent in ents:

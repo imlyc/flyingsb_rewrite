@@ -1638,7 +1638,8 @@ def _mfeng_revive(battle, targets) -> None:
         u.reaction_seq = None
         u.reaction_frame = None
         u.reaction_saved_facing = None
-        battle.damage_events.append(DamageEvent(u.hp, u.hp, u.x, u.y, heal=True))
+        from core.battle.combat import push_damage_event
+        push_damage_event(battle, u, DamageEvent(u.hp, u.hp, u.x, u.y, heal=True))
 
 
 def mfeng_cloud_think(e: "Entity", eng: "Engine") -> None:

@@ -63,12 +63,6 @@ def draw_beveled_panel(surface: pygame.Surface, rect: pygame.Rect,
     pygame.draw.line(surface, shadow, (x + w - 1, y), (x + w - 1, y + h - 1), border_w)
 
 
-def draw_floats(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
-    now = pygame.time.get_ticks()
-    for f in scene._floats:
-        f.draw(scene.surface, scene._float_big, scene._float_small, cam_x, cam_y, now)
-
-
 def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     """十字 4 选项 + 二级菜单 + 全部过渡动画.
     状态机:

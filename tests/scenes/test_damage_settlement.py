@@ -9,24 +9,9 @@ from core.sprites.base import TILE_W, TILE_H
 from scenes.battle.update import _tick_reactions, _tick_damage_signals
 
 
-class _FloatStub:
-    def __init__(self, unit, flashing):
-        self.target_unit = unit
-        self.heal = False
-        self._flash = flashing
-        self._fired = False
-
-    def take_flash_signal(self, now):
-        if self._flash and not self._fired:
-            self._fired = True
-            return True
-        return False
-
-
 class _Scene:
-    def __init__(self, units, floats):
-        self.battle = type("B", (), {"all_units": units})()
-        self._floats = floats
+    def __init__(self, units, events):
+        self.battle = type("B", (), {"all_units": units, "float_events": list(events)})()
 
 
 def _enemy(x, y, hp=20):
@@ -67,7 +52,7 @@ def test_flash_signal_triggers_death():
     sc = _Scene([d], [])
     _tick_reactions(sc, 40)                       # 反应结束 (death 仍未启动, 等闪烁)
     assert d.death_anim_time_ms < 0 and d.settle_pending is True
-    sc._floats = [_FloatStub(d, flashing=True)]
+    sc.battle.float_events = [('flash', d)]
     _tick_damage_signals(sc, 0)                   # 闪烁信号
     assert d.settle_pending is False
     assert d.death_anim_time_ms == 0              # 死亡动画启动
@@ -76,7 +61,7 @@ def test_flash_signal_triggers_death():
 def test_batch_unit_skips_reaction_commit_and_flash():
     """大金刚 settle_batch: 反应结束不 commit, 闪烁信号不触发死亡 (等批量)."""
     d = _enemy(2, 2, hp=10); _hurt(d, 10, 0); d.settle_batch = True
-    sc = _Scene([d], [_FloatStub(d, flashing=True)])
+    sc = _Scene([d], [('flash', d)])
     _tick_reactions(sc, 40)
     assert d.display_hp == 10 and d.settle_pending is True
     _tick_damage_signals(sc, 0)
