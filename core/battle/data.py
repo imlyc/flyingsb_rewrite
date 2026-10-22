@@ -128,6 +128,12 @@ class BattleUnit:
     pending_impact_count: int = 0             # 本次攻击已触发 IMPACT 次数
     pending_impact_total: int = 1             # 本次攻击 seq 里 IMPACT 总数 (= 多段攻击的段数).
     pending_impact2: bool = False             # B 类技能: 投射物落地 (SIG_IMPACT_2) 的结算中 (不再 spawn)
+    # 施法姿保持: exe 技能 dispatcher case 10 清 unit flag 0x10000 (= 不走待机动画) 再挂 cast seq, seq EXIT 后
+    # 单位**停在最后一帧** (如紫河举手) 直到 END (-110) 或 dispatcher 收尾才 |= 0x10000. 我们: seq 播完仍渲染
+    # entity 当前帧, clear_pending_attack 时解除.
+    cast_hold: bool = False
+    # 结算 (-200) 时不重放受击动作: 有些技能 exe 的 -200 只飘数字 (受击动作已在 -250 放过), 见 core.jah_skills
+    suppress_hit_reaction: bool = False
                                               # 多段攻击 (e.g. 無限刀 5 hit): 只有最后一次结算伤害,
                                               # 之前的 IMPACT 只放 hit-fx + reaction (视觉反馈)
     # === 原版式双值 HP (working buffer + committed) + 事件(signal)驱动提交 ===

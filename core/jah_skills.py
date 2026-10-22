@@ -133,14 +133,27 @@ def _victims(battle, attacker) -> list:
     return out
 
 
-def _hit(battle, caster, victim, fx: bool = True, sound: int | None = None) -> None:
-    """exe -250: 受击反应 (范围技不转向) + 标准 2 命中特效 + 音."""
+def _hit(battle, caster, victim, fx: str | None = 'both', sound: int | None = None,
+         react: bool = True) -> None:
+    """exe -250 (各 dispatcher case 0xffffff06): FUN_004c4f20 复位 + 受击 seq 0x6557f0[victim dir] (不转向)
+    + 特效: fx='both' = 655c10[dir] 方向星爆 + 655b18 红刺 (流星冰鑽/冰河醉雨), 'dir' = 只 655c10[dir]
+    (冰柱擎天/吸精/化精), None = 无 (冰柱冰身); + 音."""
     from core.battle import combat
+    from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
+    from core.sprites.base import TILE_W, TILE_H
     if not victim.alive:
         return
-    combat.set_reaction(victim, "hit", None)
-    if fx:
+    if react:
+        combat.set_reaction(victim, "hit", None)
+    if fx == 'both':
         combat._emit_hit_effect(battle, caster, victim)
+    elif fx == 'dir':
+        spec = combat.hit_effect_specs(victim, caster.name)[0]
+        cx = victim.x * TILE_W + TILE_W // 2
+        cy = victim.y * TILE_H + TILE_H // 2
+        ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
+        oy = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX) - HIT_EFFECT_Y_BASELINE_PX
+        combat._spawn_effect_entity(battle, cx + ox, cy + oy, spec)
     if sound is not None:
         _sfx(battle, sound)
 
@@ -155,15 +168,10 @@ def _hit_huajing(battle, caster, victim) -> None:
     from core.sprites.base import TILE_W, TILE_H
     if not victim.alive:
         return
-    combat.set_reaction(victim, "hit", None)
-    spec = combat.hit_effect_specs(victim, caster.name)[0]
+    _hit(battle, caster, victim, fx='dir', sound=SFX_HUAJING_HIT)
     cx = victim.x * TILE_W + TILE_W // 2
     cy = victim.y * TILE_H + TILE_H // 2
-    ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
-    oy = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX) - HIT_EFFECT_Y_BASELINE_PX
-    combat._spawn_effect_entity(battle, cx + ox, cy + oy, spec)
     combat._spawn_skill_extra_effect(battle, cx, cy - HIT_EFFECT_Y_BASELINE_PX, HUAJING_HIT_FX2)
-    _sfx(battle, SFX_HUAJING_HIT)
 
 
 def _shatter(battle, x, y) -> None:
@@ -171,7 +179,14 @@ def _shatter(battle, x, y) -> None:
     _spawn_ice_shatter(battle, x, y, big=True)         # 6 块 (exe 调 6 次 FUN_004d6dc3)
 
 
+# 结算 (-200) 时 exe 是否重新挂受击 seq: 冰柱冰身/修羅/冰龍 的 -200 case 挂, 其它只飘数字 (受击在 -250 已放).
+SETTLE_REACTS = {0x3f, 0x40, 0x41}
+
+
 def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
+    # exe 各 -200 case 都不放命中特效 (特效只在 -250), 结算走 combat 默认路径时压掉
+    caster.suppress_hit_fx = True
+    caster.suppress_hit_reaction = caster.pending_skill_id not in SETTLE_REACTS
     e = battle.engine.spawn(think_fn=think_fn)
     e.flags = 0x800 | 0x10000                            # alive + think, 不渲染
     e.user_data.update(kind='jah_coord', projectile=True, battle=battle, caster=caster,
@@ -302,7 +317,7 @@ def _pillar_up_think(e: "Entity", eng: "Engine") -> None:
     t = ud['tick']
     ud['tick'] += 1
     if t % PILLAR_UP_HIT_INTERVAL == 0 and t <= PILLAR_UP_END:
-        _hit(battle, caster, v, sound=SFX_HIT)          # t=0,20,40,60,80 (80 与结算同 tick)
+        _hit(battle, caster, v, fx='dir', sound=SFX_HIT)   # t=0,20,40,60,80 (80 与结算同 tick); 只 655c10[dir]
     if t == PILLAR_UP_END:
         if ud['first']:
             _sfx(battle, SFX_ICE_BIG)
@@ -385,7 +400,6 @@ def _rain_think(e: "Entity", eng: "Engine") -> None:
     if t == RAIN_BIG_AT:
         _spawn_ice_cone(battle, vx, vy + (4 * FP), ICE_CONE_HEIGHT, EICE_CONE_BIG[rng.randint(0, 2)], big=True)
     if t >= RAIN_BIG_AT + CONE_LAND_TICKS:
-        _hit(battle, caster, v, fx=False)
         ud['coord'].user_data['pending'] -= 1
         eng.destroy(e)
 
@@ -469,7 +483,7 @@ def _xijing_orb_think(e: "Entity", eng: "Engine") -> None:
             ud['settle_at'] = t + XIJING_SETTLE
             e.state_code = 20
     elif e.state_code == 20 and t >= ud['settle_at']:
-        _hit(battle, caster, v, sound=SFX_XIJING_HIT)
+        _hit(battle, caster, v, fx='dir', sound=SFX_XIJING_HIT)
         ud['coord'].user_data['pending'] -= 1
         eng.destroy(e)
 
@@ -521,12 +535,11 @@ def _pillar_trap_think(e: "Entity", eng: "Engine") -> None:
         if ud['first']:
             _sfx(battle, SFX_ICE_BIG)
         e.flags &= ~0x40                                  # 柱子隐去
-        _hit(battle, caster, v, fx=False)
+        _hit(battle, caster, v, fx=None)                  # exe -250: 只挂受击 seq, 无特效无音
         _shatter(battle, e.x, e.y)
         e.state_code = 20
     elif e.state_code == 20 and t > PILLAR_TRAP_END - 1:
-        _hit(battle, caster, v, fx=False)
-        ud['coord'].user_data['pending'] -= 1
+        ud['coord'].user_data['pending'] -= 1              # -250/-200: 受击 seq 由结算重放
         eng.destroy(e)
 
 
@@ -548,10 +561,7 @@ def _xiuluo_land_think(e: "Entity", eng: "Engine") -> None:
     if 'land' not in ud:
         return
     if not e.is_playing():
-        battle, caster = ud['battle'], ud['caster']
-        for v in ud['victims']:
-            _hit(battle, caster, v, fx=False)
-        ud['coord'].user_data['pending'] = 0
+        ud['coord'].user_data['pending'] = 0               # -200: 飘数字 + 受击 seq (结算重放), 无特效
         eng.destroy(e)
 
 
@@ -601,9 +611,7 @@ def _dragon_think(e: "Entity", eng: "Engine") -> None:
             e.flags &= ~0x40
             e.state_code = 10
     elif e.state_code == 10 and ud['tick'] >= ud['land_at']:
-        for v in ud['victims']:
-            _hit(ud['battle'], ud['caster'], v, fx=False)
-        ud['coord'].user_data['pending'] = 0
+        ud['coord'].user_data['pending'] = 0               # 大冰锥落地 -200: 飘数字 + 受击 seq (结算重放)
         eng.destroy(e)
     ud['tick'] += 1
 

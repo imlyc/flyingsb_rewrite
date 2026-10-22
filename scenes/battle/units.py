@@ -159,7 +159,8 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
     #       + phase-based sub-frame 插值 (cols > n 的角色用)
     #   (b) Enemy ENEMY_* (atlas_slot 是全局 idx, e.g. 192=ccrow_g0): 走 atlas_resource() 反查,
     #       frame_idx 直接当 atlas 内索引 (敌方 seq 不需要 phase 数学)
-    elif u.is_attacking:
+    elif u.is_attacking or (u.cast_hold and u.entity is not None):
+        # cast_hold: seq EXIT 后停在最后一帧 (exe 清 0x10000 期间不走待机)
         frame, anchor = _resolve_attack_frame(scene, u, cs)
     elif u.cast_anim_key:
         # 施法姿 (破天舞): ps_ atlas 循环前两列 (col 0↔1), 朝 facing. 细微施法手势.
@@ -195,12 +196,13 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
             weakened_sprite=weakened_sprite,
         )
     # 攻击中不要变半透明 (会让玩家误以为已结束行动)
-    alpha = 140 if (u.has_acted and not u.is_attacking) else None
+    holding = u.cast_hold and u.entity is not None
+    alpha = 140 if (u.has_acted and not u.is_attacking and not holding) else None
     # 攻击位移: entity.x/y 是 16.16 fixed point → 右移 16 拿像素.
     # 若当前在 MOVE 等待期 (move_total_ticks > 0), 从 move_start_x lerp 到 entity.x,
     # 进度 = (move_total - ticks_remaining + sub_t) / move_total, 平滑滑动.
     ax = ay = 0
-    if u.is_attacking:
+    if u.is_attacking or holding:
         ent = u.entity
         move_total = ent.user_data.get('_move_total_ticks', 0)
         if move_total > 0 and ent.ticks > 0:
