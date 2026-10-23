@@ -469,12 +469,13 @@ POTIAN_TRAJ_SEQ: list[tuple] = [
     ('fm', 292, 7, 5), ('fm', 292, 8, 5), ('fm', 292, 9, 5), ('fm', 292, 10, 5),
     ('exit',),
 ]
-SECONDARY_PHASE_TICKS = 29
+SECONDARY_PHASE_TICKS = 39      # 实录 mask_23: 天字 seq 0x676de8 (帧 0-8) 完 -150 → 施法者挥刀, 共 39 tick
 # scatter (天字斩开两半) 寿命: exe FUN_00504eaa state0 漂移到内部 tick>0x20(32), state1 闪烁到 >0x30(48).
 SCATTER_DRIFT_TICKS = 32
 SCATTER_BLINK_TICKS = 16
 SCATTER_PHASE_TICKS = SCATTER_DRIFT_TICKS + SCATTER_BLINK_TICKS   # coordinator 等 scatter 跑完再结算
-SCATTER_SPLIT_VX = int(1.2 * FP_ONE)    # 两半水平分开速度 (px/tick), 直线匀速 (无重力/无下落)
+SCATTER_SPLIT_VX = FP_ONE               # FUN_00504f27: vx = ∓1, vy = +1 px/tick 匀速 ((rand&0x3ff)>>10 恒 0 → +1), 无加速度
+POTIAN_FX_Y_OFF = 600                   # 天字/半片 生在 (x, y+600, z 600) = 画在敌格但排序最前
 POTIAN_EXPLODE_Y_PX = 36                 # 爆炸/天字/斩开 抬到敌人 sprite 中心 (像素, 脚上方)
 
 # Coordinator state codes (复用 PROJ_STATE_* 命名空间)
@@ -584,8 +585,8 @@ def _spawn_potian_secondary(battle, tile_xy: tuple[int, int]) -> "Entity":
     e = eng.spawn(think_fn=potian_secondary_think)
     tx, ty = tile_xy
     e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
-    e.y = (ty * TILE_H + TILE_H // 2) * FP_ONE
-    e.z = 0
+    e.y = (ty * TILE_H + TILE_H // 2 + POTIAN_FX_Y_OFF) * FP_ONE
+    e.z = -POTIAN_FX_Y_OFF * FP_ONE
     e.atlas_slot = 279
     e.frame_idx = 0
     e.flags |= 0x40
@@ -604,8 +605,8 @@ def _spawn_potian_scatter_one(battle, victim_tile: tuple[int, int],
     tx, ty = victim_tile
     e = eng.spawn(think_fn=potian_scatter_think)
     e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
-    e.y = (ty * TILE_H + TILE_H // 2) * FP_ONE
-    e.z = 0
+    e.y = (ty * TILE_H + TILE_H // 2 + POTIAN_FX_Y_OFF) * FP_ONE
+    e.z = -POTIAN_FX_Y_OFF * FP_ONE
     e.vx = vx
     e.vy = vy
     e.vz = 0
@@ -626,9 +627,10 @@ def _spawn_potian_trajectory(battle, victim_tile: tuple[int, int]) -> "Entity":
     eng = battle.engine
     e = eng.spawn(think_fn=potian_passive_effect_think)
     tx, ty = victim_tile
-    e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
-    e.y = (ty * TILE_H + TILE_H // 2 - POTIAN_EXPLODE_Y_PX) * FP_ONE   # 抬到敌人 sprite 中心
-    e.z = 0
+    rng = battle.rng                                      # FUN_00504f27 → FUN_004d0d7b: (x+rand%12-6, y+24, z 72+rand&15-8)
+    e.x = (tx * TILE_W + TILE_W // 2 + rng.randint(0, 11) - 6) * FP_ONE
+    e.y = (ty * TILE_H + TILE_H // 2 + 24) * FP_ONE
+    e.z = -(72 + rng.randint(0, 15) - 8) * FP_ONE
     e.atlas_slot = 292
     e.frame_idx = 0
     e.flags |= 0x40

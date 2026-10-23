@@ -338,8 +338,8 @@ def test_potian_caster_dash_phase_attaches_cdit1_g0():
     coord = [e for e in b.engine.entities
              if e.user_data.get('kind') == 'potian_coordinator'][0]
 
-    # 跑过 SECONDARY 阶段 (29 ticks)
-    for _ in range(30):
+    # 跑过 SECONDARY 阶段 (39 ticks, 实录天字 seq 完才挥刀)
+    for _ in range(40):
         b.engine.tick()
     assert coord.state_code == _POTIAN_PHASE_CASTER_DASH
     assert caster.pending_caster_coord is coord

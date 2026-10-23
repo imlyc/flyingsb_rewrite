@@ -967,7 +967,7 @@ SKILL_IMPACT2_SOUNDS: dict[int, int] = {
 
 # DOIT_melee 模板 (FUN_004d0e18) 的技能: 没有调色板渐暗/渐亮 (state 0/0x1e 只是镜头推到施法者再推回), seq 完 -110 即待机.
 # 2026-10-22 实录 南瓜破 (sz_14): dispatcher 生成下一 tick 就挂 seq, END 当 tick 施法者 idle. 其它技能 (自定义 dispatcher) 都有渐变.
-MELEE_TEMPLATE_SKILLS = {0x14, 0x16, 0x18, 0x20, 0x24}
+MELEE_TEMPLATE_SKILLS = {0x14, 0x16, 0x18, 0x20, 0x24, 0x1e, 0x1f}   # 沙悟净 斗轉/返荷 (FUN_00503e6d/503f17) 也无渐变: 直接挂 seq, 完即 idle
 
 
 def skill_signal_sounds(skill_id: int | None, sig: int) -> tuple[int, int]:
