@@ -99,11 +99,12 @@ def test_xuanwu_sounds():
 
 
 def test_yuetu_sounds():
-    from core.son_transform import SFX_YT_BEAST, SFX_YT_BARRAGE, SFX_YT_COIL
+    from core.son_transform import SFX_YT_BEAST, SFX_YT_BARRAGE
+    SFX_YT_COIL = ((24, 0x12a), (27, 0xa9))          # 盘踞 seq 0x671c8c 内的 sound op (现由 attach_seq 播)
     played, solo, stopped = _run_son_skill(0x07)
     assert played.count(SFX_YT_BEAST) == 1 and stopped == [SFX_YT_BEAST]
     # 弹幕期 end-0x1e <= t <= end 共 31 tick, 每 tick 一次 (exe 两个 if 同 tick 都跑, 末 tick 也播)
-    assert solo.count(SFX_YT_BARRAGE) == 31
+    assert solo.count(SFX_YT_BARRAGE) == 31                   # 实录 tick 183..213 每 tick 一次 (含结束 tick)
     for _t, sid in SFX_YT_COIL:
         assert played.count(sid) >= 2
         assert sid in _exe_ids(0x07, 'seq')

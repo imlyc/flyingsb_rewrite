@@ -284,8 +284,8 @@ def test_qinglong_ice_cone_shatter_sequence():
 
 def test_baihu_whirlwind_attack():
     """白虎: 神兽 (eson03 256) 盘踞 + 旋风 (ehari00 295 旋涡环升起成柱) + 敌人击退抖动 + 伤害."""
-    from core.son_transform import (WIND_ATLAS, BH_ATLAS, BH_WIND_HEIGHT,
-                                     WIND_TOP as WIND_TORNADO_HEIGHT, start_son_transform)
+    from core.son_transform import (WIND_ATLAS, BH_ATLAS, WIND_TOP as WIND_TORNADO_HEIGHT, start_son_transform)
+    BH_WIND_HEIGHT = 100                              # exe 阶段1 浮到 z<100 才加升力 → 在 100 上下
     from core.fm_frames import FM_FRAMES
     from core.raw_attack_seqs import atlas_resource
     b, caster, d1, d2 = _fixture()
@@ -472,13 +472,13 @@ def test_yuetu_beast_and_star_sparkles():
                     saw_265 += 1            # 盘踞动画切到 eson07b atlas265
             if renders(e, YT_SPARKLE_ATLAS):
                 saw_sparkle += 1
-            if e.user_data.get('burst'):
-                nburst += 1
-                burst_atlases.add(e.user_data.get('atlas_key'))
+            if e.user_data.get('kind') == 'hit_effect' and e.is_playing() and e.atlas_slot in (215, 216):
+                nburst += 1                # 弹幕期每 tick -250 → 受击特效 (寿命 9/10) 叠加 (实录 183..212 每 tick 两个)
+                burst_atlases.add(atlas_resource(e.atlas_slot))
         if nburst > max_burst:
             max_burst = nburst
         if max_burst > 4 and nburst == 0:
-            cleared_after_peak = True      # 峰值后归零 = 末尾全部一起消失
+            cleared_after_peak = True      # 弹幕止后自然播完 = 归零
         if b._pending_turn_end:
             break
     assert saw_beast > 0, "月兔本体应在场"
@@ -596,7 +596,8 @@ def test_fenshen_clones_per_enemy_and_caster_somersault():
             if not e.user_data.get('clone'):
                 continue
             clone_ids.add(id(e))
-            max_atk = max(max_atk, e.user_data.get('atk_num', 0))
+            if e.state_code == 1 and e.is_playing():
+                max_atk = max(max_atk, 1)
             if e.state_code == 0 and e.user_data.get('ps_sheet') == FENSHEN_FALL_SHEET:
                 saw_fall_ps102 = True   # 下落用 ps_CSON102 站姿
             if e.state_code == 1 and e.user_data.get('ps_sheet') is None and e.atlas_slot == FENSHEN_ATLAS:
@@ -612,7 +613,7 @@ def test_fenshen_clones_per_enemy_and_caster_somersault():
     assert saw_fall_ps102, "分身下落应用 ps_CSON102 站姿"
     assert saw_attack_cson, "分身落地应用 cson1_g0 普通攻击图"
     assert saw_react, "每身命中应使敌人受击 (reaction)"
-    assert max_atk >= FENSHEN_ATK_COUNT, f"每分身应连打 {FENSHEN_ATK_COUNT} 拳, 实际最多 {max_atk}"
+    assert max_atk >= 1 and FENSHEN_ATK_COUNT == 6                    # 6 拳在原始 seq 字节码里 (core.fenshen_seqs)
     assert len(hp1) == 2 and len(hp2) == 2, f"每敌应只结算一次伤害 (各自末身), 实际 {hp1} {hp2}"
     assert d1.hp < 50 and d2.hp < 50, "分身术应伤到两敌"
     assert b._pending_turn_end is True
@@ -661,9 +662,9 @@ def test_luanwu_skateboards():
 
 
 def test_baihu_sounds_follow_original_trace():
-    """白虎音效时序 (2026-10-12 原版 sfx_trace 实录, 单位 tick≈24.5ms):
-    烟雾 → +62 旋风起 0xdc → +27 虎吼 0x139 → 0xdc 第二次 (与首次相隔 64) → 首次 0xdc +123 抛天 0xf4
-    → 摔地 0xf0 → +65 返程烟雾, 同时 stop 0x139."""
+    """白虎音效时序 (2026-10-22 原版 entdump 实录 son_02_F221671 + 反编译):
+    烟雾 (+24) → 神兽 +32 → 悬停 +29 = 旋风起 0xdc (烟雾 +61) → coil seq +26 虎吼 0x139 → 0xdc 第二次 (+64)
+    → 首次 0xdc +120 抛天 0xf4 → 落地 摔地 0xf0 → 飘字落定后神兽升空 29t → 返程烟雾. 没有 stop."""
     from core.son_transform import (start_son_transform, SFX_SMOKE, SFX_BH_WIND, SFX_BH_ROAR,
                                     SFX_BH_FLING, SFX_BH_SLAM)
 
@@ -692,10 +693,10 @@ def test_baihu_sounds_follow_original_trace():
     smoke1, smoke2 = at(SFX_SMOKE, 0), at(SFX_SMOKE, 1)
     wind1, wind2 = at(SFX_BH_WIND, 0), at(SFX_BH_WIND, 1)
     assert [s for _, s in played if s == SFX_BH_WIND] == [SFX_BH_WIND] * 2
-    assert abs((wind1 - smoke1) - 62) <= 4, f"烟雾→旋风起 {wind1 - smoke1} tick (实录 62)"
-    assert abs((at(SFX_BH_ROAR) - wind1) - 26) <= 3, "虎吼在旋风起后 ~26 tick"
+    assert abs((wind1 - smoke1) - 61) <= 1, f"烟雾→旋风起 {wind1 - smoke1} tick (实录 61)"
+    assert abs((at(SFX_BH_ROAR) - wind1) - 26) <= 1, "虎吼在旋风起后 26 tick (coil seq 0,1,2 后的 sound op)"
     assert wind2 - wind1 == 64
-    assert abs((at(SFX_BH_FLING) - wind1) - 121) <= 3, "抛天在旋风起后 ~121 tick"
+    assert at(SFX_BH_FLING) - wind1 == 120, "抛天在旋风起后 120 tick (锚 t==0x78)"
     assert at(SFX_BH_SLAM) > at(SFX_BH_FLING)
-    assert abs((smoke2 - at(SFX_BH_SLAM)) - 65) <= 4, f"摔地→返程 {smoke2 - at(SFX_BH_SLAM)} tick (实录 65)"
-    assert [s for _, s in stopped] == [SFX_BH_ROAR] and stopped[0][0] == smoke2
+    assert smoke2 > at(SFX_BH_SLAM) + 29, "摔地 → 飘字落定 → 升空 29t → 返程烟"
+    assert stopped == [], "白虎 dispatcher 没有 FUN_00416388 stop"

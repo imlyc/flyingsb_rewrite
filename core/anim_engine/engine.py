@@ -110,6 +110,9 @@ class Engine:
 
     def _signal(self, source_unit: Entity, sig: int):
         """op 0x0e 实现: 把 signal 路由给 active_action 的 think_fn."""
+        cb = source_unit.user_data.get('on_signal')      # 特效实体自己的 signal 回调 (如分身攻击 seq 的 -200 受击)
+        if cb is not None:
+            cb(source_unit, sig)
         # 先发事件给外部订阅
         self._emit('signal', source_unit, sig)
         # 内部 wrapper 路由 (对应 FUN_004cba90)
