@@ -233,8 +233,9 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in seq_tuples)
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
     seq_bc = tuple_to_bytecode(seq_tuples)
-    if skill_id is not None:
-        # 技能: 先战场暗化 (exe dispatcher state 0 的调色板渐变, ≈480ms) 再挂 cast seq (case 10)
+    from core.skill_seq import MELEE_TEMPLATE_SKILLS
+    if skill_id is not None and skill_id not in MELEE_TEMPLATE_SKILLS:
+        # 技能: 先战场暗化 (exe dispatcher state 0 的调色板渐变, ≈480ms) 再挂 cast seq (case 10); DOIT_melee 模板技能无渐变
         from core.battle.skill_dim import start_skill_dim
         ent = attacker.entity
 
@@ -271,8 +272,8 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
             if attacker.pending_impact2:
                 _apply_mp_drain(battle, attacker, SKILL_MP_DRAIN[sid])
                 return
-        elif is_heal_skill(sid):
-            _apply_heal(battle, attacker)
+        elif is_heal_skill(sid) and (attacker.pending_impact2 or not has_impact_spawn(sid)):
+            _apply_heal(battle, attacker)       # 生命之火: 光球→火爆 (IMPACT 时 spawn) 播完才回血 (IMPACT_2)
             return
     # B 类技能: IMPACT 不直接结算伤害, 而是 spawn 投射物 (think_fn 物理 → 落地后发 SIG_IMPACT_2 才结算)
     if sid is not None and not attacker.pending_impact2:
@@ -341,7 +342,8 @@ def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
         t.hp = min(t.max_hp, t.hp + amt)
         healed = t.hp - before
         push_damage_event(battle, t, DamageEvent(healed, t.hp, t.x, t.y, heal=True))
-        _emit_life_fire_effect(battle, t)
+        if attacker.pending_skill_id != 0x15:
+            _emit_life_fire_effect(battle, t)       # 生命之火的火爆已由 core.sam_skills 在光球到达时放
         battle.engine._emit('sound_play', None, 301)    # exe FUN_004fe111 case -210: 每 victim 回血数字旁播 0x12d
         battle._log(f"{attacker.name} → {t.name}: 回复 {healed} HP ({t.hp}/{t.max_hp})")
 

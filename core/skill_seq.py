@@ -367,33 +367,35 @@ SKILL_SAM_THREE_HIT = [   # 0x16 @0x67304c, 3 IMPACTs/dir (多段 dedup 只末�
 ]
 
 SKILL_SAM_LIFE_FIRE = [   # 0x15 生命之火 cast @0x672bb8, atlas csam_g0=7. 回血技能 (heal).
+    # dispatcher FUN_004fe111 不处理 -110: seq 完施法者定格 (hold) 到光球/火爆/飘字都完 (0x1e) 才待机 → 末尾用 exit 不发 END,
+    # 收尾由 core.sam_skills 的协调实体 SIG_END (同紫河 B 类).
     # UP
     [
         ('fm', 7, 0, 6), ('fm', 7, 1, 6), ('fm', 7, 2, 12), ('move', 0, -4, 0),
         ('fm', 7, 3, 3), ('move', 0, -6, 0), ('impact',),
         ('fm', 7, 4, 3), ('move', 0, -4, 0), ('fm', 7, 5, 3), ('move', 0, 14, 0),
-        ('fm', 7, 0, 0), ('end',),
+        ('fm', 7, 0, 0), ('exit',),
     ],
     # DN
     [
         ('fm', 7, 6, 6), ('fm', 7, 7, 6), ('fm', 7, 8, 12), ('move', 0, 4, 0),
         ('fm', 7, 9, 3), ('move', 0, 6, 0), ('impact',),
         ('fm', 7, 10, 3), ('move', 0, 4, 0), ('fm', 7, 11, 3), ('move', 0, -14, 0),
-        ('fm', 7, 6, 0), ('end',),
+        ('fm', 7, 6, 0), ('exit',),
     ],
     # LF
     [
         ('fm', 7, 12, 6), ('fm', 7, 13, 6), ('fm', 7, 14, 12), ('move', -6, 0, 0),
         ('fm', 7, 15, 3), ('move', -8, 0, 0), ('impact',),
         ('fm', 7, 16, 3), ('move', -6, 0, 0), ('fm', 7, 17, 3), ('move', 20, 0, 0),
-        ('fm', 7, 12, 0), ('end',),
+        ('fm', 7, 12, 0), ('exit',),
     ],
     # RT
     [
         ('fm', 7, 18, 6), ('fm', 7, 19, 6), ('fm', 7, 20, 12), ('move', 6, 0, 0),
         ('fm', 7, 21, 3), ('move', 8, 0, 0), ('impact',),
         ('fm', 7, 22, 3), ('move', 6, 0, 0), ('fm', 7, 23, 3), ('move', -20, 0, 0),
-        ('fm', 7, 18, 0), ('end',),
+        ('fm', 7, 18, 0), ('exit',),
     ],
 ]
 
@@ -963,6 +965,11 @@ SKILL_IMPACT2_SOUNDS: dict[int, int] = {
 }
 
 
+# DOIT_melee 模板 (FUN_004d0e18) 的技能: 没有调色板渐暗/渐亮 (state 0/0x1e 只是镜头推到施法者再推回), seq 完 -110 即待机.
+# 2026-10-22 实录 南瓜破 (sz_14): dispatcher 生成下一 tick 就挂 seq, END 当 tick 施法者 idle. 其它技能 (自定义 dispatcher) 都有渐变.
+MELEE_TEMPLATE_SKILLS = {0x14, 0x16, 0x18, 0x20, 0x24}
+
+
 def skill_signal_sounds(skill_id: int | None, sig: int) -> tuple[int, int]:
     """(播放音, 登记命中音) for 技能 seq 的 jump 信号; 没有 → -1."""
     if skill_id is None:
@@ -1052,6 +1059,7 @@ def _jah(sid):
 
 SKILL_IMPACT_SPAWN: dict[int, "callable"] = {
     **{sid: _jah(sid) for sid in range(0x39, 0x42)},   # 紫河 9 技能 (core.jah_skills)
+    0x15: lambda b, a, t: __import__('core.sam_skills', fromlist=['spawn_life_fire']).spawn_life_fire(b, a, t),   # 三藏 生命之火 (光球→火爆→回血)
     0x17: _spawn_phoenix,    # 三藏 凤凰掌
     0x21: _spawn_cloudwave,
     0x22: _spawn_huolong,

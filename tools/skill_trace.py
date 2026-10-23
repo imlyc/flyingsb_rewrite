@@ -60,19 +60,24 @@ def main():
     ap.add_argument('--caster', default='紫河'); ap.add_argument('--caster-idx', type=int, default=4, help='原版实录里施法者的实体下标 (队伍位置)')
     ap.add_argument('--enemy-dx', type=int, default=-1); ap.add_argument('--enemy-dy', type=int, default=2)
     ap.add_argument('--facing', default='down'); ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--ally-dx', type=int); ap.add_argument('--ally-dy', type=int, help='加一个队友 (我方目标技能用)')
+    ap.add_argument('--cursor-dx', type=int); ap.add_argument('--cursor-dy', type=int, help='光标相对施法者格 (默认敌人格, 失败回施法者)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
     a = ap.parse_args()
     p = _unit(a.caster, 15, 53, is_player=True, agile=99)
     e = _unit('enemy', 15 + a.enemy_dx, 53 + a.enemy_dy, is_player=False, agile=1)
-    b = TacticsBattle(players=[p], enemies=[e], battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
-                      player_positions=[(p.x, p.y)], enemy_positions=[(e.x, e.y)])
+    players = [p]
+    if a.ally_dx is not None:
+        ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
+    b = TacticsBattle(players=players, enemies=[e], battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
+                      player_positions=[(u.x, u.y) for u in players], enemy_positions=[(e.x, e.y)])
     p.facing = FACING[a.facing]
     out = []
     sounds = []
     b.engine.on('sound_play', lambda ent, sid: sounds.append(sid))
     b.engine.on('sound_play_solo', lambda ent, sid: sounds.append(sid))
     assert b.enter_attack_aim(skill_id=a.skill), 'aim failed'
-    b.aim_cursor = (e.x, e.y)
+    b.aim_cursor = (15 + a.cursor_dx, 53 + a.cursor_dy) if a.cursor_dx is not None else (e.x, e.y)
     if not b.confirm_attack_aim():                 # 我方/自身目标技能 (生命之火/斗轉/返荷/化精為氣): 光标放施法者
         b.aim_cursor = (p.x, p.y)
         assert b.confirm_attack_aim(), 'confirm failed (敌人不在范围?)'
@@ -85,7 +90,7 @@ def main():
         out.append(unit_line(a.caster_idx, p, True)); out.append(unit_line(60, e, False))
         idx = 90
         for ent in b.engine.entities:
-            if not (ent.flags & 0x800) or ent is p.entity or ent is e.entity:
+            if not (ent.flags & 0x800) or any(ent is u.entity for u in b.all_units):
                 continue
             out.append(effect_line(90 + ent.id, ent, b.engine._tick_id - ent._born_tick))   # 槽位复用时 age 归零 (= exe +0x144)
         if sounds:

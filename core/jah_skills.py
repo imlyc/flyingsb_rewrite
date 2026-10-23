@@ -151,12 +151,15 @@ def _hit(battle, caster, victim, fx: str | None = 'both', sound: int | None = No
     if fx == 'both':
         combat._emit_hit_effect(battle, caster, victim)
     elif fx == 'dir':
-        spec = combat.hit_effect_specs(victim, caster.name)[0]
+        # exe 各 dispatcher 的 -250: FUN_004d0c90(x, y+400, z+448, dir, PTR_DAT_00655c10[dir]) = **ef010 方向刺爆** (slot 216),
+        # 无抖动 (抖动 ±8 只在 DOIT_melee 模板的 655b18 et00 星爆上). 实录 生命之火/吸精 -250 只有 216.
+        from core.hit_effect_seq import (HitEffectSpec, facing_to_dir, UNIVERSAL_SPARK_ATLAS, UNIVERSAL_SPARK_BY_DIR,
+                                         UNIVERSAL_SPARK_FRAME_TICKS)
+        d = facing_to_dir((-victim.facing[0], -victim.facing[1]))
+        spec = HitEffectSpec(UNIVERSAL_SPARK_ATLAS, list(UNIVERSAL_SPARK_BY_DIR[d]), UNIVERSAL_SPARK_FRAME_TICKS, jittered=False)
         cx = victim.x * TILE_W + TILE_W // 2
-        cy = victim.y * TILE_H + TILE_H // 2
-        ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
-        oy = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX) - HIT_EFFECT_Y_BASELINE_PX
-        combat._spawn_effect_entity(battle, cx + ox, cy + oy, spec)
+        cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX
+        combat._spawn_effect_entity(battle, cx, cy, spec)
     if sound is not None:
         _sfx(battle, sound)
 
