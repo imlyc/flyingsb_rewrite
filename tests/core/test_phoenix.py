@@ -54,7 +54,7 @@ def test_phoenix_grows_in_place_then_flies_then_explodes():
     phoenix_destroyed = False
 
     for _ in range(400):
-        if e.state_code == _PHOENIX_GROW:
+        if not phoenix_destroyed and e.state_code == _PHOENIX_GROW:
             grow_frames.add(e.frame_idx)
         b.engine.tick()
         if (e.flags & 0x800) == 0 or e.user_data.get('target_x') is None:   # 销毁 (槽位可能被火/协调实体复用)
@@ -70,8 +70,7 @@ def test_phoenix_grows_in_place_then_flies_then_explodes():
     # 1) 原地由小变大: 长大期零位移, 播帧 0-4
     assert not moved_during_grow, "凤凰长大期不应位移"
     assert grow_frames == set(range(PHOENIX_GROW_FRAMES)), grow_frames
-    # 2) 起飞后确实飞出去了 (位移)
-    assert e.state_code != _PHOENIX_GROW
+    # 2) 起飞后确实飞出去了 (飞出屏外销毁)
     # 3) 命中后连爆 8 个 efock01
     assert len(burst_ids) == PHOENIX_BURST_COUNT, f"应爆 {PHOENIX_BURST_COUNT} 个, got {len(burst_ids)}"
     # 4) 凤凰飞出屏外销毁 (火在它之后放)

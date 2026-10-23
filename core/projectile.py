@@ -59,40 +59,48 @@ def _sfx(battle, sound_id: int, solo: bool = False) -> None:
     battle.engine._emit('sound_play_solo' if solo else 'sound_play', None, sound_id)
 
 
+def _cloudwave_victims(battle, caster):
+    out = []
+    tiles = getattr(battle, '_pending_damage_range', None)
+    if tiles:
+        for (x, y) in tiles:
+            u = battle.q.occupant(x, y)
+            if u is not None and u.alive and u.is_player != caster.is_player:
+                out.append(u)
+    elif caster.pending_attack_target is not None and caster.pending_attack_target.alive:
+        out.append(caster.pending_attack_target)
+    return out
+
+
 def cloudwave_think_fn(e: "Entity", eng: "Engine") -> None:
-    """赤雲波 投射物 think_fn (= exe FUN_00504413 简化版).
-    state 0: 抛物线物理 (vx+vy 水平匀速, vz 重力下落). z<=0 时落地, 切到爆炸状态.
-    state 10: 等爆炸 seq 跑完, 信号 SIG_END + destroy.
-    """
+    """赤雲波 FUN_00504413 (2026-10-22 实录 mask_21_F45221): z 640 以 32px/t 匀速落 (20t) → 落地 -250 (全敌受击 seq + 两特效)
+    + 播 0xf6 + 挂 seq 0x676b60 (edit01 52t) → seq 完 再 -250 + -200 (飘字) 自毁; dispatcher 0x1e 等飘字 → 渐亮."""
+    ud = e.user_data
+    if 'battle' not in ud:
+        return
+    battle, caster = ud['battle'], ud['caster']
     if e.state_code == PROJ_STATE_FLYING:
-        # 水平匀速 + 垂直重力
-        e.x += e.vx
-        e.y += e.vy
-        e.vz += GRAVITY_PER_TICK
-        e.z += e.vz
+        e.z += CLOUDWAVE_VZ << 16
         if e.z >= 0:
-            # 落地: 钳 z=0, 发 IMPACT_2 (= 让 battle signal handler 结算伤害)
-            e.z = 0
-            e.vx = e.vy = e.vz = 0
-            battle = e.user_data.get('battle')
-            if battle is not None:
-                _sfx(battle, 246)             # exe FUN_00504413 落地播 0xf6
-            eng._signal(e, SIG_IMPACT_2)
-            # 挂着陆爆炸 seq
+            from core.jah_skills import _hit
             from core.anim_engine.bytecode import tuple_to_bytecode
+            e.z = 0
+            for v in ud['victims']:
+                _hit(battle, caster, v, fx='both')
+            _sfx(battle, 246)
             eng.attach_seq(e, tuple_to_bytecode(CLOUDWAVE_EXPLOSION_SEQ))
             e.state_code = PROJ_STATE_EXPLODING
     elif e.state_code == PROJ_STATE_EXPLODING:
-        # seq 跑完 (= playing flag 落下) → 收
         if not e.is_playing():
-            eng._signal(e, SIG_END)
+            from core.jah_skills import _hit
+            for v in ud['victims']:
+                _hit(battle, caster, v, fx='both')
+            ud['coord'].user_data['pending'] = 0          # -200: 飘字 (SIG_IMPACT_2 → 结算, 受击/特效已由上面 -250 放)
             eng.destroy(e)
-            e.state_code = PROJ_STATE_DONE
 
 
-# 投射物初始高度 (= 离 defender tile 多远) + 落地总时长.
-# 屏幕高 600, defender tile 在屏中心附近 → 高度 600 让投射物从屏幕顶外开始落下.
-# 落地 24 ticks (= 960ms) 视觉刚好.
+CLOUDWAVE_Z = 640
+CLOUDWAVE_VZ = 32
 SKY_DROP_HEIGHT_PX = 600
 SKY_DROP_FLIGHT_TICKS = 24
 
@@ -108,50 +116,26 @@ def _compute_initial_vz(height_px: int, ticks: int, gravity: int) -> int:
 
 
 def spawn_cloudwave_projectile(battle, attacker, target_tile: tuple[int, int]) -> "Entity":
-    """spawn 赤雲波 投射物 — 从屏幕顶外正上方坠落到 target_tile (= AIM cursor 格).
-    无水平运动, 仿原版 spawn_fn 只启 Z 轴 (mode flag bit 6).
-    """
+    """赤雲波 -100 (FUN_005044c8): 在光标格 (x, y+1) z 640 生成 edit01 (277), vz -32 匀速 (无重力)."""
     from core.sprites.base import TILE_W, TILE_H
+    from core.jah_skills import _spawn_coord, _pillar_coord_think
     eng = battle.engine
-
+    victims = _cloudwave_victims(battle, attacker)
+    coord = _spawn_coord(battle, attacker, victims, _pillar_coord_think)
+    coord.user_data['pending'] = 1
     tx, ty = target_tile
-    spawn_x_px = tx * TILE_W + TILE_W // 2
-    spawn_y_px = ty * TILE_H + TILE_H // 2
-
     e = eng.spawn(think_fn=cloudwave_think_fn)
-    e.x = spawn_x_px * FP_ONE
-    e.y = spawn_y_px * FP_ONE
-    e.z = -SKY_DROP_HEIGHT_PX * FP_ONE       # 屏幕顶外, 上方 600 px
-    e.vx = 0
-    e.vy = 0
-    e.user_data['battle'] = battle           # 落地音效用
-    e.vz = _compute_initial_vz(SKY_DROP_HEIGHT_PX, SKY_DROP_FLIGHT_TICKS, GRAVITY_PER_TICK)
-    e.atlas_slot = 277          # edit01 (mode 0)
-    e.frame_idx = 0
+    e.x = (tx * TILE_W + TILE_W // 2) << 16
+    e.y = ((ty * TILE_H + TILE_H // 2 + 1) << 16)
+    e.z = -(CLOUDWAVE_Z << 16)
+    e.vx = e.vy = e.vz = 0
+    e.atlas_slot, e.frame_idx = 277, 0
     e.flags |= 0x40
-    e.user_data['kind'] = 'hit_effect'
-    e.user_data['projectile'] = True
+    e.user_data.update(kind='hit_effect', projectile=True, battle=battle, caster=attacker, victims=victims, coord=coord)
     e.state_code = PROJ_STATE_FLYING
     return e
 
 
-# =========================================================================
-# 凤凰掌 0x17 三藏 — 严格还原 exe (caster dispatcher FUN_004febad + phoenix think FUN_004fe717)
-# =========================================================================
-# Exe 真实流程 (2026-06-01 重新逆向):
-#   1. caster 念咒 (csam_g4 @0x6733ac) IMPACT(-100) → FUN_004fe964 spawn 凤凰.
-#   2. 凤凰 think FUN_004fe717:
-#      - state 0:  **不调物理**, 只等 grow seq (0x67312c, atlas 帧 0-4, 每帧 4 tick) 跑完
-#                  → 即凤凰**在 caster 原地由小变大, 无位移**. 跑完挂飞行 seq (0x6731ec) 进 state 10.
-#      - state 10: 调物理 (mode 0x31 弹簧朝 target), 飞行 seq = 帧 5-8 循环 (扑翅). 抵达 target → state 20.
-#      - state 20: 继续飞出屏幕 → 发 -200.
-#   3. caster dispatcher 收 -200 → 爆炸阶段 (state 0x28): 每 4 tick 在 target 周围随机散布
-#      (±32px x, +24px y, 72±32px 高) spawn 1 个 **efock01 爆炸** (FUN_004feb72→think FUN_004feb17,
-#      efock01 seq 0x655e58 帧 0-7), 共 8 个, 每个音效 0xd7. 8 个放完 (state 0x32) 才结算伤害+受击.
-#
-# 工程实现: 凤凰用 think_fn 全手动驱动 (长大→飞→爆), 爆炸 burst 用独立 seq entity (自动 exit).
-#   damage 在 8 个 burst 全 spawn 后发 SIG_IMPACT_2 (= 原版"爆完才结算"), 爆炸期 phoenix
-#   (projectile, state≠20) 存活挡住回合结束.
 PHOENIX_ATLAS_BY_FACING = (269, 270, 271, 272)  # UP/DN/LF/RT, exe esam03a/b/c/d
 # 2026-10-22 实录 sz_17_F32270 + reverse_engineering/phoenix_decomp.txt (FUN_004fe964 spawn / 4fe717 think):
 # spawn 在施法者当前位置 (x, y+1, z+32) 再按朝向偏 (上 y-24 / 下 y+24 / 左 x-32 / 右 x+32), flags 0x31 弹簧目标 = 目标敌,

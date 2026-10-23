@@ -184,21 +184,24 @@ def test_cloudwave_projectile_physics_lands_and_damages():
 
     apply_pending_attack(b, caster)
 
-    # 投射物 entity 应已 spawn (think_fn=cloudwave_think_fn)
-    proj = [e for e in b.engine.entities if e.user_data.get('projectile')]
+    # 投射物 entity 应已 spawn (think_fn=cloudwave_think_fn; 另有不渲染的协调实体)
+    proj = [e for e in b.engine.entities if e.user_data.get('projectile') and e.user_data.get('kind') == 'hit_effect']
     assert len(proj) == 1
     p = proj[0]
     assert p.state_code == 0   # FLYING
 
-    # 跑 tick 直到 z 落地 (max 100 tick 防死循环)
+    # 实录: z 640 以 32px/t 匀速落 20t → 落地只受击 (不扣血), seq 52t 播完 -200 才飘字扣血
     initial_hp = defender.hp
-    for _ in range(100):
+    landed_at = None
+    for t in range(160):
         b.engine.tick()
-        if p.state_code != 0:
+        if landed_at is None and p.state_code != 0:
+            landed_at = t
+            assert defender.hp == initial_hp, "落地时还不该扣血 (扣血在波纹 seq 完)"
+        if defender.hp < initial_hp:
             break
-    # 落地后 state 切换 + 伤害结算
-    assert p.state_code != 0, "投射物没落地"
-    assert defender.hp < initial_hp, "落地后没扣血"
+    assert landed_at == 19, f"应 20 tick 落地, 实际 {landed_at}"
+    assert defender.hp < initial_hp, "波纹 seq 完后没扣血"
     assert len(b.damage_events) == 1
 
 
