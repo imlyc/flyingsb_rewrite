@@ -188,7 +188,7 @@ def _shatter(battle, x, y) -> None:
 
 
 # 结算 (-200) 时 exe 是否重新挂受击 seq: 冰柱冰身/修羅/冰龍 的 -200 case 挂, 其它只飘数字 (受击在 -250 已放).
-SETTLE_REACTS = {0x3f, 0x40, 0x41}
+SETTLE_REACTS = {0x3f, 0x40, 0x41, 0x17}      # 凤凰掌 0x32: 飘字 + 受击 seq (无特效)
 
 
 def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":

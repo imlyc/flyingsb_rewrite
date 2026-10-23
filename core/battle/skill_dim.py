@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 DIM_FADE_MS = 480                                   # exe 30 步 × 16ms
 DIM_TICKS = max(1, round(DIM_FADE_MS / ATTACK_TICK_MS))
+# 自定义调色板渐变的 dispatcher (FUN_0040b0c5 60 步): 凤凰掌 实录 渐暗 40 tick / 渐亮 38 tick (颜色是自定义表, 暂仍用黑)
+SKILL_DIM_TICKS = {0x17: (40, 38)}
 
 
 def _dim_think(e: "Entity", eng: "Engine") -> None:
@@ -23,10 +25,11 @@ def _dim_think(e: "Entity", eng: "Engine") -> None:
         return
     battle = ud['battle']
     ud['tick'] += 1
-    t = min(ud['tick'], DIM_TICKS)
-    frac = t / DIM_TICKS
+    total = ud['ticks']
+    t = min(ud['tick'], total)
+    frac = t / total
     battle.dim_level = frac if ud['dir'] > 0 else 1.0 - frac
-    if ud['tick'] >= DIM_TICKS:
+    if ud['tick'] >= total:
         battle.dim_level = 1.0 if ud['dir'] > 0 else 0.0
         cb = ud.get('on_done')
         eng.destroy(e)
@@ -34,21 +37,21 @@ def _dim_think(e: "Entity", eng: "Engine") -> None:
             cb()
 
 
-def _spawn(battle, direction: int, on_done: Callable | None) -> "Entity":
+def _spawn(battle, direction: int, on_done: Callable | None, ticks: int) -> "Entity":
     e = battle.engine.spawn(think_fn=_dim_think)
     e.flags = 0x800 | 0x10000                       # alive + think, 不渲染
     e.user_data.update(kind='skill_dim', projectile=True, dim=True, battle=battle,
-                       dir=direction, tick=0, on_done=on_done)
+                       dir=direction, tick=0, on_done=on_done, ticks=max(1, ticks))
     return e
 
 
-def start_skill_dim(battle, on_done: Callable) -> "Entity":
-    """渐暗 DIM_TICKS 后调 on_done (= 挂 cast seq). projectile=True 让回合/输入门控等它."""
-    return _spawn(battle, +1, on_done)
+def start_skill_dim(battle, on_done: Callable, skill_id: int | None = None) -> "Entity":
+    """渐暗 (默认 DIM_TICKS, 自定义调色板技能见 SKILL_DIM_TICKS) 后调 on_done (= 挂 cast seq). projectile=True 让回合/输入门控等它."""
+    return _spawn(battle, +1, on_done, SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[0])
 
 
-def end_skill_dim(battle, on_done: Callable | None = None) -> "Entity | None":
-    """技能收尾: 渐亮 DIM_TICKS 后调 on_done. 没暗过就不做 (返回 None)."""
+def end_skill_dim(battle, on_done: Callable | None = None, skill_id: int | None = None) -> "Entity | None":
+    """技能收尾: 渐亮后调 on_done. 没暗过就不做 (返回 None)."""
     if getattr(battle, 'dim_level', 0.0) <= 0.0:
         return None
-    return _spawn(battle, -1, on_done)
+    return _spawn(battle, -1, on_done, SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[1])

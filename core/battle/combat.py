@@ -242,7 +242,7 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         def _attach():
             battle.engine.attach_seq(ent, seq_bc)
             attacker.cast_hold = hold
-        start_skill_dim(battle, _attach)
+        start_skill_dim(battle, _attach, skill_id)
     else:
         battle.engine.attach_seq(attacker.entity, seq_bc)
         attacker.cast_hold = hold

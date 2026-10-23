@@ -1,8 +1,5 @@
-"""三藏 凤凰掌 0x17 投射物: 原地由小变大 → 飞向 target → 敌人周围连爆 8 个 efock01.
-
-严格还原 exe (caster dispatcher FUN_004febad + phoenix think FUN_004fe717):
-  - state 0 不调物理, 只播 grow seq (帧 0-4) → 凤凰在 caster 原地长大, 无位移.
-  - 抵达 target 后每 4 tick spawn 1 个 efock01 爆炸, 共 8 个, 爆完发 SIG_IMPACT_2 结算.
+"""三藏 凤凰掌 0x17 投射物 (2026-10-22 实录校准): 原地长大 (seq 帧 0-4) → 弹簧飞向 target → 越过后匀速飞出屏外
+→ 之后每 4 tick 一个 efock01 共 8 个 → 全播完 SIG_IMPACT_2 结算.
 """
 
 import random
@@ -11,22 +8,37 @@ from core.anim_engine.engine import Engine
 from core.projectile import (
     EFOCK01_ATLAS,
     PHOENIX_BURST_COUNT,
-    PHOENIX_GROW_FRAMES,
     _PHOENIX_FLY,
     _PHOENIX_GROW,
     spawn_phoenix_effect,
 )
+
+PHOENIX_GROW_FRAMES = 5     # 长大 seq 0x67312c 帧 0-4
+
+
+class _Q:
+    def occupant(self, x, y):
+        return None
 
 
 class _Battle:
     def __init__(self):
         self.rng = random.Random(0)
         self.engine = Engine()
+        self.q = _Q()
+        self.float_pending = 0
+        self.damage_events = []
 
 
 class _Caster:
     def __init__(self, x, y, facing):
         self.x, self.y, self.facing = x, y, facing
+        self.entity = None
+        self.is_player = True
+        self.pending_skill_id = 0x17
+        self.cast_hold = True
+        self.suppress_hit_fx = False
+        self.suppress_hit_reaction = False
 
 
 def test_phoenix_grows_in_place_then_flies_then_explodes():
@@ -45,13 +57,14 @@ def test_phoenix_grows_in_place_then_flies_then_explodes():
         if e.state_code == _PHOENIX_GROW:
             grow_frames.add(e.frame_idx)
         b.engine.tick()
-        if e.state_code == _PHOENIX_GROW and (e.x != spawn_x or e.y != spawn_y):
+        if (e.flags & 0x800) == 0 or e.user_data.get('target_x') is None:   # 销毁 (槽位可能被火/协调实体复用)
+            phoenix_destroyed = True
+        if not phoenix_destroyed and e.state_code == _PHOENIX_GROW and (e.x != spawn_x or e.y != spawn_y):
             moved_during_grow = True
         for x in b.engine.entities:
-            if x is not e and x.atlas_slot == EFOCK01_ATLAS:
+            if x.atlas_slot == EFOCK01_ATLAS and x.user_data.get('ember'):
                 burst_ids.add(id(x))
-        if (e.flags & 0x800) == 0 or e not in b.engine.entities:
-            phoenix_destroyed = True
+        if phoenix_destroyed and len(burst_ids) >= PHOENIX_BURST_COUNT:
             break
 
     # 1) 原地由小变大: 长大期零位移, 播帧 0-4
@@ -61,8 +74,8 @@ def test_phoenix_grows_in_place_then_flies_then_explodes():
     assert e.state_code != _PHOENIX_GROW
     # 3) 命中后连爆 8 个 efock01
     assert len(burst_ids) == PHOENIX_BURST_COUNT, f"应爆 {PHOENIX_BURST_COUNT} 个, got {len(burst_ids)}"
-    # 4) 爆完凤凰销毁
-    assert phoenix_destroyed, "8 爆后凤凰应销毁"
+    # 4) 凤凰飞出屏外销毁 (火在它之后放)
+    assert phoenix_destroyed, "凤凰飞出屏外应销毁"
 
 
 def test_phoenix_flies_toward_target_after_grow():
