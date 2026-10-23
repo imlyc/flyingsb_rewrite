@@ -311,10 +311,10 @@ HUOLONG_EFFECT_SEQ: list[tuple] = [
 
 
 def huolong_think_fn(e: "Entity", eng: "Engine") -> None:
-    """火龍斬 effect entity. state 0: 等 seq 播完 → SIG_IMPACT_2 + destroy."""
+    """火龍斬 FUN_00504a77 (实录 mask_22_F90788): 光标格 (x, y+1) 播 seq 0x676d38 (278 帧 0-15, 32t) → 完 -200:
+    全敌飘字 + 受击 seq (无特效) + 播 0xbd; dispatcher 0x1e 等飘字落定 → 施法者 idle → 渐亮."""
     if e.state_code == PROJ_STATE_EXPLODING and not e.is_playing():
-        eng._signal(e, SIG_IMPACT_2)
-        eng._signal(e, SIG_END)
+        e.user_data['coord'].user_data['pending'] = 0
         eng.destroy(e)
         e.state_code = PROJ_STATE_DONE
 
@@ -325,19 +325,21 @@ def spawn_huolong_effect(battle, attacker, target_tile: tuple[int, int]) -> "Ent
     """
     from core.sprites.base import TILE_W, TILE_H
     from core.anim_engine.bytecode import tuple_to_bytecode
+    from core.jah_skills import _spawn_coord, _pillar_coord_think
     eng = battle.engine
+    coord = _spawn_coord(battle, attacker, _cloudwave_victims(battle, attacker), _pillar_coord_think)
+    coord.user_data['pending'] = 1
 
     tx, ty = target_tile
     e = eng.spawn(think_fn=huolong_think_fn)
     e.x = (tx * TILE_W + TILE_W // 2) * FP_ONE
-    e.y = (ty * TILE_H + TILE_H // 2) * FP_ONE
+    e.y = (ty * TILE_H + TILE_H // 2 + 1) * FP_ONE
     e.z = 0
     e.vx = e.vy = e.vz = 0
     e.atlas_slot = 278
     e.frame_idx = 0
     e.flags |= 0x40
-    e.user_data['kind'] = 'hit_effect'
-    e.user_data['projectile'] = True
+    e.user_data.update(kind='hit_effect', projectile=True, coord=coord)
     e.state_code = PROJ_STATE_EXPLODING       # 直接到 seq-playing 阶段
     eng.attach_seq(e, tuple_to_bytecode(HUOLONG_EFFECT_SEQ))
     return e

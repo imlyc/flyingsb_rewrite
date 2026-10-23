@@ -188,7 +188,7 @@ def _shatter(battle, x, y) -> None:
 
 
 # 结算 (-200) 时 exe 是否重新挂受击 seq: 冰柱冰身/修羅/冰龍 的 -200 case 挂, 其它只飘数字 (受击在 -250 已放).
-SETTLE_REACTS = {0x3f, 0x40, 0x41, 0x17}      # 凤凰掌 0x32: 飘字 + 受击 seq (无特效)
+SETTLE_REACTS = {0x3f, 0x40, 0x41, 0x17, 0x22}      # 凤凰掌 0x32 / 火龍斬 -200: 飘字 + 受击 seq (无特效)
 
 
 def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
@@ -206,7 +206,7 @@ def _spawn_coord(battle, caster, victims, think_fn) -> "Entity":
 # (末位数字弹两下落定时 -20; 实录 结算 → idle 标志 = 30 + 2×位数 (+0/1 池序)). 我们直接等 battle.float_pending == 0.
 # 施法者何时放下手 (flags |= 0x10000 → 待机帧): 每个 dispatcher 模板不同 — 这些在进 0x28 渐亮**前**放手 (实录 idle 在渐亮开始 tick),
 # 其余 (冰錐/擎天/化精/冰雨/吸精) 在渐亮**结束**后才放手.
-IDLE_BEFORE_FADE = {0x3e, 0x3f, 0x40, 0x41}
+IDLE_BEFORE_FADE = {0x3e, 0x3f, 0x40, 0x41, 0x22}
 
 
 def _coord_finish(e: "Entity", eng: "Engine") -> None:

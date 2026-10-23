@@ -263,7 +263,7 @@ def test_huolong_effect_signals_impact_and_damages():
     caster.pending_impact_total = 1
 
     apply_pending_attack(b, caster)
-    proj = [e for e in b.engine.entities if e.user_data.get('projectile')]
+    proj = [e for e in b.engine.entities if e.user_data.get('projectile') and e.user_data.get('kind') == 'hit_effect']
     assert len(proj) == 1
     p = proj[0]
     assert p.atlas_slot == 278   # 火龍 atlas
