@@ -148,6 +148,10 @@ class TacticsBattle:
                 self.engine._emit('sound_play', source_entity, play)
             if hit >= 0:
                 self.engine.swing_sound = hit
+            from core.skill_seq import SKILL_CAST_SIGNAL_HANDLERS
+            h = SKILL_CAST_SIGNAL_HANDLERS.get(unit.pending_skill_id)
+            if h is not None and h(self, unit, sig):
+                return
         # 破天舞 PHASE_CASTER_DASH 期间, caster.entity 跑 cdit1_g0 的 'impact'/'end' 不走
         # 常规结算流程, 而是转发给 coord (coord 控制何时真正 SIG_IMPACT_2 + damage + END).
         coord = unit.pending_caster_coord

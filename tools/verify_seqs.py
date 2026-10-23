@@ -28,10 +28,12 @@ ORIGIN = Path(os.environ.get("FLYINGSB_ORIGIN", ROOT.parent / "origin" / "flying
 EXE = Path(os.environ.get("FLYINGSB_EXE", ORIGIN / "FlyingSB.exe"))
 IMAGE_BASE = 0x400000
 
-MODULES = ("core.raw_attack_seqs", "core.skill_seq", "core.son_transform", "core.projectile",
+MODULES = ("core.raw_attack_seqs", "core.skill_seq", "core.son_transform", "core.projectile", "core.pig_skills",
            "core.hit_effect_seq")
 SEQ_KINDS = {"fm", "idle", "fm_m1", "move", "sound", "impact", "jump", "end", "exit", "loop", "raw"}
 SIG_IMPACT, SIG_END = -100, -110
+# 我们为绕开 tactics 普攻 IMPACT 结算而改用的专用信号 = exe 原 -100 (超亂舞 -1008, 猪八戒 -1009)
+SIG_ALIASES = {-1008: SIG_IMPACT, -1009: SIG_IMPACT}
 MAX_OPS = 400
 
 
@@ -51,7 +53,7 @@ def norm_ours(seq) -> list[tuple]:
         elif k == "impact":
             out.append(("G", t[1] if len(t) > 1 else SIG_IMPACT))
         elif k == "jump":
-            out.append(("G", t[1]))
+            out.append(("G", SIG_ALIASES.get(t[1], t[1])))
         elif k == "end":
             out.append(("G", SIG_END))
         elif k == "exit":

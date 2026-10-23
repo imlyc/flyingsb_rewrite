@@ -24,7 +24,7 @@ def tuple_to_bytecode(tuple_seq: list) -> bytes:
       ('raw', op_hex, a, b, c, d)        → 原样 10B (未解码 op, 用 op_hex 低字节 + size 0x0a)
     """
     # op_hex 0x0411 → 字节码 op 0x11 (PLAY); 0x0413 → op 0x13 (SET_SWING_SOUND)
-    SOUND_HEX_TO_OP = {0x0411: 0x11, 0x0413: 0x13}
+    SOUND_HEX_TO_OP = {0x0411: 0x11, 0x0412: 0x12, 0x0413: 0x13}   # 0x12 = 停音 (颱風火炎砲 seq 末尾)
 
     out = bytearray()
     for t in tuple_seq:

@@ -84,8 +84,13 @@ def main():
         b.aim_cursor = (p.x, p.y)
         assert b.confirm_attack_aim(), 'confirm failed (敌人不在范围?)'
     born = {}
+    from types import SimpleNamespace
+    from scenes.battle.update import _tick_reactions
+    from core.attack_seq import ATTACK_TICK_MS
+    scene_stub = SimpleNamespace(battle=b)
     for t in range(a.max_ticks):
         b.engine.tick()
+        _tick_reactions(scene_stub, ATTACK_TICK_MS)    # 受击 seq 也推进 (dispatcher 收尾要等它播完, 如猪八戒 0x14)
         out.append(f"F {t} {t * 24}")
         out.append(f"G cam={a.enemy_dx},{a.enemy_dy} skill={a.skill} move=0 nvict=1")
         out.append(f"B caster={0x86b618 + a.caster_idx * 0x1ac:x} n=1 {0x86b618 + 60 * 0x1ac:x}")
