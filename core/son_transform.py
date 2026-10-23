@@ -265,16 +265,9 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
                 _flip_attach(battle, caster, loop=True)
                 e.state_code = _TRANSFORM
             return
-        # 超亂舞: 简短施法姿 ps_CSON102 列 2 → 3, 各 CAST_POSE_FRAME_TICKS (待实录校准)
-        if t and t % CAST_POSE_FRAME_TICKS == 0:
-            e.user_data['cast_pose_idx'] += 1
-            ci = e.user_data['cast_pose_idx']
-            if ci >= len(CAST_POSE_COLS):
-                caster.cast_pose_frame = e.user_data['cast_row'] * 4 + CAST_POSE_COLS[-1]
-                spawn_luanwu(battle, caster, e)
-                e.state_code = _TRANSFORM
-            else:
-                caster.cast_pose_frame = e.user_data['cast_row'] * 4 + CAST_POSE_COLS[ci]
+        # 超亂舞: cast seq 的 -1008 (= exe -100) 由 on_signal 同 tick 召滑板 (见 start_son_transform), 这里只等它切状态
+        if e.user_data['skill_id'] == 0x08:
+            return
     elif e.state_code == _FLIP_OUT:
         # 翻跟头 seq (attach @start_son_transform) 播完 (exit op 清 playing) → 隐身变身
         if not caster.is_attacking:
@@ -286,9 +279,8 @@ def son_transform_think(e: "Entity", eng: "Engine") -> None:
             e.state_code = _TRANSFORM
     elif e.state_code == _TRANSFORM:
         if e.user_data['skill_id'] == 0x08:
-            # 超亂舞: 孙悟空保持施法姿, 等滑板打完 (eson_done) → 收尾 (不翻跟斗/不隐身)
-            if e.user_data.get('eson_done'):
-                caster.cast_pose_frame = None
+            # 超亂舞: 孙悟空定格施法姿, 滑板打完 (eson_done) 且飘字落定 (0x1e) → 收尾渐亮 (不翻跟斗/不隐身)
+            if e.user_data.get('eson_done') and getattr(battle, 'float_pending', 0) == 0:
                 e.state_code = _DONE
             return
         if e.user_data['skill_id'] == 0x04:
@@ -1697,113 +1689,94 @@ def spawn_kukumao_beast(battle, caster, coord: "Entity") -> None:
 # 原版: 孙悟空施法(ps_CSON102, 同分身念咒) → coordinator spawn 16 滑板(eson08 atlas266, 8方向帧),
 # 各随机位置+随机方向飞, **撞屏幕边反弹**(翻向); 每 20tick 全敌受击; 128tick 时结算伤害+滑板全销毁.
 LUANWU_SKATE_ATLAS = 266        # eson08 = 滑板孙悟空 (8 帧 = 8 方向)
-LUANWU_COUNT = 32
-LUANWU_SPEED = 48               # 滑板飞行速度 px/tick (= 原版 exe 0x30=48)
-LUANWU_HEIGHT = 48              # 飞行高度 px (exe z=0x300000)
-LUANWU_DURATION = 128           # coordinator 总时长 tick (exe frame==0x80)
-LUANWU_REACT_INTERVAL = 20      # 每 N tick 全敌受击 (exe frame%0x14)
-LUANWU_BOX_HW = 340             # 反弹框半宽 px (绕 cursor 中心 = 满屏飞)
-LUANWU_BOX_HH = 200             # 反弹框半高 px
-LUANWU_BOUNCE_TURN = 0.5        # **反弹时**额外随机偏转 rad (~±29°) — 打破刚性轨迹不聚团; 平时直线
-# eson08 8 方向帧 = **从北顺时针**: 0=上(N) 1=右上 2=右(E) 3=右下 4=下(S) 5=左下 6=左(W) 7=左上.
-# (渲染逐帧辨认确认.) 帧 = 飞行速度方向的罗盘扇区, 滑板头朝飞行方向.
+# 2026-10-23 实录 son_08_F1653533 + reverse_engineering/luanwu_decomp.txt:
+# cast seq 0x671d40[dir] = fm_mode1 18 (ps_CSON102) 列 2 t3, 列 3 t3, -100, exit (+7 定格); -100 → 协调实体 FUN_004f82c9:
+# 出生 tick 生成 16 块滑板 (FUN_004f8188) + 播 0xb1; age%20==0 → -250 全敌受击 + 两特效 + 0xbd; age==128 → 滑板自毁 + -200 全敌飘字.
+# 滑板: 位置 = 屏幕矩形内均匀随机 (cam-w/2 + rand%w, cam-h/2 + rand%h), z 48, flags 0x31 无加速度 = 匀速, 角度 a=rand%1000/1000 圈,
+# vx = sin(a)×48, vy = cos(a)×48, 帧 = DAT_00671e14[((a+0xf000)&0xffff)*8>>16]; 出屏幕左右: 帧查 671e1c 表 + vx 取反, 上下: 671e24 + vy 取反.
+LUANWU_COUNT = 16
+LUANWU_SPEED = 48
+LUANWU_HEIGHT = 48
+LUANWU_DURATION = 128
+LUANWU_REACT_INTERVAL = 20
+LUANWU_SCREEN = (640, 480)
+LUANWU_CAST_SLOT = 18           # ps_CSON102 在 ps_ 登记表的绝对下标 (core.grid_atlas_table)
+LUANWU_SIG = -1008
+LUANWU_DIR_FRAMES = (4, 3, 2, 1, 0, 7, 6, 5)      # DAT_00671e14
+LUANWU_FLIP_X = (0, 7, 6, 5, 4, 3, 2, 1)          # DAT_00671e1c
+LUANWU_FLIP_Y = (4, 3, 2, 1, 0, 7, 6, 5)          # DAT_00671e24
 _LUANWU_RUN = 240
-SFX_LUANWU_START = 0xb1         # 滑板起飞 (E009): coordinator spawn FUN_004f82c9
-SFX_LUANWU_HIT = 0xbd           # 周期全敌受击 (E021): dispatcher case -250, 每轮一次
+SFX_LUANWU_START = 0xb1
+SFX_LUANWU_HIT = 0xbd
 
 
-def _skate_frame(vx: float, vy: float) -> int:
-    """飞行速度方向 → eson08 帧 (从北顺时针 45° 一档, 滑板头=飞行方向; 反弹后自动更新)."""
-    import math
-    ang = math.atan2(vx, -vy)                            # 从北(-y)顺时针的角度
-    return round(ang / (math.pi / 4)) % 8
+def _luanwu_cast_seq(row: int) -> list[tuple]:
+    # exe 这里是 signal -100 (dispatcher 召协调实体); 我们用专用信号 -1008 走实体 on_signal 回调, 避免 tactics 把它当普攻 IMPACT 结算
+    return [('fm_mode1', LUANWU_CAST_SLOT, row * 4 + 2, 3), ('fm_mode1', LUANWU_CAST_SLOT, row * 4 + 3, 3), ('jump', LUANWU_SIG), ('exit',)]
+
+
+def _luanwu_screen_rect(battle, caster) -> tuple[int, int, int, int]:
+    view = getattr(battle, 'view_center_world', None)
+    if view is None:
+        from core.sprites.base import TILE_W, TILE_H
+        view = (caster.x * TILE_W + TILE_W // 2, caster.y * TILE_H + TILE_H // 2)
+    w, h = LUANWU_SCREEN
+    return view[0] - w // 2, view[1] - h // 2, w, h
 
 
 def skateboard_think(e: "Entity", eng: "Engine") -> None:
-    """滑板: 直线飞 + 撞反弹框边反向(翻向帧); coordinator 结束(luanwu_done)时销毁 (exe FUN_004f803e)."""
+    """滑板 FUN_004f803e: 匀速直线; 出屏幕矩形左右/上下边 → 翻帧 + 该轴速度取反; 协调实体结束 (luanwu_done) 自毁."""
     ud = e.user_data
     if 'skate' not in ud:
         return
     if ud['coord'].user_data.get('luanwu_done'):
         eng.destroy(e)
         return
-    e.x += int(ud['vx'] * 65536)                          # 平时直线飞
-    e.y += int(ud['vy'] * 65536)
+    e.x += ud['vx']
+    e.y += ud['vy']
+    x0, y0, w, h = ud['rect']
     px, py = e.x >> 16, e.y >> 16
-    cx, cy = ud['cx'], ud['cy']
-    bounced = False
-    if px < cx - LUANWU_BOX_HW or px > cx + LUANWU_BOX_HW:
-        ud['vx'] = -ud['vx']                              # 撞左右边反弹
-        bounced = True
-    if py < cy - LUANWU_BOX_HH or py > cy + LUANWU_BOX_HH:
-        ud['vy'] = -ud['vy']                              # 撞上下边反弹
-        bounced = True
-    if bounced:                                           # 反弹时随机偏转 → 不沿刚性轨迹聚团
-        import math
-        da = ud['battle'].rng.uniform(-LUANWU_BOUNCE_TURN, LUANWU_BOUNCE_TURN)
-        cos_a, sin_a = math.cos(da), math.sin(da)
-        vx, vy = ud['vx'], ud['vy']
-        ud['vx'] = vx * cos_a - vy * sin_a
-        ud['vy'] = vx * sin_a + vy * cos_a
-    e.frame_idx = _skate_frame(ud['vx'], ud['vy'])        # 帧跟飞行方向 (反弹后更新)
+    if px < x0 or px > x0 + w:
+        e.frame_idx = LUANWU_FLIP_X[e.frame_idx]
+        ud['vx'] = -ud['vx']
+    if py < y0 or py > y0 + h:
+        e.frame_idx = LUANWU_FLIP_Y[e.frame_idx]
+        ud['vy'] = -ud['vy']
 
 
-def _spawn_skateboard(battle, cx: int, cy: int, coord, idx: int = 0) -> None:
-    """spawn 1 个滑板: 4×4 网格分散位置(+抖动) + 随机方向 + 轻微随机速度 (防聚团). cx,cy=px 中心."""
+def _spawn_skateboard(battle, caster, coord, rect) -> None:
     import math
-    ang = battle.rng.random() * 2 * math.pi
-    spd = LUANWU_SPEED * battle.rng.uniform(0.82, 1.18)  # 速度轻微差异 → 不同步, 不聚团
-    vx = math.cos(ang) * spd
-    vy = math.sin(ang) * spd
+    rng = battle.rng
+    x0, y0, w, h = rect
+    a16 = (rng.randint(0, 999) << 16) // 1000                    # 角度 (16.16 圈)
+    ang = a16 / 65536 * 2 * math.pi
     e = battle.engine.spawn(think_fn=skateboard_think)
     e.atlas_slot = LUANWU_SKATE_ATLAS
+    e.frame_idx = LUANWU_DIR_FRAMES[(((a16 + 0xf000) & 0xffff) * 8) >> 16]
     e.flags |= 0x40
-    # 4×4 网格铺开: idx → 格中心 + 半格抖动 (初始就分散)
-    col, row = idx % 4, (idx // 4) % 4
-    cw, ch = (2 * LUANWU_BOX_HW) // 4, (2 * LUANWU_BOX_HH) // 4
-    gx = -LUANWU_BOX_HW + col * cw + cw // 2 + battle.rng.randint(-cw // 2, cw // 2)
-    gy = -LUANWU_BOX_HH + row * ch + ch // 2 + battle.rng.randint(-ch // 2, ch // 2)
-    e.x = (cx + gx) << 16
-    e.y = (cy + gy) << 16
+    e.x = (x0 + rng.randint(0, w - 1)) << 16
+    e.y = (y0 + rng.randint(0, h - 1)) << 16
     e.z = -(LUANWU_HEIGHT << 16)
-    e.user_data['kind'] = 'hit_effect'
-    e.user_data['projectile'] = True
-    e.user_data['skate'] = True
-    e.user_data['draw_order'] = 10
-    e.user_data['battle'] = battle
-    e.user_data['vx'] = vx
-    e.user_data['vy'] = vy
-    e.user_data['cx'] = cx
-    e.user_data['cy'] = cy
-    e.user_data['coord'] = coord
-    e.frame_idx = _skate_frame(vx, vy)
+    e.user_data.update(kind='hit_effect', projectile=True, skate=True, draw_order=10, battle=battle, coord=coord,
+                       vx=int(math.sin(ang) * LUANWU_SPEED * 65536), vy=int(math.cos(ang) * LUANWU_SPEED * 65536), rect=rect)
 
 
 def luanwu_coord_think(e: "Entity", eng: "Engine") -> None:
-    """超亂舞 coordinator: spawn 16 滑板 → 每 20tick 全敌受击 → 128tick 结算伤害+滑板全销毁 (exe FUN_004f82c9)."""
+    """超亂舞协调实体 FUN_004f82c9: 出生 16 滑板 + 0xb1; age%20 全敌 -250 (受击+两特效+0xbd); age 128 滑板自毁 + -200 飘字."""
     ud = e.user_data
     if 'luanwu' not in ud:
         return
     battle, caster, coord = ud['battle'], ud['caster'], ud['coord']
-    if not ud['spawned']:                                 # 起手 spawn 16 滑板
-        ud['spawned'] = True
-        # 框中心 = 可见屏幕中心 (满屏飞). 施法者靠地图/相机边缘时相机会 clamp, 此时
-        # 屏幕中心 ≠ 施法者格, 用施法者格当中心会让滑板整体偏到半屏 (bug). headless
-        # 无 UI 时回退到 cursor 格.
-        view = getattr(battle, 'view_center_world', None)
-        cx, cy = view if view is not None else ((coord.x >> 16), (coord.y >> 16))
-        for i in range(LUANWU_COUNT):
-            _spawn_skateboard(battle, cx, cy, coord, idx=i)
-        _sfx(battle, SFX_LUANWU_START)
     ud['tick'] += 1
-    t = ud['tick']
-    if t % LUANWU_REACT_INTERVAL == 0:                    # 周期全敌受击 (滑板撞击感)
+    t = ud['tick']                                        # 出生 tick (= cast -100) 后第 t tick; exe age = t-1
+    if (t - 1) % LUANWU_REACT_INTERVAL == 0 and t <= LUANWU_DURATION:   # 实录 受击在 +8, +28, ..., +128
         for v in ud['victims']:
             _ql_rain_react(battle, caster, v)
-        _sfx(battle, SFX_LUANWU_HIT)                      # exe case -250: 全敌受击后播一次
-    if t >= LUANWU_DURATION:                              # 结算伤害 + 滑板全销毁 + 收尾
-        _aoe_hit_all(battle, caster, ud['victims'])
-        coord.user_data['luanwu_done'] = True             # 滑板自毁
+        _sfx(battle, SFX_LUANWU_HIT)
+    if t > LUANWU_DURATION:                               # age == 128 (实录 +136): 滑板自毁 + 飘字
+        coord.user_data['luanwu_done'] = True
+        for v in ud['victims']:
+            _damage_only(battle, caster, v)
         coord.user_data['eson_done'] = True
         eng.destroy(e)
 
@@ -1821,9 +1794,13 @@ def spawn_luanwu(battle, caster, coord: "Entity") -> None:
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
     e.user_data['victims'] = _eson_collect_victims(battle, caster)
-    e.user_data['spawned'] = False
+    e.user_data['spawned'] = True
     e.user_data['tick'] = 0
     e.state_code = _LUANWU_RUN
+    rect = _luanwu_screen_rect(battle, caster)           # exe 协调实体 state -1 (出生 tick): 16 滑板 + 0xb1
+    for _ in range(LUANWU_COUNT):
+        _spawn_skateboard(battle, caster, coord, rect)       # luanwu_done 标在 son 协调实体上
+    _sfx(battle, SFX_LUANWU_START)
 
 
 # ============ 分身术: 孙悟空原地翻跟斗 + 对每敌召唤 4 分身围攻 (exe FUN_004f3ca3/3c73/3bdf/3876/3693) ============
@@ -2004,7 +1981,21 @@ def start_son_transform(battle, caster, target_tile, skill_id: int) -> "Entity":
     e.user_data['phase_ticks'] = 0
     # ps_CSON102 简短施法姿: **0x04 分身 (PTR_00671b0c) + 0x08 超亂舞 (PTR_00671db0, 同位帧2/6)**.
     # 其余技能 cast = 翻跟斗本身 (槽5=ps_CSON105), 直接进 FLIP_OUT.
-    if skill_id in (0x04, 0x08):
+    if skill_id == 0x08:
+        from core.anim_engine.bytecode import tuple_to_bytecode
+        if caster.entity is None:
+            caster.entity = battle.engine.spawn()
+        ent = caster.entity
+        ent.x = ent.y = ent.z = 0
+        def _on_cast_sig(src, sig, coord=e):
+            if sig == LUANWU_SIG and coord.state_code == _CAST:
+                spawn_luanwu(battle, caster, coord)      # exe -100: 协调实体出生 tick 就生成 16 滑板 (实录 +7)
+                coord.state_code = _TRANSFORM
+        ent.user_data = {'unit': caster, 'on_signal': _on_cast_sig}
+        battle.engine.attach_seq(ent, tuple_to_bytecode(_luanwu_cast_seq(_caster_cson_row(caster))))
+        caster.cast_hold = True
+        e.state_code = _CAST
+    elif skill_id == 0x04:
         e.user_data['cast_row'] = _caster_cson_row(caster)
         e.user_data['cast_pose_idx'] = 0
         e.state_code = _CAST

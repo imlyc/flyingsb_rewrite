@@ -124,7 +124,7 @@ def test_luanwu_sounds():
     from core.son_transform import SFX_LUANWU_START, SFX_LUANWU_HIT, LUANWU_DURATION, LUANWU_REACT_INTERVAL
     played, solo, stopped = _run_son_skill(0x08)
     assert played.count(SFX_LUANWU_START) == 1
-    assert played.count(SFX_LUANWU_HIT) == LUANWU_DURATION // LUANWU_REACT_INTERVAL
+    assert played.count(SFX_LUANWU_HIT) == LUANWU_DURATION // LUANWU_REACT_INTERVAL + 1   # 实录 age 0,20,...,120 共 7 次
     assert played.index(SFX_LUANWU_START) < played.index(SFX_LUANWU_HIT)
     assert {SFX_LUANWU_START, SFX_LUANWU_HIT} == _exe_ids(0x08, 'play')
 

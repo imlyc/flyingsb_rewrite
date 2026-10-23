@@ -636,13 +636,13 @@ def test_luanwu_skateboards():
     caster.pending_impact_total = 1
     b._pending_damage_range = {(8, 5), (7, 6)}
     start_son_transform(b, caster, (7, 5), 0x08)
-    assert caster.cast_pose_frame is not None, "超亂舞起手应有 ps_CSON102 施法姿"
+    assert caster.entity is not None and caster.entity.is_playing(), "超亂舞起手应挂 ps_CSON102 施法 seq (fm_mode1 18)"
     skate_ids = set()
     saw_cast_hold = saw_react = False
     for _ in range(400):
         b.engine.tick()
-        if caster.cast_pose_frame is not None:
-            saw_cast_hold = True        # 施法姿保持 (不翻跟斗)
+        if caster.cast_hold and not caster.cast_hidden:
+            saw_cast_hold = True        # 施法姿定格 (不翻跟斗/不隐身)
         if d1.reaction_seq is not None or d2.reaction_seq is not None:
             saw_react = True
         for e in b.engine.entities:
@@ -654,7 +654,7 @@ def test_luanwu_skateboards():
     assert saw_cast_hold, "孙悟空应保持施法姿 (不翻跟斗)"
     assert saw_react, "滑板期敌人应周期受击"
     assert d1.hp < 50 and d2.hp < 50, "超亂舞应伤到两敌"
-    assert caster.cast_pose_frame is None, "收尾应清施法姿"
+    assert not caster.cast_hold, "收尾应放下施法姿"
     # 收尾滑板应全销毁
     assert not any(e.user_data.get('skate') for e in b.engine.entities if e.flags & 0x800), \
         "收尾时滑板应全销毁"
