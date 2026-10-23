@@ -522,12 +522,12 @@ def test_mfeng_revive_and_feathers():
             if e.atlas_slot == MF_FEATHER_ATLAS and e.user_data.get('feather'):
                 saw_feather += 1
             if e.user_data.get('cloud'):
-                cloud_targets.add(e.user_data['target_x'])
+                cloud_targets.add(e.x >> 16)
         if b._pending_turn_end:
             break
     assert saw_phoenix > 0, "应召唤大凤凰 eson09 (267)"
     assert saw_feather > 0, "应有羽毛光点 (e00 247)"
-    assert len(cloud_targets) >= 4, "应有多朵祥云散布在不同水平位置 (非对称聚两侧)"
+    assert len(cloud_targets) >= 8, "应有 8 朵祥云从两侧飞入 (位置随机)"
     # 收尾时祥云应已全部飘出销毁 (主凤凰飞出屏外 + 等云走完)
     assert not any(e.user_data.get('cloud') for e in b.engine.entities if e.flags & 0x800), \
         "回合结束时祥云应已全部飘出"

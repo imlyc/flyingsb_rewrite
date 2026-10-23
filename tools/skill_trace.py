@@ -69,6 +69,8 @@ def main():
     players = [p]
     if a.ally_dx is not None:
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
+        if a.skill == 0x09:                     # M凤凰 复活术: 队友得是倒下的才是目标
+            ally.hp = 0; ally.death_anim_time_ms = 0
     b = TacticsBattle(players=players, enemies=[e], battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
                       player_positions=[(u.x, u.y) for u in players], enemy_positions=[(e.x, e.y)])
     p.facing = FACING[a.facing]

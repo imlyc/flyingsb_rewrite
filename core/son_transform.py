@@ -1406,163 +1406,142 @@ def spawn_yuetu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     _beast_spawn(battle, caster, coord, atlas, yuetu_beast_think, draw_order=0)
 
 
-# ============ M凤凰: 复活术 (治疗类! 全队复活回满 + 羽毛光点) (exe FUN_004f8ce6 + FUN_004f8bc6) ============
-# 原版: 凤凰神兽 (eson09 atlas267 帧0 = 471x339 大凤凰图, 静态无 coil) 从天降到中心悬停; 落地音效0xef;
-# hold 0x40(64)tick; 最后 0x1e(30)tick **每 tick** 对**除施法者外的每个队友**撒羽毛光点 (FUN_004f8bc6)
-# + 音效0x111; 末尾升空. ⚠目标=**队友(含死者)**非敌人; 技能="将全体人员复原" = 全队复活+回满.
-# 羽毛 = e00(atlas247) 帧30-41 (4变体×3帧, 3x3 极小光点), 从队友头顶飘落 (轻重力, ~63tick/落地消失).
-MF_ATLAS = 267                  # eson09 帧0 (大凤凰, 静态)
-MF_HOVER_HEIGHT = 80            # 悬停高度 px (大凤凰图中心≈屏幕中心; 锚点(207,166))
-MF_DROP = 140                   # 进场下落距离
-MF_DESCEND_VZ = 22
-MF_HOLD_TICKS = 64              # 悬停时长 (exe +0x40)
-MF_RISE_OFFSCREEN = 600         # 升空到此高度 px = 大凤凰(471x339)完全离屏 → 才消失 (避免屏内突然消失)
-MF_FEATHER_LEAD = 30            # 最后 30tick 撒羽毛 (exe end - 0x1e)
+# ============ M凤凰: 复活术 (exe 2026-10-23 实录 son_09_F10548 + reverse_engineering/mfeng_decomp.txt) ============
+# dispatcher FUN_004f8f71: 翻跟头 → 0x14 烟 + 隐身 +32t → 0x19 FUN_004f8e70 召凤凰 (+0x78=1) → 0x1e 等 +0x78==0 (凤凰 -100)
+#   且 +0x7a==0 (每个目标的回血飘字 -20) → 烟 + 现身. -200 (0xffffff38): 对**目标列表**每人 (= 光标选中的倒下队友, 不含施法者):
+#   think 换回 FUN_004bb56b (复活/待机) + 0x10000 idle + FUN_004d074e 白色回血飘字, +0x7a++.
+# 凤凰 FUN_004f8e70/4f8ce6: eson09 267 帧 0, 与其它神兽**同款弹簧进场** (屏中心 x, y+1000, z1900, vz-60, a2 → 29t 悬停 z1030)
+#   → 0xef, end = age+64; end-30..end **每 tick** 对每个目标撒 1 片羽毛 + 0x111 (31 次); end: DAT_0086a7dc=1 (云散), -200,
+#   升空 (目标 z2000, v0 a2) z>1800 → -100 自毁 (28t).
+# 祥云 FUN_004f899d/4f88ad ×8 (帧 1 左 / 2|3 右, z1000, y = 屏中心 y+1000 -140 + rand%300): 左云生在 屏中心 x-900-rand%160
+#   vx+60 a-2, 右云 +900+rand%160 vx-60 a+2 (生 tick 先走一步); |vx|≤2 → a=0 悬停 (vx 仍 2 慢漂);
+#   凤凰 end → a = ±2 向外 (vx<1 → -2) 加速, |vx|>60 自毁 (30t).
+# 羽毛 FUN_004f8bc6/4f8b51: 生在目标 (x,y) z128, vx,vy = (rand&31-16)/16, vz = (rand&63)/16 (向上), a 0.25 弹簧朝 z0
+#   (v += ±a; z += v), vz 恰为 0 时 a/=4 (慢落 → 活满 64t); age>63 或 z<1 自毁; seq PTR_DAT_00656abc[rand&3]:
+#   e00 247 帧 (30|33|36|39)+0..2 各 2t 循环.
+MF_ATLAS = 267                  # eson09 帧0 大凤凰, 帧 1-3 祥云
+MF_HOLD_TICKS = 64              # 悬停 (exe +0x40)
+MF_FEATHER_LEAD = 30            # end-0x1e 起撒羽毛
 MF_FEATHER_ATLAS = 247          # e00
-MF_FEATHER_VARIANTS = ((30, 31, 32), (33, 34, 35), (36, 37, 38), (39, 40, 41))  # 4变体×3帧
-MF_FEATHER_FRAME_TICKS = 2      # 羽毛 3 帧循环 tick
-MF_FEATHER_HEIGHT = 128         # 羽毛起始高度 px (exe victim.z + 0x80)
-MF_FEATHER_GRAVITY = 0.25       # 轻重力 (exe 0x4000)
-MF_FEATHER_LIFE = 63            # 羽毛寿命 tick (exe frame > 0x3f) 或落地消失
-SFX_MF_LAND = 0xef              # 大凤凰落定音 (E071): exe FUN_004f8ce6 state 0 落到悬停高度时播
-SFX_MF_FEATHER = 0x111          # 羽毛光点音 (E105): 最后 0x1e tick **每 tick** 播 (同 buffer 重启 = 连续)
+MF_FEATHER_VARIANTS = ((30, 31, 32), (33, 34, 35), (36, 37, 38), (39, 40, 41))
+MF_FEATHER_FRAME_TICKS = 2
+MF_FEATHER_Z = 128 << 16        # exe 0x800000
+MF_FEATHER_ACCEL = 0x4000       # 0.25 px/t² 弹簧朝 z0
+MF_FEATHER_MAX_AGE = 0x3f
+SFX_MF_LAND = 0xef              # 凤凰悬停音 (E071)
+SFX_MF_FEATHER = 0x111          # 羽毛音 (E105) 每 tick
+MF_CLOUD_COUNT = 8
+MF_CLOUD_X_OFF = 900            # 屏中心 x ± (900 + rand%160)
+MF_CLOUD_X_RAND = 160
+MF_CLOUD_Y_OFF = BEAST_SPAWN_Y_OFF - 140   # 屏中心 y + 1000 - 140 + rand%300
+MF_CLOUD_Y_RAND = 300
+MF_CLOUD_Z = 1000
+MF_CLOUD_V0 = 60 << 16
+MF_CLOUD_ACCEL = 2 << 16
+MF_CLOUD_V_MIN = 2 << 16        # |vx| ≤ 2 → 悬停
+MF_CLOUD_V_OUT = 60 << 16       # 飘出 |vx| > 60 → 自毁
 _MF_DESCEND = 0
 _MF_HOLD = 1
 _MF_RISE = 2
-# 8 朵祥云 (exe FUN_004f899d spawn + FUN_004f88ad think; eson09 帧1-3 = 3 个旋涡云变体, **不是小凤凰**):
-# think 三段: 从就近屏外飘入(不横穿)→在大凤凰**两侧 + 多在下半部**散布悬停→主凤凰升空(coord['mf_leave'])
-# 后**继续穿到对面**飘出消失. **位置固定不随机** (帧仍随机), 偏左 + 多数下半部前景, 一朵上半部身后.
-# (x 偏移 px [相对中心], 高度 px [越大越靠上], draw_order [>10 凤凰前/ <10 凤凰后]).
-# 高度 px = 相对施法者地面 (正=上方/负=下方). 大凤凰悬停时占 地面+246 ~ 地面-93;
-# 下三分之一 ≈ 地面+20 ~ 地面-93, 故下半部云高度落在此带 (多在地面附近偏下).
-MF_CLOUD_POSITIONS = [
-    # 左侧 5 朵**聚成一团** (内侧到 ≈-50, 与右簇留约一整朵祥云的距离 ~100px), 下三分之一
-    (-155, -20, 12), (-128, 10, 12), (-100, -50, 12), (-74, -5, 12), (-50, -35, 12),
-    # 右侧 2 朵**聚在一起** (内侧 ≈+52)
-    (52, 0, 12), (102, -40, 12),
-    # 上半部 1 朵 (身后, draw_order<凤凰), 左侧 (用户)
-    (-95, 170, 9),
-]
-# eson09 云帧天然 head 朝向 (像素质心): 帧1=右, 帧2/3=左. 用于按云所在侧翻转使 head 朝中心.
-MF_CLOUD_FRAME_HEAD_RIGHT = {1}    # 其余 (2,3) head 朝左
-MF_CLOUD_SPAWN_EXTRA = 440      # 目标基础上再往同侧外推多少 px = 从同侧屏外飘入
-MF_CLOUD_EASE = 0.12            # 飘入趋近系数 (越近越慢 = 减速)
-MF_CLOUD_SNAP = 4               # 距目标 <此 px → 转悬停
-MF_CLOUD_OUT_ACCEL = 1.5        # 飘出加速 px/tick²
-MF_CLOUD_OUT_OFF = 560          # |离中心|>此 px → 销毁
 _MFC_IN = 0
 _MFC_HOVER = 1
 _MFC_OUT = 2
 
 
 def mfeng_feather_think(e: "Entity", eng: "Engine") -> None:
-    """凤凰羽毛光点: 头顶飘落 (左右微飘 + 轻重力) + 3帧循环 → 落地或寿命到消失 (exe FUN_004f8b51)."""
+    """羽毛 FUN_004f8b51: 弹簧朝 z0 (a 0.25, vz==0 时 a/=4), age>63 或 z<1 自毁."""
     ud = e.user_data
     if 'feather' not in ud:
         return
     e.x += ud['vx']
-    e.vz += int(MF_FEATHER_GRAVITY * 65536)
-    e.z += e.vz
-    ud['life'] += 1
-    # 3 帧循环
-    ud['frame_tick'] += 1
-    if ud['frame_tick'] >= MF_FEATHER_FRAME_TICKS:
-        ud['frame_tick'] = 0
-        ud['fi'] = (ud['fi'] + 1) % 3
-        e.frame_idx = ud['variant'][ud['fi']]
-    if e.z >= 0 or ud['life'] >= MF_FEATHER_LIFE:
+    e.y += ud['vy']
+    ud['vz'] += -ud['az'] if ud['ez'] > 0 else ud['az']
+    ud['ez'] += ud['vz']
+    e.z = -ud['ez']
+    if ud['vz'] == 0:
+        ud['az'] >>= 2
+    if ud['age'] > MF_FEATHER_MAX_AGE or ud['ez'] < FP_ONE:   # exe +0x144 出生帧为 0, 实录活 64 帧
         eng.destroy(e)
+    ud['age'] += 1
 
 
 def _spawn_mfeng_feather(battle, ally) -> None:
-    """对 ally 头顶撒 1 个羽毛光点 (随机 4 变体, 小随机速度)."""
+    """FUN_004f8bc6: 目标脚下 (x,y) z128, 随机小速度, 4 变体 seq 之一. 出生 tick 先走一步 (池序)."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
     rng = battle.rng
     vx, vy = _victim_ground(ally)
-    variant = MF_FEATHER_VARIANTS[rng.randint(0, 3)]
     e = battle.engine.spawn(think_fn=mfeng_feather_think)
     e.atlas_slot = MF_FEATHER_ATLAS
-    e.frame_idx = variant[0]
     e.flags |= 0x40
-    e.x = vx + (rng.randint(-12, 12) << 16)
-    e.y = vy + (rng.randint(-6, 6) << 16)
-    e.z = -((MF_FEATHER_HEIGHT + rng.randint(-20, 20)) << 16)
-    e.vz = -(rng.randint(0, 2) << 16)            # 轻微上飘起手, 轻重力后落下
-    e.user_data['kind'] = 'hit_effect'
-    e.user_data['projectile'] = True
-    e.user_data['feather'] = True
-    e.user_data['draw_order'] = 20               # 羽毛在凤凰之上
-    e.user_data['variant'] = variant
-    e.user_data['vx'] = rng.randint(-1, 1) << 16
-    e.user_data['fi'] = 0
-    e.user_data['frame_tick'] = 0
-    e.user_data['life'] = 0
+    e.x, e.y = vx, vy
+    e.user_data.update(kind='hit_effect', projectile=True, feather=True, draw_order=20,
+                       vx=((rng.randrange(32) - 16) << 16) >> 4, vy=((rng.randrange(32) - 16) << 16) >> 4,
+                       vz=(rng.randrange(64) << 16) >> 4, az=MF_FEATHER_ACCEL, ez=MF_FEATHER_Z, age=0)
+    e.z = -e.user_data['ez']
+    var = MF_FEATHER_VARIANTS[rng.randrange(4)]
+    e.frame_idx = var[0]
+    battle.engine.attach_seq(e, tuple_to_bytecode([('fm', MF_FEATHER_ATLAS, f, MF_FEATHER_FRAME_TICKS) for f in var] + [('loop',)]))
+    mfeng_feather_think(e, battle.engine)
 
 
 def _mfeng_revive(battle, targets) -> None:
-    """**只复活死亡同伴并回满** (用户确认: 对存活角色无效, 哪怕残血也不加血). 重置死亡/受击视觉状态."""
+    """exe -200: 目标 (倒下队友) think 换回待机 + 白色回血飘字 (+0x7a 计数, 落定 -20). 回满 = 数值近似."""
     from core.battle.data import DamageEvent
-    for u in targets:                            # targets = spawn 时捕获的死亡同伴
-        u.hp = u.max_hp                          # 满血复活 (hp>0 = alive)
+    from core.battle.combat import push_damage_event
+    for u in targets:
+        u.hp = u.max_hp
         u.shown_hp_override = None
         u.settle_pending = False
         u.settle_batch = False
-        u.death_anim_time_ms = -1                # 取消死亡动画
+        u.death_anim_time_ms = -1
         u.reaction_seq = None
         u.reaction_frame = None
         u.reaction_saved_facing = None
-        from core.battle.combat import push_damage_event
         push_damage_event(battle, u, DamageEvent(u.hp, u.hp, u.x, u.y, heal=True))
 
 
 def mfeng_cloud_think(e: "Entity", eng: "Engine") -> None:
-    """祥云: 飘入趋近散布目标(减速) → 悬停 → (主凤凰升空后)向外加速飘出销毁 (exe FUN_004f88ad)."""
+    """祥云 FUN_004f88ad: FUN_004c3211 (v += a; x += v) 减速到 |vx|≤2 → a=0 漂 → 凤凰走 → 向外 a±2 → |vx|>60 自毁."""
     ud = e.user_data
     if 'cloud' not in ud:
         return
+    ud['vx'] += ud['ax']
+    e.x += ud['vx']
     if e.state_code == _MFC_IN:
-        dx = ud['target_x'] - e.x
-        e.x += int(dx * MF_CLOUD_EASE)                # 趋近 = 越近越慢 (减速飘入)
-        if abs(dx) <= (MF_CLOUD_SNAP << 16):
-            e.x = ud['target_x']
+        if abs(ud['vx']) <= MF_CLOUD_V_MIN:
+            ud['ax'] = 0
             e.state_code = _MFC_HOVER
     elif e.state_code == _MFC_HOVER:
-        if ud['coord'].user_data.get('mf_leave'):     # 主凤凰升空 → 该散了
-            ud['vx'] = 0.0
+        # exe 凤凰 (下标小) 先于云 think, 同 tick 置 DAT_0086a7dc 云即起飞; 我们池序不定 → 按绝对 tick 比较
+        if eng._tick_id >= ud['coord'].user_data.get('mf_leave_tick', 1 << 60):
+            ud['ax'] = -MF_CLOUD_ACCEL if ud['vx'] < FP_ONE else MF_CLOUD_ACCEL
             e.state_code = _MFC_OUT
     elif e.state_code == _MFC_OUT:
-        ud['vx'] += ud['dir_out'] * MF_CLOUD_OUT_ACCEL  # 向外加速飘出
-        e.x += int(ud['vx'] * 65536)
-        if abs((e.x - ud['center_x']) >> 16) > MF_CLOUD_OUT_OFF:
+        if abs(ud['vx']) > MF_CLOUD_V_OUT:
             eng.destroy(e)
 
 
 def _spawn_mfeng_clouds(battle, caster, coord) -> None:
-    """召唤 8 朵祥云 (位置固定/帧随机): 从同侧屏外飘入停在两侧, 悬停后**继续穿到对面**飘出."""
+    """FUN_004f899d ×8: rand&1 定左右; 左 帧1, 右 帧 2+(rand&1); y/z 同神兽基准 (屏中心 y+1000 带, z1000)."""
+    rng = battle.rng
     cx, cy = _screen_center(battle, caster)
-    for off, h, draw_order in MF_CLOUD_POSITIONS:
-        side = 1 if off >= 0 else -1                  # 目标在右(+)/左(-)
-        spawn_off = off + side * MF_CLOUD_SPAWN_EXTRA  # 同侧再外推 → 从同侧屏外飘入(不横穿)
+    for _ in range(MF_CLOUD_COUNT):
         e = battle.engine.spawn(think_fn=mfeng_cloud_think)
-        e.atlas_slot = MF_ATLAS                       # eson09 帧1-3 = 3 个旋涡云变体
-        e.frame_idx = battle.rng.randint(1, 3)        # 帧随机 (用户: 随机帧保留)
+        e.atlas_slot = MF_ATLAS
         e.flags |= 0x40
-        # 朝向: 左侧云 head 朝右(向中心), 右侧云 head 朝左(向中心). 帧天然朝向不符则翻转.
-        wants_head_right = (side < 0)                 # 左侧(side<0) → head 朝右
-        natural_head_right = e.frame_idx in MF_CLOUD_FRAME_HEAD_RIGHT
-        e.user_data['flip_x'] = (wants_head_right != natural_head_right)
-        e.x = cx + (spawn_off << 16)
-        e.y = cy
-        e.z = -(h << 16)
-        e.user_data['kind'] = 'hit_effect'
-        e.user_data['projectile'] = True
-        e.user_data['cloud'] = True
-        e.user_data['draw_order'] = draw_order        # 多数 12 (凤凰前); 上半部那朵 9 (凤凰后)
-        e.user_data['center_x'] = cx
-        e.user_data['target_x'] = cx + (off << 16)
-        e.user_data['dir_out'] = -side                # 飘出 = **穿到对面** (悬停后继续运动)
-        e.user_data['vx'] = 0.0
-        e.user_data['coord'] = coord
+        if rng.randrange(2) == 0:
+            e.x = cx - ((MF_CLOUD_X_OFF + rng.randrange(MF_CLOUD_X_RAND)) << 16)
+            vx, ax = MF_CLOUD_V0, -MF_CLOUD_ACCEL
+            e.frame_idx = 1
+        else:
+            e.x = cx + ((MF_CLOUD_X_OFF + rng.randrange(MF_CLOUD_X_RAND)) << 16)
+            vx, ax = -MF_CLOUD_V0, MF_CLOUD_ACCEL
+            e.frame_idx = 2 + rng.randrange(2)
+        e.y = cy + ((MF_CLOUD_Y_OFF + rng.randrange(MF_CLOUD_Y_RAND)) << 16)
+        e.z = -(MF_CLOUD_Z << 16)
+        e.user_data.update(kind='hit_effect', projectile=True, cloud=True, draw_order=12, coord=coord, vx=vx, ax=ax)
         e.state_code = _MFC_IN
+        mfeng_cloud_think(e, battle.engine)          # 出生 tick 先走一步 (实录首帧已位移 60)
 
 
 def mfeng_beast_think(e: "Entity", eng: "Engine") -> None:
@@ -1570,57 +1549,38 @@ def mfeng_beast_think(e: "Entity", eng: "Engine") -> None:
     if 'allies' not in ud:
         return
     battle, caster = ud['battle'], ud['caster']
+    ud['age'] += 1
+    age = ud['age']
     if e.state_code == _MF_DESCEND:
-        e.z += MF_DESCEND_VZ << 16
-        if e.z >= -(MF_HOVER_HEIGHT << 16):       # 降到悬停高度 (仍在空中)
-            e.z = -(MF_HOVER_HEIGHT << 16)
-            ud['hold_tick'] = 0
+        _beast_step(e)
+        if ud['vz'] >= 0:
             _sfx(battle, SFX_MF_LAND)
+            ud['end'] = age + MF_HOLD_TICKS
+            ud['coord'].user_data['mf_leave_tick'] = eng._tick_id + MF_HOLD_TICKS   # 云散 = 凤凰 end 当 tick
             e.state_code = _MF_HOLD
     elif e.state_code == _MF_HOLD:
-        ud['hold_tick'] += 1
-        t = ud['hold_tick']
-        if t >= MF_HOLD_TICKS - MF_FEATHER_LEAD:
-            since = t - (MF_HOLD_TICKS - MF_FEATHER_LEAD)
-            if since == 0:
-                _mfeng_revive(battle, ud['allies'])   # 只复活死亡同伴回满 (与羽毛同时, 一次)
-            for u in ud['allies']:                    # 羽毛只撒在被复活的死亡同伴身上
+        if age >= ud['end'] - MF_FEATHER_LEAD:
+            for u in ud['allies']:
                 _spawn_mfeng_feather(battle, u)
-            _sfx(battle, SFX_MF_FEATHER, solo=True)   # exe 每 tick 播 0x111 (solo = 播完再续)
-        if t >= MF_HOLD_TICKS:
-            ud['coord'].user_data['mf_leave'] = True   # 通知祥云飘出
+            _sfx(battle, SFX_MF_FEATHER, solo=True)
+        if age >= ud['end']:
+            _mfeng_revive(battle, ud['allies'])         # -200
+            _beast_rise_start(e)
             e.state_code = _MF_RISE
     elif e.state_code == _MF_RISE:
-        e.z -= MF_DESCEND_VZ << 16                # **持续平滑升空** (不冻住; 飞出屏外才消失)
-        # 升到完全离屏后, 等祥云也飘出完才收尾 (期间仍继续上升 = 屏外不可见, 无卡顿)
-        if (e.z >> 16) <= -MF_RISE_OFFSCREEN:
-            clouds = any(s.user_data.get('cloud') for s in eng.entities if (s.flags & 0x800))
-            if not clouds:
-                ud['coord'].user_data['eson_done'] = True
-                eng.destroy(e)
+        if _beast_rise_step(e, by_z=True):
+            ud['coord'].user_data['eson_done'] = True   # -100 → 0x1e 等飘字落定再现身
+            eng.destroy(e)
 
 
 def spawn_mfeng_beast(battle, caster, coord: "Entity", atlas: int) -> None:
-    """M凤凰: 大凤凰降到中心悬停 + **只复活死亡同伴回满** + 羽毛光点 + 升空 (复活术, 对存活者无效)."""
-    coord.user_data['eson_done'] = False
+    """M凤凰: 凤凰弹簧进场悬停 64t, 末 30t 每 tick 撒羽毛, 末尾复活倒下队友 (白字回满) + 升空; 8 朵祥云两侧对飞."""
     party = battle.players if caster.is_player else battle.enemies
-    allies = [u for u in party if not u.alive]   # **只取死亡同伴** (复活目标; 存活者无效)
-    e = battle.engine.spawn(think_fn=mfeng_beast_think)
-    e.atlas_slot = atlas
-    e.frame_idx = 0                              # eson09 帧0 = 大凤凰 (静态)
-    e.flags |= 0x40
-    e.user_data['kind'] = 'hit_effect'
-    e.user_data['projectile'] = True
-    e.user_data['draw_order'] = 10               # 大凤凰图
-    e.user_data['battle'] = battle
-    e.user_data['caster'] = caster
-    e.user_data['coord'] = coord
+    allies = [u for u in party if not u.alive]   # 目标列表 = 倒下的队友
+    coord.user_data['return_waits_floats'] = True
+    e = _beast_spawn(battle, caster, coord, atlas, mfeng_beast_think)
     e.user_data['allies'] = allies
-    e.x, e.y = _screen_center(battle, caster)            # 中心 = caster tile
-    e.z = -((MF_HOVER_HEIGHT + MF_DROP) << 16)   # 从高处降到悬停高度
-    e.state_code = _MF_DESCEND
-    coord.user_data['mf_leave'] = False
-    _spawn_mfeng_clouds(battle, caster, coord)    # 8 朵祥云散布簇拥
+    _spawn_mfeng_clouds(battle, caster, coord)
 
 
 # ============ 酷酷猫: 笑脸猫五段演出 + 解异常 (exe FUN_004f5f0d spawn + FUN_004f5ecc think + seq 0x671b80) ============
