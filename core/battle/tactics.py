@@ -245,6 +245,8 @@ class TacticsBattle:
         # 状态回合递减 (exe 回合管理器 FUN_004a4f94 state 1 → FUN_004a3738, 每新回合对全体一次)
         from core.battle.status import round_tick
         round_tick(self.all_units)
+        from core.battle import status_icons
+        status_icons.sync(self, create=False)    # exe FUN_004a3c1f: 到期的状态摘图标
         self._turn_order = sorted(self.alive_units, key=lambda u: -u.agile)
         for u in self._turn_order:
             u.has_acted = False
@@ -590,6 +592,8 @@ class TacticsBattle:
         hold = attacker.cast_hold
         combat.clear_pending_attack(attacker)
         self._pending_damage_range = None
+        from core.battle import status_icons
+        status_icons.sync(self)                  # exe FUN_004cbc9d case 1: 行动结束按状态挂/摘图标
         if was_skill:
             from core.battle.skill_dim import end_skill_dim
             # 渐亮 (projectile 实体, 回合切换等它完). 施法者放手时机按 dispatcher 模板: 多数在渐亮**结束** (0x28 后 |= 0x10000);

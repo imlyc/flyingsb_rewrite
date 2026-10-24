@@ -560,6 +560,7 @@ def _spawn_rings(battle, caster, coord, targets) -> None:
                     cx=x, cy=cy, rx=400, ry=400, phi=(k << 13), state=0, age=0, lead=(k == 7))
             _set_z(e, 0x4080000)                         # 目标 (x, y+1000, z+1032) = 画在目标上方 32px
             _orbit(e)
+            _ring_think(e, battle.engine)                # 出生 tick 就 think (实录 jet_28 首帧半径 392, 角 +0x200)
         coord.user_data['live'] += 1
         if sid == 0x2a:
             _sfx(battle, 0x13e)
