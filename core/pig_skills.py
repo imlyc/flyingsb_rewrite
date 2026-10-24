@@ -65,6 +65,7 @@ SPREAD_OFFSETS = [(0, 2), (0, 3), (0, 4), (2, 0), (3, 0), (4, 0), (0, -2), (0, -
 SPREAD_DIRS = [1, 1, 1, 3, 3, 3, 0, 0, 0, 2, 2, 2]
 
 TYPHOON_COUNT = 36
+FADE_IN_TICKS = 21                  # 0x1e 渐亮计时 (实录 pig_1a_F14748: dispatcher 0x1e 停留 21 tick)
 TYPHOON_RX0, TYPHOON_RY0 = 64, 48   # +0x190 / +0x194 初值
 TYPHOON_DRX, TYPHOON_DRY = 32, 24   # 每 tick 增量
 
@@ -195,6 +196,10 @@ def _coord_think(e: "Entity", eng: "Engine") -> None:
         return
     if any(v.reaction_seq is not None for v in ud['victims']):
         return
+    # 0x1e FUN_004d0cd8(0, 0x1e): 即使开头没暗化也要跑完渐亮计时 (实录 火炎砲 0x14→0x1e 后 21 tick 才自毁/待机)
+    ud['fade'] = ud.get('fade', 0) + 1
+    if ud['fade'] <= FADE_IN_TICKS:
+        return
     caster.cast_hold = False
     ud['unit'] = caster
     eng._signal(e, SIG_END)
@@ -217,8 +222,9 @@ def _burst_think(e: "Entity", eng: "Engine") -> None:
         return
     coord = ud['coord']
     cd = coord.user_data
-    cd['live'] -= 1
-    _on_burst_done(cd)                       # -210
+    if ud['counted']:
+        cd['live'] -= 1
+        _on_burst_done(cd)                   # -210 (擴散火炎砲不处理, 协调实体可能已收尾)
     eng.destroy(e)
 
 
@@ -238,8 +244,11 @@ def _spawn_burst(battle, coord, x: int, y: int, z_px: int, seq) -> None:
     b.atlas_slot, b.frame_idx = seq[0][1], seq[0][2]
     b.flags |= 0x40
     b.x, b.y, b.z = x, y, -(z_px << 16)
-    b.user_data.update(kind='hit_effect', projectile=True, burst=True, coord=coord)
-    coord.user_data['live'] += 1
+    # 擴散火炎砲 dispatcher 不处理 -210, 0x14 也不等火爆 (实录 pig_1b: 末火爆还在播就进 0x1e); 其它四招都等火爆计数
+    counted = coord.user_data['sid'] != 0x1b
+    b.user_data.update(kind='hit_effect', projectile=True, burst=True, coord=coord, counted=counted)
+    if counted:
+        coord.user_data['live'] += 1
     battle.engine.attach_seq(b, tuple_to_bytecode(seq))
 
 
