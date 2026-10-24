@@ -78,7 +78,7 @@ ENEMY_TEMPLATES: dict[str, dict] = {
                   color=(180, 140, 100), sprite="CTHI00"),
     "乌鸦怪": dict(level=2, max_hp=20, attack=8,  defence=3,  agile=12, move=4, exp_reward=30,  money_reward=10,
                   color=( 80,  60,  90), sprite="CCROW00",
-                  type_flags=0x10000000),          # 飞行: 不触发地雷 (用户 2026-10-23; 原版表里没有对应记录)
+                  type_flags=0x10000000),          # 不触发地雷: 乌鸦怪 = 原版敌人表 烏拉 (#189..191, flags 0x14000080, 含 0x10000000; Unity 版显示名佐证)
 }
 
 
