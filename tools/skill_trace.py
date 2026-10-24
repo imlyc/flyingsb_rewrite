@@ -59,7 +59,7 @@ def main():
     ap.add_argument('skill', type=lambda s: int(s, 16))
     ap.add_argument('--caster', default='紫河'); ap.add_argument('--caster-idx', type=int, default=4, help='原版实录里施法者的实体下标 (队伍位置)')
     ap.add_argument('--enemy-dx', type=int, default=-1); ap.add_argument('--enemy-dy', type=int, default=2)
-    ap.add_argument('--facing', default='down'); ap.add_argument('--enemy-facing', default=None, help='敌人朝向 (受击推开方向取决于它)'); ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--facing', default='down'); ap.add_argument('--enemy-facing', default=None, help='敌人朝向 (受击推开方向取决于它)'); ap.add_argument('--more-enemies', default='', help='更多敌人 dx,dy;dx,dy (相对施法者)'); ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--ally-dx', type=int); ap.add_argument('--ally-dy', type=int, help='加一个队友 (我方目标技能用)')
     ap.add_argument('--cursor-dx', type=int); ap.add_argument('--cursor-dy', type=int, help='光标相对施法者格 (默认敌人格, 失败回施法者)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
@@ -71,11 +71,14 @@ def main():
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
         if a.skill == 0x09:                     # M凤凰 复活术: 队友得是倒下的才是目标
             ally.hp = 0; ally.death_anim_time_ms = 0
-    b = TacticsBattle(players=players, enemies=[e], battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
-                      player_positions=[(u.x, u.y) for u in players], enemy_positions=[(e.x, e.y)])
+    es = [e] + [_unit(f'enemy{i}', 15 + int(t.split(',')[0]), 53 + int(t.split(',')[1]), is_player=False, agile=1)
+                for i, t in enumerate(x for x in a.more_enemies.split(';') if x)]
+    b = TacticsBattle(players=players, enemies=es, battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
+                      player_positions=[(u.x, u.y) for u in players], enemy_positions=[(u.x, u.y) for u in es])
     p.facing = FACING[a.facing]
     if a.enemy_facing:
-        e.facing = FACING[a.enemy_facing]
+        for u in es:
+            u.facing = FACING[a.enemy_facing]
     out = []
     sounds = []
     b.engine.on('sound_play', lambda ent, sid: sounds.append(sid))
