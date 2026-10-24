@@ -69,7 +69,7 @@ def main():
     players = [p]
     if a.ally_dx is not None:
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
-        if a.skill == 0x09:                     # M凤凰 复活术: 队友得是倒下的才是目标
+        if a.skill in (0x09, 0x2b):             # M凤凰 复活术 / 回生舞步: 队友得是倒下的才是目标
             ally.hp = 0; ally.death_anim_time_ms = 0
     es = [e] + [_unit(f'enemy{i}', 15 + int(t.split(',')[0]), 53 + int(t.split(',')[1]), is_player=False, agile=1)
                 for i, t in enumerate(x for x in a.more_enemies.split(';') if x)]

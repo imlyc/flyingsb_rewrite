@@ -757,6 +757,7 @@ def _spawn_revive(battle, caster, coord, targets) -> None:
         e.user_data.update(kind='jet_revive', projectile=True, revive=True, battle=battle, coord=coord, target=t,
                            state=0, age=0)
         coord.user_data['live'] += 1
+        _revive_think(e, battle.engine)                 # 出生 tick 就 think (实录 jet_2b: 首闪光 +83, 爬起 +169, 待机 +234)
         _sfx(battle, 0x112)
 
 
@@ -948,6 +949,7 @@ def _spawn_slow(battle, caster, coord, targets) -> None:
                         cx=cx, cy=cy, rx=rx, ry=ry, phi=phi & 0xffff, spd=0x400, state=0, emit=(k % 4 == 0),
                         lead=(n == 23))
                 _orbit(e)
+                _slow_think(e, battle.engine)            # 出生 tick 就 think (实录 jet_2e 首帧 z=1, 活 134t, 首粒子 +82)
                 phi = (phi + step) & 0xffff
                 n += 1
         coord.user_data['live'] += 1
