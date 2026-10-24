@@ -128,7 +128,7 @@ def test_no_mine_flag_skips_trigger():
     if ul is not None:
         ul.x, ul.y = 15, 56
         assert not mine_at(b, ul)
-    bp = make_enemy_by_type(0)                   # 豬八戒 0x29: 会触发
-    if bp is not None:
-        bp.x, bp.y = 15, 56
-        assert mine_at(b, bp)
+    goat = make_enemy_by_type(17)                # 羊頭怪 0x4000029 (无免雷位): 会触发
+    if goat is not None:
+        goat.x, goat.y = 15, 56
+        assert mine_at(b, goat)
