@@ -298,6 +298,15 @@ class TacticsBattle:
         """
         if self.phase != Phase.ENEMY_TURN:
             return
+        from core.bosan_skills import mine_at, trigger_mine
+        if not self.current.is_player and mine_at(self, self.current):
+            # exe FUN_004a4f94 case 4: 敌人移动完站在地雷上 → 本回合改为引爆地雷 (招式 247), 不再攻击
+            self._pending_enemy_attack = None
+            self._pending_enemy_skill = None
+            self._pending_enemy_cursor = None
+            self._pending_damage_range = None
+            trigger_mine(self, self.current)
+            return
         if self._pending_enemy_attack is not None and self._pending_enemy_attack.alive:
             sid = self._pending_enemy_skill
             cursor = self._pending_enemy_cursor
@@ -512,6 +521,15 @@ class TacticsBattle:
         from core.skill_table import skill_targets_allies
         # 回复/状态类技能 (exe SKILL 表 flags 0x01000000) 选友军 (is_player 相同); 攻击技能选敌人.
         heal = is_heal_skill(self.aim_skill_id) or skill_targets_allies(self.aim_skill_id)
+        if self.aim_skill_id == 0x35:
+            # 裝置地雷: 目标是空格子 (exe FUN_004a6efe: 可通行/无人/无雷/<30), 自己当 pending 目标占位
+            from core.bosan_skills import can_place_mine
+            if not can_place_mine(self, self.aim_cursor):
+                return False
+            self._pending_damage_range = None
+            combat.begin_attack(self, u, u, skill_id=0x35, cursor=self.aim_cursor)
+            self._clear_aim_overlay()
+            return True
         dmg_tiles = self.damage_range(self.aim_cursor)
         targets = []
         for (x, y) in dmg_tiles:
