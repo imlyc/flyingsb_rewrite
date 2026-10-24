@@ -45,6 +45,7 @@ SFX_THUNDER = 0xf6              # 雷箭 雷击
 SFX_RAIN = 0x10d                # 亂箭 施法 seq 内
 
 ARROW_Z = 32
+END_DELAY = 2
 ARROW_VX, ARROW_VY = 32, 24
 HIT_Y, HIT_Z = 400, 448         # FUN_004d0c90 (x, y+0x190, z+0x1c0) 约定: 画在 y-48
 CHIRI_Y, CHIRI_Z, CHIRI_Z_END = 400, 436, 392
@@ -147,10 +148,6 @@ def _chiri_think(e: "Entity", eng: "Engine") -> None:
     ud = e.user_data
     if 'chiri' not in ud:
         return
-    if not ud['started']:
-        ud['started'] = True
-        eng.attach_seq(e, tuple_to_bytecode(CHIRI_SEQ))
-        return
     e.x += ud['vx']
     e.y += ud['vy']
     ud['vz'] -= CHIRI_GRAVITY
@@ -170,9 +167,11 @@ def _chiri(battle, victim) -> None:
         e.atlas_slot, e.frame_idx = DS_CHIRI, 8
         e.flags |= 0x40
         e.x, e.y = vx0, vy0 + (CHIRI_Y << 16)
-        e.user_data.update(kind='hit_effect', projectile=True, chiri=True, started=False, vx=vx, vy=vy, vz=0,
-                           ez=CHIRI_Z << 16)
+        e.user_data.update(kind='hit_effect', projectile=True, chiri=True, vx=vx, vy=vy, vz=0, ez=CHIRI_Z << 16)
         e.z = -e.user_data['ez']
+        # 实录 pao_2f: 出生当 tick 已挂 seq 且首帧只停 1 t, 物理也已走 1 步 (首帧 z 435) → 寿命 10
+        battle.engine.attach_seq(e, tuple_to_bytecode(CHIRI_SEQ))
+        _chiri_think(e, battle.engine)
 
 
 def _ring_think(e: "Entity", eng: "Engine") -> None:
@@ -302,6 +301,10 @@ def _coord_think(e: "Entity", eng: "Engine") -> None:
     if getattr(battle, 'float_pending', 0) > 0:
         return
     if any(v.reaction_seq is not None for v in ud['victims']):
+        return
+    # 0x14 → 0x1e 停一拍才自毁, 施法者再下一拍回待机 (实录 pao_2f: 0x1e @77, 自毁 78, idle 79)
+    ud['end_wait'] = ud.get('end_wait', 0) + 1
+    if ud['end_wait'] <= END_DELAY:
         return
     caster.cast_hold = False
     ud['unit'] = caster
