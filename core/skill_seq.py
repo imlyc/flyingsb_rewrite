@@ -841,6 +841,7 @@ SKILL_SEQS: dict[int, list[list[tuple]]] = {
     0x14: SKILL_SAM_PUMPKIN_BREAK,    # 三藏 南瓜破 (A 类)
     0x15: SKILL_SAM_LIFE_FIRE,        # 三藏 生命之火 (heal, 回血技能)
     **__import__('core.pig_skills', fromlist=['PIG_SEQS']).PIG_SEQS,   # 猪八戒 0x19..0x1d (core.pig_skills)
+    **__import__('core.pao_skills', fromlist=['PAO_SEQS']).PAO_SEQS,   # 破无 0x2f..0x33 (core.pao_skills)
     0x16: SKILL_SAM_THREE_HIT,        # 三藏 不败三击 (A 类 3 IMPACT)
     0x17: SKILL_SAM_PHOENIX_CAST,     # 三藏 凤凰掌 (B 类, cast + spawn phoenix)
     0x18: SKILL_SAM_GOD_FIST,         # 三藏 三藏神拳 (A 类 5 IMPACT, 3 段切换)
@@ -968,7 +969,8 @@ SKILL_IMPACT2_SOUNDS: dict[int, int] = {
 
 # DOIT_melee 模板 (FUN_004d0e18) 的技能: 没有调色板渐暗/渐亮 (state 0/0x1e 只是镜头推到施法者再推回), seq 完 -110 即待机.
 # 2026-10-22 实录 南瓜破 (sz_14): dispatcher 生成下一 tick 就挂 seq, END 当 tick 施法者 idle. 其它技能 (自定义 dispatcher) 都有渐变.
-MELEE_TEMPLATE_SKILLS = {0x14, 0x16, 0x18, 0x20, 0x24, 0x1e, 0x1f, 0x19, 0x1a, 0x1b, 0x1c, 0x1d}   # 猪八戒 5 技 dispatcher case 0 也无渐变 (core.pig_skills)   # 沙悟净 斗轉/返荷 (FUN_00503e6d/503f17) 也无渐变: 直接挂 seq, 完即 idle
+MELEE_TEMPLATE_SKILLS = {0x14, 0x16, 0x18, 0x20, 0x24, 0x1e, 0x1f, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+                         0x2f, 0x30, 0x31, 0x32, 0x33}   # 破无 5 技 (core.pao_skills) 也无渐变   # 猪八戒 5 技 dispatcher case 0 也无渐变 (core.pig_skills)   # 沙悟净 斗轉/返荷 (FUN_00503e6d/503f17) 也无渐变: 直接挂 seq, 完即 idle
 
 
 def skill_signal_sounds(skill_id: int | None, sig: int) -> tuple[int, int]:
@@ -1073,6 +1075,10 @@ SKILL_CAST_SIGNAL_HANDLERS: dict[int, "callable"] = {
     sid: (lambda b, u, s: __import__('core.pig_skills', fromlist=['on_cast_signal']).on_cast_signal(b, u, s))
     for sid in (0x19, 0x1a, 0x1b, 0x1c, 0x1d)
 }
+SKILL_CAST_SIGNAL_HANDLERS.update({
+    sid: (lambda b, u, s: __import__('core.pao_skills', fromlist=['on_cast_signal']).on_cast_signal(b, u, s))
+    for sid in (0x2f, 0x30, 0x31, 0x32, 0x33)
+})
 
 
 def has_impact_spawn(skill_id: int | None) -> bool:
