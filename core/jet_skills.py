@@ -388,6 +388,7 @@ def _spawn_heavy(battle, caster, coord, targets) -> None:
         e.user_data.update(kind='jet_heavy', projectile=True, heavy=True, battle=battle, victim=v, coord=coord,
                            age=0, next=0, n=0)
         coord.user_data['live'] += 1
+        _heavy_spawner_think(e, battle.engine)          # 出生 tick 就 think (实录 jet_25 首光爆 +82)
 
 
 # ---------- 光圈上升粒子 (FUN_004d4819 / 4d47d4) ----------

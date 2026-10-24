@@ -593,14 +593,21 @@ class TacticsBattle:
         combat.clear_pending_attack(attacker)
         self._pending_damage_range = None
         from core.battle import status_icons
-        status_icons.sync(self)                  # exe FUN_004cbc9d case 1: 行动结束按状态挂/摘图标
+        ent = None
         if was_skill:
             from core.battle.skill_dim import end_skill_dim
+
+            def _after_fade():
+                if hold:
+                    attacker.cast_hold = False
+                status_icons.sync(self)          # exe FUN_004cbc9d case 1: dispatcher (含渐亮) 结束后才按状态挂/摘图标
             # 渐亮 (projectile 实体, 回合切换等它完). 施法者放手时机按 dispatcher 模板: 多数在渐亮**结束** (0x28 后 |= 0x10000);
             # 少数 (core.jah_skills.IDLE_BEFORE_FADE) 在进渐亮前已由协调实体把 cast_hold 清掉 → 这里 hold=False 不再保持
-            ent = end_skill_dim(self, on_done=(lambda: setattr(attacker, 'cast_hold', False)) if hold else None, skill_id=sid)
+            ent = end_skill_dim(self, on_done=_after_fade, skill_id=sid)
             if ent is not None and hold:
                 attacker.cast_hold = True
+        if ent is None:
+            status_icons.sync(self)              # 没有渐亮: 行动结束当刻挂图标
         self._pending_turn_end = True
 
     def advance_turn_when_ready(self) -> None:
