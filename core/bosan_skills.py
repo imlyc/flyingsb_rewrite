@@ -519,7 +519,7 @@ def on_cast_signal(battle, caster, sig: int) -> bool:
             _place_mine(battle, caster.pending_attack_cursor)
         else:                                                              # -200 → +0x78=0 → 自毁 (无飘字)
             coord = _spawn_coord(battle, caster, [])
-            coord.user_data.update(fired=True, end_delay=0)
+            coord.user_data.update(fired=True, end_delay=1)              # 实录 bosan_35: 自毁 +52, 待机 +53
         return True
     if sig != BOSAN_SIG:
         return True
