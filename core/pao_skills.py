@@ -201,11 +201,14 @@ def _thunder_think(e: "Entity", eng: "Engine") -> None:
         return
     battle, victim = ud['battle'], ud['victim']
     cx, cy = _tile_center(victim.x, victim.y)
+    ox, oy = victim.reaction_offset                 # FUN_004d66cc 以目标**当前**位置为中心 (受击 seq 正把他推开)
+    cx, cy = cx + int(ox * FP), cy + int(oy * FP)
     phi = ((_rand(battle) & 0xff) << 16) >> 10
     for _ in range(4):
         r = _fx(battle, _ring_think, cx, cy, 0, RING_SEQ, ring=True, battle=battle, cx=cx, cy=cy, phi=phi & 0xffff,
                 rx=0, ry=0)
         _ring_place(r)
+        _ring_think(r, battle.engine)       # 实录 pao_32: 出生当 tick 已外扩一步 (雷环下标在雷击之后, 同 tick think)
         phi += 0x4000
     eng.destroy(e)
 
