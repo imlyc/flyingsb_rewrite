@@ -111,3 +111,24 @@ def test_mine_place_and_trigger():
     assert (15, 54) not in b.mines
     assert b._pending_turn_end
     assert p.hp == 600, "踩雷的敌人这回合不再攻击"
+
+
+def test_no_mine_flag_skips_trigger():
+    """类型标志 0x10000000 (乌鸦怪 / 原版表里的蜻蜓、烏拉、氣靈…) 站在雷上不引爆."""
+    from core.bosan_skills import _place_mine, mine_at, ENEMY_FLAG_NO_MINE
+    from core.battle.setup import make_enemy, make_enemy_by_type
+    b, p, es = _battle([(15, 56)])
+    b.mines = {}
+    _place_mine(b, (15, 56))
+    assert mine_at(b, es[0])
+    crow = make_enemy("乌鸦怪")
+    crow.x, crow.y = 15, 56
+    assert crow.type_flags & ENEMY_FLAG_NO_MINE and not mine_at(b, crow)
+    ul = make_enemy_by_type(189)                 # 烏拉 0x14000080
+    if ul is not None:
+        ul.x, ul.y = 15, 56
+        assert not mine_at(b, ul)
+    bp = make_enemy_by_type(0)                   # 豬八戒 0x29: 会触发
+    if bp is not None:
+        bp.x, bp.y = 15, 56
+        assert mine_at(b, bp)

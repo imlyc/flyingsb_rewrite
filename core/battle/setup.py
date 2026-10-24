@@ -77,7 +77,8 @@ ENEMY_TEMPLATES: dict[str, dict] = {
     "贼":     dict(level=4, max_hp=35, attack=12, defence=5,  agile=14, move=4, exp_reward=50,  money_reward=20,
                   color=(180, 140, 100), sprite="CTHI00"),
     "乌鸦怪": dict(level=2, max_hp=20, attack=8,  defence=3,  agile=12, move=4, exp_reward=30,  money_reward=10,
-                  color=( 80,  60,  90), sprite="CCROW00"),
+                  color=( 80,  60,  90), sprite="CCROW00",
+                  type_flags=0x10000000),          # 飞行: 不触发地雷 (用户 2026-10-23; 原版表里没有对应记录)
 }
 
 
@@ -95,6 +96,7 @@ def make_enemy(name: str) -> BattleUnit:
         color=t["color"],
         exp_reward=t["exp_reward"], money_reward=t["money_reward"],
         sprite_key=sprite_key,
+        type_flags=t.get("type_flags", 0),
     )
 
 
@@ -134,4 +136,5 @@ def make_enemy_by_type(etype: int) -> BattleUnit | None:
         enemy_moves=[int(e[k]) for k in ("skill0", "skill1", "skill2", "skill3")
                      if 0 <= int(e.get(k, -1)) < 248],
         ai_group=max(0, int(e.get("ai_group", 0))),
+        type_flags=int(e.get("flags", 0)) & 0xffffffff,
     )

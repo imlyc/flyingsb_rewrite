@@ -73,6 +73,7 @@ class BattleUnit:
     exp_reward: int = 0
     money_reward: int = 0
     ai_group: int = 0                # 原版敌人表 +0x18 (1..50): 影响「放技能 vs 普攻」的倾向
+    type_flags: int = 0              # 原版敌人表 +0x00 flags (摆阵 FUN_0049ff07 拷进实例表 0x86ada8); 0x10000000 = 不触发地雷
     sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
     # 渲染态 (UI 写入, 战斗逻辑不动)
     anim: AnimationState = field(default_factory=AnimationState)

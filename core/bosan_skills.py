@@ -10,7 +10,7 @@ bosan_thinks_decomp.txt, bosan_mine_decomp.txt, fn_4a6efe.txt).
        0x14 → 0x1e 自毁, 施法者 2 拍后待机 (同破无).
   0x35 裝置地雷 (FUN_0050bdff): 确认时在光标格 (正前一格, 须空格无雷, 最多 30) 建地雷实体 (FUN_004a30f4, 不可见);
        施法 seq 67957c[dir] (cpusa_m1: 先走进那格 48/64px, 6 帧, -100, 退回, -200); -100 播 0x10e + 地雷显形 (eg 帧 0); -200 收尾.
-       触发 (FUN_004a4f94 敌方行动 case 4): 敌人移动完站在雷上 (类型非 0x10000000) → 本回合改执行招式 247 (FUN_0050bff2):
+       触发 (FUN_004a4f94 敌方行动 case 4): 敌人移动完站在雷上 (类型标志无 0x10000000 = BattleUnit.type_flags) → 本回合改执行招式 247 (FUN_0050bff2):
        固定 444 伤害, 受击方向 = 表 6418dc[自身朝向] (=反向, 转身), 方向刺爆 655c10[自身朝向], fire01 火爆 (x±6, y+124, z+172),
        立即红字, 0xf6, 移除地雷; 等火爆播完 + 飘字落定 → 回合结束 (不再攻击). 我方单位不触发.
   0x37 雷射光 (FUN_0050b93c): 施法 seq 6793ac[dir] (cpusa_g0), -100 → 光束控制器 (FUN_0050b8f7, 88 tick, 播 0xe4):
@@ -462,7 +462,12 @@ def _place_mine(battle, tile: tuple[int, int]) -> None:
     _sfx(battle, SFX_MINE_SET)
 
 
+ENEMY_FLAG_NO_MINE = 0x10000000    # 敌人类型标志: 不触发地雷 (FUN_004a4f94 case 4 检查 实例表 0x86ada8 & 0x10000000)
+
+
 def mine_at(battle, unit) -> bool:
+    if unit.type_flags & ENEMY_FLAG_NO_MINE:
+        return False
     return (unit.x, unit.y) in getattr(battle, 'mines', {})
 
 
