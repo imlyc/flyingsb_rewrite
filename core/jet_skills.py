@@ -167,6 +167,7 @@ def _spawn_note(battle, caster, frame: int) -> None:
     e = _fx(battle, _note_think, x - 16 * FP, y + FP, 64 * FP, atlas=ESONA00, frame=frame, note=True, battle=battle,
             phi=phi, age=0)
     _note_step(e, battle, random_walk=False)        # 出生调一次 FUN_004c3211
+    _note_step(e, battle, random_walk=True)         # 下标在发射器之后, 出生 tick 再 think 一次 (实录首帧 x-20 z65)
 
 
 def _emitter_think(e: "Entity", eng: "Engine") -> None:
@@ -197,6 +198,7 @@ def on_attach(battle, caster) -> None:
     e.user_data.update(kind='jet_emitter', projectile=True, emitter=True, battle=battle, caster=caster, age=0, next=2,
                        i=0, done=False, script=NOTE_SCRIPT_SAMBA if sid == 0x28 else NOTE_SCRIPT)
     _sfx(battle, START_SOUND[sid])
+    _emitter_think(e, battle.engine)                 # 出生当 tick 就 think (实录 jet_26: 首音符 attach+2)
 
 
 # ---------------- 目标 / 状态 ----------------
@@ -457,7 +459,8 @@ def _orbit(e: "Entity") -> None:
 
 
 def _heal_settle(battle, coord, t) -> None:
-    """-200: 回血白字 + 32 片羽毛 (FUN_004d498c)."""
+    """-200: 目标回待机 + 回血白字 + 32 片羽毛 (FUN_004d498c)."""
+    _release_pose(t)
     _heal(battle, coord.user_data['caster'], t)
     x, y = _pos(t)
     for _ in range(32):
@@ -484,14 +487,29 @@ def _feather_think(e: "Entity", eng: "Engine") -> None:
     ud['age'] += 1
 
 
+HEAL_POSE_SEQS = [[('idle', 2, f, 5), ('idle', 2, f + 1, 5), ('exit',)] for f in (2, 6, 10, 14)]   # 655aa8[dir] (目标 ps+2)
+
+
+def _hold_pose(battle, t, seqs) -> None:
+    """模板 -100: 目标挂姿势 seq 并保持末帧 (清 0x10000), 到 -200 才回待机."""
+    _attach_unit_seq(battle, t, seqs[_dir(t)])
+    t.cast_hold = True
+
+
+def _release_pose(t) -> None:
+    t.cast_hold = False
+
+
 def _spawn_heal_pillars(battle, caster, coord, targets) -> None:
     for t in targets:
+        _hold_pose(battle, t, HEAL_POSE_SEQS)
         cx, cy = _pos(t)
         phi = ((_rand(battle) & 0x3ff) << 16) >> 10
         for k in range(3):
             e = _fx(battle, _pillar_think, cx, cy, 0, MAG_SEQ, pillar=True, battle=battle, coord=coord, target=t,
                     cx=cx, cy=cy, rx=0x20, ry=0x18, phi=phi & 0xffff, spd=0x400, state=0, age=0, lead=(k == 2))
             _orbit(e)
+            _pillar_think(e, battle.engine)          # 出生 tick 就 think (实录首帧 z=1)
             phi += 0x5555
         coord.user_data['live'] += 1
     _sfx(battle, 0xc9)
