@@ -605,10 +605,11 @@ def _spawn_spirals(battle, caster, coord, targets) -> None:
     for t in targets:
         cx, cy = _pos(t)
         phi = ((_rand(battle) & 0x3ff) << 16) >> 10
-        e = _fx(battle, _spiral_think, cx, cy, 0x900000, None, atlas=E00, frame=0, spiral=True, battle=battle,
+        e = _fx(battle, _spiral_think, cx, cy, 0x900000, None, atlas=0, frame=0, spiral=True, battle=battle,
                 coord=coord, cx=cx, cy=cy, r16=0x200000, rx=32, ry=16, phi=phi & 0xffff, state=0, age=0)
-        e.flags &= ~0x40                                       # 本体不画 (只撒闪光)
+        e.flags &= ~0x40                                       # 本体无贴图 (exe 不挂 seq), 只撒闪光
         _orbit(e)
+        _spiral_think(e, battle.engine)                        # 出生 tick 就 think (实录 jet_29 首粒闪光 +82)
         coord.user_data['live'] += 1
         _sfx(battle, 0x112)
 
