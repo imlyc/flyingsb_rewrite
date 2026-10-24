@@ -287,6 +287,9 @@ def _coord_think(e: "Entity", eng: "Engine") -> None:
         return
     if any(v.reaction_seq is not None for v in ud['targets']):
         return
+    for t in ud.get('reset_z', ()):
+        if t.entity is not None:
+            t.entity.z = 0
     ud['unit'] = caster
     eng._signal(e, SIG_END)
     eng.destroy(e)
@@ -763,9 +766,11 @@ def _yuka_think(e: "Entity", eng: "Engine") -> None:
     if 'yuka' not in ud:
         return
     battle, t = ud['battle'], ud['target']
-    ent = t.entity
     st = ud['state']
     age = ud['age']
+    if st == 0:
+        _hold_pose(battle, t, HEAL_POSE_SEQS)       # 4d5f4b case 0: 目标挂 655aa8 接受姿势 (同时保证有实体可托起)
+    ent = t.entity
     if st == 0:
         ud.update(tz=48 * FP, vz=FP, az=0, uz=0, state=10)
     elif st == 10:
@@ -781,7 +786,9 @@ def _yuka_think(e: "Entity", eng: "Engine") -> None:
         ud['vz'] += ud['az'] if ud['uz'] < ud['tz'] else -ud['az']
         ud['uz'] += ud['vz']
         if age == ud['until']:
-            ud.update(until=age + 0x78, state=30)      # (第一次 0x86a768 脉冲: 光圈此时都在 state 0, 不看)
+            ud.update(until=age + 0x78, state=25)      # (第一次 0x86a768 脉冲: 光圈此时都在 state 0, 不看)
+    elif st == 25:
+        ud['state'] = 30                            # case 0x19: 只清脉冲, 不动 (实录 +136 高度停一拍)
     elif st == 30:
         ud['vz'] += ud['az'] if ud['uz'] < ud['tz'] else -ud['az']
         ud['uz'] += ud['vz']
@@ -794,10 +801,11 @@ def _yuka_think(e: "Entity", eng: "Engine") -> None:
                 _sfx(battle, 0xca)
     else:
         ud['uz'] += ud['vz']
-        if ud['uz'] < 0:
-            ud['uz'] = 0
+        if ud['uz'] < 0:                            # 0x28: 落到 z<0 → 目标回待机 (exe 不归零, 停在 -0.99 到回合结束)
             if ent is not None:
-                ent.z = 0
+                ent.z = -ud['uz']
+            _release_pose(t)
+            ud['coord'].user_data.setdefault('reset_z', []).append(t)
             eng.destroy(e)
             return
     if ent is not None:
@@ -869,6 +877,7 @@ def _spawn_yuka(battle, caster, coord, targets) -> None:
         e.user_data.update(kind='jet_yuka', projectile=True, yuka=True, battle=battle, coord=coord, target=t,
                            state=0, age=0, first=(i == 0))
         coord.user_data['live'] += 1
+        _yuka_think(e, battle.engine)                   # 出生 tick 就 think (实录 jet_2c 目标 +83 已升 1px)
 
 
 # ---------- 0x2d 英雄樂章 (模板 FUN_0050eb21 = 紫河化精為氣) ----------
