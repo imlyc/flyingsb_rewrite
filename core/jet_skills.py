@@ -659,10 +659,12 @@ def _spawn_luck(battle, caster, coord, targets) -> None:
     x, y = _pos(t)
     y += 0x1980000
     common = dict(luck=True, battle=battle, coord=coord, vz=-8 * FP, tz=432 * FP, state=0, age=0)
-    _fx(battle, _luck_think, x, y, 0x3780000, LUCK_MAIN_FALL, small=False, wait1=0xd4, wait2=300, **common)
+    stars = [_fx(battle, _luck_think, x, y, 0x3780000, LUCK_MAIN_FALL, small=False, wait1=0xd4, wait2=300, **common)]
     for k in range(3):
-        _fx(battle, _luck_think, x - 0x100000 + k * 0x100000, y, 0x3780000, LUCK_SMALL_FALL, small=True,
-            wait1=k * 0x1e + 0x78, wait2=300, flag=(k == 2), **common)
+        stars.append(_fx(battle, _luck_think, x - 0x100000 + k * 0x100000, y, 0x3780000, LUCK_SMALL_FALL, small=True,
+                         wait1=k * 0x1e + 0x78, wait2=300, flag=(k == 2), **common))
+    for st in stars:
+        _luck_think(st, battle.engine)              # 出生 tick 就 think (实录 jet_27 首帧 z 880)
     coord.user_data['live'] += 1
     _sfx(battle, 0x11e)
     _sfx(battle, 0x11f)
