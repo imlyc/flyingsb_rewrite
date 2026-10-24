@@ -242,6 +242,10 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         def _attach():
             battle.engine.attach_seq(ent, seq_bc)
             attacker.cast_hold = hold
+            from core.skill_seq import SKILL_ATTACH_HOOKS
+            hook = SKILL_ATTACH_HOOKS.get(skill_id)
+            if hook is not None:
+                hook(battle, attacker)
         start_skill_dim(battle, _attach, skill_id)
     else:
         battle.engine.attach_seq(attacker.entity, seq_bc)

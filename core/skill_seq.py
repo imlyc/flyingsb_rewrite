@@ -843,6 +843,7 @@ SKILL_SEQS: dict[int, list[list[tuple]]] = {
     **__import__('core.pig_skills', fromlist=['PIG_SEQS']).PIG_SEQS,   # 猪八戒 0x19..0x1d (core.pig_skills)
     **__import__('core.pao_skills', fromlist=['PAO_SEQS']).PAO_SEQS,   # 破无 0x2f..0x33 (core.pao_skills)
     **__import__('core.bosan_skills', fromlist=['BOSAN_SEQS']).BOSAN_SEQS,   # 捕山 0x34..0x38 (core.bosan_skills)
+    **__import__('core.jet_skills', fromlist=['JET_SEQS']).JET_SEQS,   # 乐神杰特 0x25..0x2e (core.jet_skills)
     0x16: SKILL_SAM_THREE_HIT,        # 三藏 不败三击 (A 类 3 IMPACT)
     0x17: SKILL_SAM_PHOENIX_CAST,     # 三藏 凤凰掌 (B 类, cast + spawn phoenix)
     0x18: SKILL_SAM_GOD_FIST,         # 三藏 三藏神拳 (A 类 5 IMPACT, 3 段切换)
@@ -1085,6 +1086,12 @@ SKILL_CAST_SIGNAL_HANDLERS.update({
     sid: (lambda b, u, s: __import__('core.bosan_skills', fromlist=['on_cast_signal']).on_cast_signal(b, u, s))
     for sid in (0x34, 0x35, 0x36, 0x37, 0x38)
 })
+
+
+# 挂施法 seq 的同一刻要启动的东西 (exe dispatcher case 10 里和 seq 一起做的): sid → hook(battle, caster)
+SKILL_ATTACH_HOOKS: dict[int, "callable"] = {
+    sid: (lambda b, u: __import__('core.jet_skills', fromlist=['on_attach']).on_attach(b, u)) for sid in range(0x25, 0x2f)
+}
 
 
 def has_impact_spawn(skill_id: int | None) -> bool:

@@ -28,7 +28,7 @@ ORIGIN = Path(os.environ.get("FLYINGSB_ORIGIN", ROOT.parent / "origin" / "flying
 EXE = Path(os.environ.get("FLYINGSB_EXE", ORIGIN / "FlyingSB.exe"))
 IMAGE_BASE = 0x400000
 
-MODULES = ("core.raw_attack_seqs", "core.skill_seq", "core.son_transform", "core.projectile", "core.pig_skills", "core.pao_skills", "core.bosan_skills",
+MODULES = ("core.raw_attack_seqs", "core.skill_seq", "core.son_transform", "core.projectile", "core.pig_skills", "core.pao_skills", "core.bosan_skills", "core.jet_skills",
            "core.hit_effect_seq")
 SEQ_KINDS = {"fm", "idle", "fm_m1", "move", "sound", "impact", "jump", "end", "exit", "loop", "raw"}
 SIG_IMPACT, SIG_END = -100, -110

@@ -1424,7 +1424,7 @@ MF_HOLD_TICKS = 64              # 悬停 (exe +0x40)
 MF_FEATHER_LEAD = 30            # end-0x1e 起撒羽毛
 MF_FEATHER_ATLAS = 247          # e00
 MF_FEATHER_VARIANTS = ((30, 31, 32), (33, 34, 35), (36, 37, 38), (39, 40, 41))
-MF_FEATHER_FRAME_TICKS = 2
+MF_FEATHER_FRAME_TICKS = 1      # seq 656abc 每帧 ticks=1 (引擎显示 2t; 实录 son_09 "36 37×2 38×2")
 MF_FEATHER_Z = 128 << 16        # exe 0x800000
 MF_FEATHER_ACCEL = 0x4000       # 0.25 px/t² 弹簧朝 z0
 MF_FEATHER_MAX_AGE = 0x3f

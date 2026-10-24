@@ -532,10 +532,12 @@ class TacticsBattle:
             return True
         dmg_tiles = self.damage_range(self.aim_cursor)
         targets = []
+        from core.skills import REVIVE_SKILLS
+        revive = self.aim_skill_id in REVIVE_SKILLS
         for (x, y) in dmg_tiles:
             occ = self.q.occupant(x, y)
-            if occ is None or not occ.alive:
-                continue
+            if occ is None or (not occ.alive and not (revive and occ.is_player == u.is_player)):
+                continue                         # 复活类技能 (回生舞步/強力慢曲/甦生/重生) 可选倒地队友
             same_side = occ.is_player == u.is_player
             if (heal and same_side) or (not heal and not same_side):
                 targets.append(occ)
