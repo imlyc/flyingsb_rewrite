@@ -199,10 +199,12 @@ def _spark(battle, d: int, victim) -> None:
     from core.battle import combat
     from core.hit_effect_seq import (HitEffectSpec, UNIVERSAL_SPARK_ATLAS, UNIVERSAL_SPARK_BY_DIR,
                                      UNIVERSAL_SPARK_FRAME_TICKS, HIT_EFFECT_Y_BASELINE_PX)
+    from core.pao_skills import hit_pos
     key = ('UP', 'DN', 'LF', 'RT')[d]
     spec = HitEffectSpec(UNIVERSAL_SPARK_ATLAS, list(UNIVERSAL_SPARK_BY_DIR[key]), UNIVERSAL_SPARK_FRAME_TICKS, jittered=False)
-    cx = victim.x * TILE_W + TILE_W // 2
-    cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX
+    hx, hy = hit_pos(victim)
+    cx = hx >> 16
+    cy = (hy >> 16) - HIT_EFFECT_Y_BASELINE_PX
     combat._spawn_effect_entity(battle, cx, cy, spec)
 
 
@@ -210,8 +212,9 @@ def _starburst(battle, victim) -> None:
     """FUN_004d0c90(..., 655b18) = et00 星爆 帧 14,15 (无抖动)."""
     from core.battle import combat
     from core.hit_effect_seq import HIT_EFFECT_Y_BASELINE_PX
-    cx = victim.x * TILE_W + TILE_W // 2
-    cy = victim.y * TILE_H + TILE_H // 2
+    from core.pao_skills import hit_pos
+    hx, hy = hit_pos(victim)
+    cx, cy = hx >> 16, hy >> 16
     combat._spawn_skill_extra_effect(battle, cx, cy - HIT_EFFECT_Y_BASELINE_PX, STARBURST_SEQ)
 
 
@@ -281,7 +284,8 @@ def _throw_think(e: "Entity", eng: "Engine") -> None:
     cd['live'] -= 1
     _damage(battle, caster, [victim])                                           # -200
     _hit(battle, caster, victim, face_caster=False, chiri=False)               # -250
-    vx, vy = _tile_center(victim.x, victim.y)
+    from core.pao_skills import hit_pos
+    vx, vy = hit_pos(victim)
     _fx(battle, _seq_end_think, vx, vy + (400 << 16), 432, FIRE02_SEQ if sid == 0x34 else FIRE01_SEQ, fx_end=True)
     _sfx(battle, SFX_GRENADE_HIT if sid == 0x34 else SFX_DYNAMITE_HIT)
     eng.destroy(e)
@@ -489,14 +493,15 @@ def trigger_mine(battle, unit) -> None:
     unit.reaction_saved_facing = None
     combat.set_reaction(unit, "hit", None)
     _spark(battle, d, unit)
-    coord = battle.engine.spawn(think_fn=_mine_coord_think)
+    coord = battle.engine.spawn(think_fn=_mine_coord_think)  # (火爆在下面: 受击后生成, 同样用后退后的位置)
     coord.flags = 0x800 | 0x10000
     coord.user_data.update(kind='mine_coord', projectile=True, mine_coord=True, battle=battle, unit_hit=unit, burst_live=1)
 
     def _burst_done():
         coord.user_data['burst_live'] = 0
     rng_x = (_rand(battle) % 12) - 6
-    vx, vy = _tile_center(unit.x, unit.y)
+    from core.pao_skills import hit_pos
+    vx, vy = hit_pos(unit)
     _fx(battle, _seq_end_think, vx + (rng_x << 16), vy + (124 << 16), 172, FIRE01_SEQ, fx_end=True, on_end=_burst_done)
     combat.push_damage_event(battle, unit, DamageEvent(MINE_DAMAGE, unit.hp, unit.x, unit.y))
     _sfx(battle, SFX_MINE_BOOM)

@@ -108,6 +108,14 @@ def _caster_pos(caster) -> tuple[int, int]:
     return x + (ent.x if ent is not None else 0), y + (ent.y if ent is not None else 0)
 
 
+def hit_pos(victim) -> tuple[int, int]:
+    """-250 先挂受击 seq 6557f0[dir], 其首个位移 (背离朝向 4px) 立即生效 → 之后生成的特效以后退后的位置为准
+    (实录 pao_2f 碎屑 x 均值 -132 / bosan_34 爆炸 y -4)."""
+    x, y = _tile_center(victim.x, victim.y)
+    fx, fy = victim.facing
+    return x - fx * 4 * FP, y - fy * 4 * FP
+
+
 def _rand(battle) -> int:
     """exe rand() 0..0x7fff."""
     return battle.rng.randrange(0x8000)
@@ -138,8 +146,9 @@ def _spark(battle, caster, victim) -> None:
                                      UNIVERSAL_SPARK_FRAME_TICKS, HIT_EFFECT_Y_BASELINE_PX)
     d = facing_to_dir(caster.facing)
     spec = HitEffectSpec(UNIVERSAL_SPARK_ATLAS, list(UNIVERSAL_SPARK_BY_DIR[d]), UNIVERSAL_SPARK_FRAME_TICKS, jittered=False)
-    cx = victim.x * TILE_W + TILE_W // 2
-    cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX
+    hx, hy = hit_pos(victim)
+    cx = hx >> 16
+    cy = (hy >> 16) - HIT_EFFECT_Y_BASELINE_PX
     combat._spawn_effect_entity(battle, cx, cy, spec)
 
 
@@ -159,7 +168,7 @@ def _chiri_think(e: "Entity", eng: "Engine") -> None:
 
 def _chiri(battle, victim) -> None:
     """FUN_004e52de: 8 粒碎屑."""
-    vx0, vy0 = _tile_center(victim.x, victim.y)
+    vx0, vy0 = hit_pos(victim)
     for _ in range(CHIRI_COUNT):
         vx = _rand(battle) * 16 - 0x40000
         vy = _rand(battle) * 16 - 0x40000
