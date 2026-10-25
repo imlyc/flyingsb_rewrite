@@ -97,6 +97,11 @@ def _rand(battle) -> int:
     return battle.rng.randrange(0x8000)
 
 
+def _i32(v: int) -> int:
+    """exe int32 运算回绕 (乘积溢出: 首帧用 16.16 半径的粒子会飞出画面)."""
+    return ((v + 0x80000000) & 0xffffffff) - 0x80000000
+
+
 def _sin(a: int) -> int:
     return int(math.sin((a & 0xffff) / 65536 * 2 * math.pi) * FP)
 
@@ -461,8 +466,8 @@ def _pillar_think(e: "Entity", eng: "Engine") -> None:
 def _orbit(e: "Entity") -> None:
     """FUN_004c3211 mode 2 (x,y): x = cx + sin φ·rx, y = cy - cos φ·ry."""
     ud = e.user_data
-    e.x = ud['cx'] + _sin(ud['phi']) * ud['rx']
-    e.y = ud['cy'] - _cos(ud['phi']) * ud['ry']
+    e.x = _i32(ud['cx'] + _i32(_sin(ud['phi']) * ud['rx']))
+    e.y = _i32(ud['cy'] - _i32(_cos(ud['phi']) * ud['ry']))
 
 
 def _heal_settle(battle, coord, t) -> None:
@@ -837,7 +842,12 @@ def _yuka_rings(battle, t, n: int, total: int, owner_ud) -> None:
                 r16x=abs(rx0) << 2, r16y=abs(ry0) << 2, cx=x, cy=y, rx=0, ry=0, age=0, burst=(n == 2))
         e.user_data['dx'] = e.user_data['r16x'] >> 7
         e.user_data['dy'] = e.user_data['r16y'] >> 7
-        _yuka_ring_place(e)
+        coord = owner_ud.get('coord')
+        if coord is not None and coord.user_data.get('seq_signal'):
+            e.user_data['rx'], e.user_data['ry'] = rx0, ry0    # exe 初值 = 16.16 乘积 → 首次环绕 int32 溢出
+            _yuka_ring_think(e, battle.engine)                # 池序在控制体之后 → 出生 tick 就 think (实录 mina_11)
+        else:
+            _yuka_ring_place(e)
 
 
 def _yuka_ring_place(e) -> None:
