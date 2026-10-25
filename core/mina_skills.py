@@ -187,7 +187,7 @@ def _new_coord(battle, caster, sid, targets) -> "Entity":
     coord = battle.engine.spawn(think_fn=J._coord_think)
     coord.flags = 0x800 | 0x10000
     coord.user_data.update(kind='mina_coord', projectile=True, jet=True, battle=battle, caster=caster, sid=sid,
-                           targets=targets, live=0)
+                           targets=targets, live=0, seq_signal=True, birth_think=False)
     return coord
 
 
@@ -309,7 +309,7 @@ def _bigheal_think(e: "Entity", eng: "Engine") -> None:
 def _spawn_bigheal(battle, caster, coord, targets) -> None:
     for i, t in enumerate(targets):
         if t.is_player:
-            _hold_pose(battle, t, HEAL_POSE_SEQS)
+            _hold_pose(battle, t, HEAL_POSE_SEQS, coord)
         cx, cy = _pos(t)
         phi = ((_rand(battle) & 0x3ff) << 16) >> 10
         for k in range(4):
@@ -317,7 +317,6 @@ def _spawn_bigheal(battle, caster, coord, targets) -> None:
                     state=0, age=0, spd=0x400, lead=(k == 3), first=(i == 0),
                     **_motion(m=0x32, tx=cx, ty=cy, rx=0x20, ry=0x18, px=phi, py=phi))
             _c3211(e)
-            _bigheal_think(e, battle.engine)          # 出生 tick 就 think (同 強力慢曲 光点, 待实录核对)
             phi = _wrap16(phi + 0x4000)
         coord.user_data['live'] += 1
     _sfx(battle, SFX_HEAL_A)
@@ -374,7 +373,7 @@ def _cure_ctrl_think(e: "Entity", eng: "Engine") -> None:
 
 def _spawn_cure(battle, caster, coord, targets) -> None:
     for t in targets:
-        _hold_pose(battle, t, HEAL_POSE_SEQS)
+        _hold_pose(battle, t, HEAL_POSE_SEQS, coord)
         e = battle.engine.spawn(think_fn=_cure_ctrl_think)
         e.flags = 0x800 | 0x10000
         e.user_data.update(kind='mina_cure', projectile=True, cure_ctrl=True, battle=battle, coord=coord, target=t,
@@ -913,7 +912,7 @@ def _spawn_spirit(battle, caster, coord, targets) -> None:
         return
     t = targets[0]
     if t.is_player == caster.is_player:
-        _hold_pose(battle, t, HEAL_POSE_SEQS)
+        _hold_pose(battle, t, HEAL_POSE_SEQS, coord)
         phi0 = ((_rand(battle) % 1000) << 16) // 1000
         _spawn_spirit_entity(battle, caster, _angel_think, PS_ANGEL, angel=True, coord=coord, target=t, phi0=phi0,
                              n=0, w=0, **_motion())

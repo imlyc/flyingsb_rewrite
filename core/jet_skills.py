@@ -409,8 +409,11 @@ def _spawn_rise(battle, src: "Entity") -> None:
     """FUN_004d4819: 源位置, vx/vy = 0x4000/(rand&3+1), vz -2 (向下), seq 656abc[rand&3]."""
     vx = 0x4000 // ((_rand(battle) & 3) + 1)
     vy = 0x4000 // ((_rand(battle) & 3) + 1)
-    _fx(battle, _rise_think, src.x, src.y, src.user_data['ez'], FEATHER_SEQS[_rand(battle) & 3], rise=True,
-        vx=vx, vy=vy, vz=-2 * FP, az=0, age=0)
+    e = _fx(battle, _rise_think, src.x, src.y, src.user_data['ez'], FEATHER_SEQS[_rand(battle) & 3], rise=True,
+            vx=vx, vy=vy, vz=-2 * FP, az=0, age=0)
+    coord = src.user_data.get('coord')
+    if coord is not None and coord.user_data.get('seq_signal'):
+        _rise_think(e, battle.engine)    # 池序: 粒子下标在光柱之后 → 出生 tick 就 think (实录 mina_0a; 杰特那次多在光柱之前, 未模拟)
 
 
 # ---------- 0x26 恢復樂章 (模板 FUN_004d4ee0) ----------
@@ -494,9 +497,14 @@ def _feather_think(e: "Entity", eng: "Engine") -> None:
 HEAL_POSE_SEQS = [[('idle', 2, f, 5), ('idle', 2, f + 1, 5), ('exit',)] for f in (2, 6, 10, 14)]   # 655aa8[dir] (目标 ps+2)
 
 
-def _hold_pose(battle, t, seqs) -> None:
-    """模板 -100: 目标挂姿势 seq 并保持末帧 (清 0x10000), 到 -200 才回待机."""
-    _attach_unit_seq(battle, t, seqs[_dir(t)])
+def _hold_pose(battle, t, seqs, coord=None) -> None:
+    """模板 -100: 目标挂姿势 seq 并保持末帧 (清 0x10000), 到 -200 才回待机.
+    exe 怪癖 (实录 mina_0a 自疗): -100 若由施法者自己的 seq jump op 发出 (美娜等), 处理函数给施法者换 seq 后 jump op
+    又把偏移 +4 → 落进新 seq 第二个 op 中间 → 只播首帧就结束 (帧 2 停在那). 音符发射器发的 (乐神杰特) 不受影响."""
+    seq = seqs[_dir(t)]
+    if coord is not None and coord.user_data.get('seq_signal') and t is coord.user_data.get('caster'):
+        seq = [seq[0], ('exit',)]
+    _attach_unit_seq(battle, t, seq)
     t.cast_hold = True
 
 
@@ -506,14 +514,15 @@ def _release_pose(t) -> None:
 
 def _spawn_heal_pillars(battle, caster, coord, targets) -> None:
     for t in targets:
-        _hold_pose(battle, t, HEAL_POSE_SEQS)
+        _hold_pose(battle, t, HEAL_POSE_SEQS, coord)
         cx, cy = _pos(t)
         phi = ((_rand(battle) & 0x3ff) << 16) >> 10
         for k in range(3):
             e = _fx(battle, _pillar_think, cx, cy, 0, MAG_SEQ, pillar=True, battle=battle, coord=coord, target=t,
                     cx=cx, cy=cy, rx=0x20, ry=0x18, phi=phi & 0xffff, spd=0x400, state=0, age=0, lead=(k == 2))
             _orbit(e)
-            _pillar_think(e, battle.engine)          # 出生 tick 就 think (实录首帧 z=1)
+            if coord.user_data.get('birth_think', True):
+                _pillar_think(e, battle.engine)      # 出生 tick 就 think (实录 jet_26 首帧 z=1; 美娜 seq 发的 -100 不会, mina_0a 首帧 z=0)
             phi += 0x5555
         coord.user_data['live'] += 1
     _sfx(battle, 0xc9)
@@ -757,7 +766,8 @@ def _spawn_revive(battle, caster, coord, targets) -> None:
         e.user_data.update(kind='jet_revive', projectile=True, revive=True, battle=battle, coord=coord, target=t,
                            state=0, age=0)
         coord.user_data['live'] += 1
-        _revive_think(e, battle.engine)                 # 出生 tick 就 think (实录 jet_2b: 首闪光 +83, 爬起 +169, 待机 +234)
+        if coord.user_data.get('birth_think', True):
+            _revive_think(e, battle.engine)             # 出生 tick 就 think (实录 jet_2b: 首闪光 +83, 爬起 +169, 待机 +234)
         _sfx(battle, 0x112)
 
 
@@ -771,7 +781,7 @@ def _yuka_think(e: "Entity", eng: "Engine") -> None:
     st = ud['state']
     age = ud['age']
     if st == 0:
-        _hold_pose(battle, t, HEAL_POSE_SEQS)       # 4d5f4b case 0: 目标挂 655aa8 接受姿势 (同时保证有实体可托起)
+        _hold_pose(battle, t, HEAL_POSE_SEQS)       # 4d5f4b case 0 (在它自己的 think 里挂, 不受 seq jump 怪癖影响): 目标挂 655aa8 接受姿势 (同时保证有实体可托起)
     ent = t.entity
     if st == 0:
         ud.update(tz=48 * FP, vz=FP, az=0, uz=0, state=10)
@@ -879,7 +889,8 @@ def _spawn_yuka(battle, caster, coord, targets) -> None:
         e.user_data.update(kind='jet_yuka', projectile=True, yuka=True, battle=battle, coord=coord, target=t,
                            state=0, age=0, first=(i == 0))
         coord.user_data['live'] += 1
-        _yuka_think(e, battle.engine)                   # 出生 tick 就 think (实录 jet_2c 目标 +83 已升 1px)
+        if coord.user_data.get('birth_think', True):
+            _yuka_think(e, battle.engine)               # 出生 tick 就 think (实录 jet_2c 目标 +83 已升 1px)
 
 
 # ---------- 0x2d 英雄樂章 (模板 FUN_0050eb21 = 紫河化精為氣) ----------
@@ -949,7 +960,8 @@ def _spawn_slow(battle, caster, coord, targets) -> None:
                         cx=cx, cy=cy, rx=rx, ry=ry, phi=phi & 0xffff, spd=0x400, state=0, emit=(k % 4 == 0),
                         lead=(n == 23))
                 _orbit(e)
-                _slow_think(e, battle.engine)            # 出生 tick 就 think (实录 jet_2e 首帧 z=1, 活 134t, 首粒子 +82)
+                if coord.user_data.get('birth_think', True):
+                    _slow_think(e, battle.engine)        # 出生 tick 就 think (实录 jet_2e 首帧 z=1, 活 134t, 首粒子 +82)
                 phi = (phi + step) & 0xffff
                 n += 1
         coord.user_data['live'] += 1

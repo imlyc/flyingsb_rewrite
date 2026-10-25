@@ -67,7 +67,7 @@ def main():
     p = _unit(a.caster, 15, 53, is_player=True, agile=99)
     e = _unit('enemy', 15 + a.enemy_dx, 53 + a.enemy_dy, is_player=False, agile=1)
     players = [p]
-    if a.ally_dx is not None:
+    if a.ally_dx is not None and (a.ally_dx, a.ally_dy) != (0, 0):      # (0,0) = 目标就是施法者自己
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
         if a.skill in (0x09, 0x2b):             # M凤凰 复活术 / 回生舞步: 队友得是倒下的才是目标
             ally.hp = 0; ally.death_anim_time_ms = 0
