@@ -264,6 +264,15 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     attacker.entity.user_data = {'unit': attacker}
     if na_entry is not None:
         attacker.entity.user_data['global_atlas'] = True     # exe 原 seq: fm 槽号是全局图集号 (渲染不走 ATK_A/B/C 抽象槽)
+        # seq 以 move 开头 (如孙悟空拳 0x670a20 先 move 1t): 第一个帧 op 之前 exe 仍显示待机姿 (实录 na0_00)
+        pre = 0
+        for t in seq_tuples:
+            if t[0] in ('fm', 'idle', 'fm_mode1'):
+                break
+            if t[0] == 'move':
+                pre += t[-1]
+        if pre:
+            attacker.entity.user_data['idle_until_tick'] = battle.engine._tick_id + pre + 1
     # 施法姿保持 (见 BattleUnit.cast_hold): 有帧 op 的 seq 播完后停在最后一帧直到攻击收尾 (= exe 清 0x10000).
     hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in seq_tuples)
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.

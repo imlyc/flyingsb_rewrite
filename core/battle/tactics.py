@@ -176,6 +176,9 @@ class TacticsBattle:
             if unit.pending_draw_sound >= 0:
                 self.engine._emit('sound_play', source_entity, unit.pending_draw_sound)
         elif sig == self._SIG_END:
+            if unit.pending_skill_id is None and unit.attack_cur is not None and unit.entity is not None:
+                # 普攻 END (-110) 后 exe 末帧再显示 1 tick 才回待机 (实录 na0_00/03/07)
+                unit.entity.user_data['hold_until_tick'] = self.engine._tick_id + 1
             self.post_attack_anim(unit)
 
     def _find_pending_attacker(self) -> BattleUnit | None:

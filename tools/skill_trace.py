@@ -27,6 +27,9 @@ def _unit(name, x, y, *, is_player, agile):
     return u
 
 
+_CUR_TICK = [0]
+
+
 def unit_line(idx, u, active):
     e = u.entity
     flags = 0x40 | 0x800 | (0x400 if not u.is_player else 0) | (0x80 if active else 0)
@@ -34,7 +37,8 @@ def unit_line(idx, u, active):
         flags |= 0x20000
     elif not u.cast_hold:
         flags |= 0x10000
-    if e is not None and (e.is_playing() or u.cast_hold):
+    if e is not None and (e.is_playing() or u.cast_hold or _CUR_TICK[0] < e.user_data.get('hold_until_tick', -1)) \
+            and _CUR_TICK[0] >= e.user_data.get('idle_until_tick', 0):
         slot, frame = e.atlas_slot, e.frame_idx
         x = u.x * TILE_W * 65536 + TILE_W * 32768 + e.x
         y = u.y * TILE_H * 65536 + TILE_H * 32768 + e.y
@@ -62,6 +66,7 @@ def main():
     ap.add_argument('--facing', default='down'); ap.add_argument('--enemy-facing', default=None, help='敌人朝向 (受击推开方向取决于它)'); ap.add_argument('--more-enemies', default='', help='更多敌人 dx,dy;dx,dy (相对施法者)'); ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--ally-facing', default=None); ap.add_argument('--ally-dx', type=int); ap.add_argument('--ally-dy', type=int, help='加一个队友 (我方目标技能用)')
     ap.add_argument('--cursor-dx', type=int); ap.add_argument('--cursor-dy', type=int, help='光标相对施法者格 (默认敌人格, 失败回施法者)')
+    ap.add_argument('--attack', type=int, default=None, help='普攻表 idx (普攻实录; skill 参数忽略)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
     a = ap.parse_args()
     p = _unit(a.caster, 15, 53, is_player=True, agile=99)
@@ -87,7 +92,15 @@ def main():
     sounds = []
     b.engine.on('sound_play', lambda ent, sid: sounds.append(sid))
     b.engine.on('sound_play_solo', lambda ent, sid: sounds.append(sid))
-    assert b.enter_attack_aim(skill_id=a.skill), 'aim failed'
+    if a.attack is not None:
+        from core import normal_attack as NA
+        p.attack_normal = p.attack_melee = a.attack
+        if p.name == '紫河' and a.attack in (88, 89, 90):           # 紫河形态卡 (形态 = idx-88), 开战已变身
+            NA.zihe_setup(p, {0: (), 1: (0x129,), 2: (0x12a,)}[a.attack - 88] + (0x144,))
+            NA.zihe_switch(p, to_beast=True)
+            p.flicker = None
+            p.attack_normal = p.attack_melee = a.attack
+    assert b.enter_attack_aim(skill_id=None if a.attack is not None else a.skill), 'aim failed'
     b.aim_cursor = (15 + a.cursor_dx, 53 + a.cursor_dy) if a.cursor_dx is not None else (e.x, e.y)
     if not b.confirm_attack_aim():                 # 我方/自身目标技能 (生命之火/斗轉/返荷/化精為氣): 光标放施法者
         b.aim_cursor = (p.x, p.y)
@@ -99,9 +112,10 @@ def main():
     scene_stub = SimpleNamespace(battle=b)
     for t in range(a.max_ticks):
         b.engine.tick()
+        _CUR_TICK[0] = b.engine._tick_id
         _tick_reactions(scene_stub, ATTACK_TICK_MS)    # 受击 seq 也推进 (dispatcher 收尾要等它播完, 如猪八戒 0x14)
         out.append(f"F {t} {t * 24}")
-        out.append(f"G cam={a.enemy_dx},{a.enemy_dy} skill={a.skill} move=0 nvict=1")
+        out.append(f"G cam={a.enemy_dx},{a.enemy_dy} skill={a.attack if a.attack is not None else a.skill} move=0 nvict=1")
         out.append(f"B caster={0x86b618 + a.caster_idx * 0x1ac:x} n=1 {0x86b618 + 60 * 0x1ac:x}")
         out.append(unit_line(a.caster_idx, p, True)); out.append(unit_line(60, e, False))
         idx = 90

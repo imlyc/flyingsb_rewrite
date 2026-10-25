@@ -168,8 +168,10 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
     #       + phase-based sub-frame 插值 (cols > n 的角色用)
     #   (b) Enemy ENEMY_* (atlas_slot 是全局 idx, e.g. 192=ccrow_g0): 走 atlas_resource() 反查,
     #       frame_idx 直接当 atlas 内索引 (敌方 seq 不需要 phase 数学)
-    elif u.is_attacking or (u.cast_hold and u.entity is not None):
-        # cast_hold: seq EXIT 后停在最后一帧 (exe 清 0x10000 期间不走待机)
+    elif (u.is_attacking or (u.cast_hold and u.entity is not None)
+          or (u.entity is not None and scene.battle.engine._tick_id < u.entity.user_data.get('hold_until_tick', -1))) and \
+            scene.battle.engine._tick_id >= u.entity.user_data.get('idle_until_tick', 0):
+        # cast_hold: seq EXIT 后停在最后一帧 (exe 清 0x10000 期间不走待机); idle_until_tick: seq 首个帧 op 前仍待机
         frame, anchor = _resolve_attack_frame(scene, u, cs)
     elif u.cast_anim_key:
         # 施法姿 (破天舞): ps_ atlas 循环前两列 (col 0↔1), 朝 facing. 细微施法手势.
