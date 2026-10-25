@@ -82,10 +82,14 @@ def test_zihe_hit_trigger_and_revert():
     from core.battle import combat
     combat.apply_damage(b, e, z, 10, "")
     assert z.zihe['pending']
-    b.end_unit_turn()                                              # 紫河行动完 → 敌人回合前的处理点变身
+    b.end_unit_turn()                                              # 当前单位行动完 → 处理点变身
     assert z.zihe['transformed'] and z.attack_normal == 89 and z.mp == 0
     beast_hp = z.hp
-    b.end_unit_turn()                                              # 轮到紫河 → 变回人形
+    b.end_unit_turn()                                              # 敌人行动完: 不是紫河 → 保持兽形
+    assert z.zihe['transformed']
+    assert b._turn_order[b._turn_idx] is z                         # 新回合轮到紫河, 以兽形行动
+    assert z.zihe['transformed'] and z.attack_normal == 89
+    b.end_unit_turn()                                              # 紫河兽形行动完 → 变回人形
     assert not z.zihe['transformed'] and z.hp == 590 and z.mp == 300
     assert beast_hp == 600 * 4 // 2
 

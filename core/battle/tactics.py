@@ -253,6 +253,9 @@ class TacticsBattle:
         # 状态回合递减 (exe 回合管理器 FUN_004a4f94 state 1 → FUN_004a3738, 每新回合对全体一次)
         from core.battle.status import round_tick
         round_tick(self.all_units)
+        for z_u in self.players:                 # exe 新回合清 DAT_007e2d4c (待变身标记)
+            if getattr(z_u, 'zihe', None) is not None:
+                z_u.zihe['pending'] = False
         from core.battle import status_icons
         status_icons.sync(self, create=False)    # exe FUN_004a3c1f: 到期的状态摘图标
         self._turn_order = sorted(self.alive_units, key=lambda u: -u.agile)
@@ -263,8 +266,9 @@ class TacticsBattle:
         self._enter_current()
 
     def _zihe_turn_point(self, actor: BattleUnit) -> None:
-        """exe FUN_004a4f94 case 0xc (每个行动者开始前): 紫河 (无保温瓶) 轮到自己且已变身 → 变回;
-        否则有待变身标记 → 变身. 换卡即刻生效, 闪烁 31t 只是表现."""
+        """exe FUN_004a4f94 case 0xb→0xc (每个单位**行动结束**后): 刚行动完的是已变身的紫河 (无保温瓶) → 变回;
+        否则有待变身标记 → 变身. 即: 被打中 → 打她的单位行动完变身 → 她以兽形行动一次 → 这次行动完变回.
+        换卡即刻生效, 闪烁 31t 只是表现."""
         from core.normal_attack import zihe_switch
         for z_u in self.players:
             z = getattr(z_u, 'zihe', None)
@@ -290,7 +294,6 @@ class TacticsBattle:
         while self._turn_idx < len(self._turn_order):
             u = self._turn_order[self._turn_idx]
             if u.alive:
-                self._zihe_turn_point(u)
                 if u.is_player:
                     self.phase = Phase.PLAYER_MOVE
                     self._pre_move_pos = (u.x, u.y)
@@ -310,6 +313,7 @@ class TacticsBattle:
     def end_unit_turn(self) -> None:
         if self._turn_idx < len(self._turn_order):
             self._turn_order[self._turn_idx].has_acted = True
+            self._zihe_turn_point(self._turn_order[self._turn_idx])
         self._turn_idx += 1
         self._pre_move_pos = None
         if self._check_end():
