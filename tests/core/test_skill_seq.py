@@ -99,8 +99,8 @@ def test_attack_seq_for_routes_to_skill_when_skill_id_given():
 
 def test_unimplemented_skill_falls_back_to_normal_attack():
     """未 dump 的 skill_id 回落到角色普攻 seq (= 不崩, 视觉先 work).
-    用 0x0a (美娜小回复, 尚未实现) 验证 fallback."""
-    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x0a)
+    0x00..0x41 都已有 seq 或走孙悟空变身框架, 用不存在的 0x7f 验证 fallback."""
+    seq_skill = attack_seq_for("蒙面人", (0, -1), skill_id=0x7f)
     seq_atk = attack_seq_for("蒙面人", (0, -1), skill_id=None)
     assert seq_skill == seq_atk
 
