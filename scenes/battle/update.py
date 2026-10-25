@@ -243,6 +243,7 @@ def _tick_flicker(battle) -> None:
             fl['t'] += 1
             if fl['t'] >= FLICKER_TICKS:
                 u.flicker = None
+                battle.refresh_status_snapshot(working=False)   # exe 0xd/0xe 闪完 FUN_004a4e42(0)
 
 
 def _tick_camera(scene: "BattleScene") -> None:

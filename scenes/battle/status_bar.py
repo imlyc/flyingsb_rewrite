@@ -14,6 +14,7 @@ weight 500), 半角 8px 等宽; 文字先按描边模板 (0x53c7a4 #0: 6 个偏�
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pygame
@@ -117,14 +118,15 @@ def hp_pair(hp: int, max_hp: int):
     return PAIR_LOW
 
 
-def render_bar(units) -> pygame.Surface:
-    """整条状态栏 (len(units) × 128 × 80, 透明底)."""
+def render_bar(rows) -> pygame.Surface:
+    """整条状态栏 (len(rows) × 128 × 80, 透明底). rows = energy.status_snapshot() 列表 (或 BattleUnit, 现取)."""
     from core.battle import energy
-    surf = pygame.Surface((max(1, len(units)) * COL_W, BAR_H), pygame.SRCALPHA)
+    rows = [r if isinstance(r, SimpleNamespace) else energy.status_snapshot(r) for r in rows]
+    surf = pygame.Surface((max(1, len(rows)) * COL_W, BAR_H), pygame.SRCALPHA)
     smenu = _get_smenu()
-    for i, u in enumerate(units):
+    for i, u in enumerate(rows):
         x = i * COL_W
-        hp = u.display_hp
+        hp = u.hp
         base = PAIR_DEAD if hp < 1 else PAIR_NORMAL
         draw_text(surf, x + 8, 10, u.name, base)          # 原版是繁体名; 重制版界面统一简体
         draw_text(surf, x + 80, 10, f"Lv{u.level:3d}", base)
@@ -135,8 +137,8 @@ def render_bar(units) -> pygame.Surface:
         else:
             draw_text(surf, x + 8, 50, f"MP:     /{u.max_mp:4d}", base)
             draw_text(surf, x + 40, 50, f"{u.mp:4d}", PAIR_DEAD if hp < 1 else PAIR_MP)
-        t = energy.energy_type(u)
-        if t in (energy.ENERGY_SG, energy.ENERGY_SG2) and energy.uses_sg(u):
+        t = u.etype
+        if t in (energy.ENERGY_SG, energy.ENERGY_SG2) and u.sg_ok:
             px_tab = energy.SG_GAUGE_PX[t]
             full_w = len(energy.SG_THRESHOLDS[t]) * 16
             px = px_tab[max(0, min(energy.SG_MAX, u.sg))]
@@ -144,7 +146,7 @@ def render_bar(units) -> pygame.Surface:
                 surf.blit(smenu, (x + 40 + px, 42), pygame.Rect(px, 32, full_w - px, 16))
             if px > 0:
                 surf.blit(smenu, (x + 40, 42), pygame.Rect(0, 48, px, 16))
-        bits = getattr(u, 'status_bits', 0)
+        bits = u.status_bits
         for bit, alt, src, ix in STATUS_ICONS:
             if bits & bit:
                 s = src
@@ -171,6 +173,7 @@ def draw(scene: "BattleScene") -> None:
     h = getattr(scene, '_status_bar_h', 0)
     if h <= 0:
         return
-    bar = render_bar(scene.battle.players)
+    snap = getattr(scene.battle, 'status_snapshot', None)
+    bar = render_bar(snap if snap is not None else scene.battle.players)
     ox, oy = getattr(scene, 'battle_view_origin', (0, 0))
     scene.surface.blit(bar, (ox, oy + BAR_Y_OFFSET), pygame.Rect(0, BAR_H - h, bar.get_width(), h))

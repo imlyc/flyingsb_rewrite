@@ -39,6 +39,9 @@ BLOCK_SIZE = 0xBC                 # 188 bytes per character block
 CHAR_DATA_OFFSET_IN_BLOCK = 4     # block 前 4B 是 identifier, 跳过
 CHARACTERS_START = 0x44
 MONEY_OFFSET = 0xBF4
+PARTY_COUNT_OFFSET = 0xBF8        # 出场人数 (exe 0x867e84)
+PARTY_LIST_OFFSET = 0xBFC         # 出场名单: 角色槽位 int32 × 人数 (exe 0x654d54), 状态栏/战斗按这个顺序
+PARTY_MAX = 5
 FLAGS_START = 0xC04          # 角色块之后的剧情 flags 位图区 (1 = 已置位)
 FLAGS_END = 0x1C00
 
@@ -231,3 +234,18 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def party_slots(save: "SaveData") -> list[int]:
+    """原版存档里的出场名单 (槽位, 按队伍顺序). 读不出合法名单 (重制版 JSON 存档 raw 全 0 等) → []."""
+    raw = getattr(save, "raw", b"") or b""
+    if len(raw) < PARTY_LIST_OFFSET + 4 * PARTY_MAX:
+        return []
+    n = struct.unpack_from("<i", raw, PARTY_COUNT_OFFSET)[0]
+    if not 1 <= n <= PARTY_MAX:
+        return []
+    slots = list(struct.unpack_from(f"<{n}i", raw, PARTY_LIST_OFFSET))
+    chars = getattr(save, "characters", {}) or {}
+    if any(s not in chars or chars[s].MaxHP <= 0 for s in slots):
+        return []
+    return slots

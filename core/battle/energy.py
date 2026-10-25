@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -166,3 +167,10 @@ def write_back(battle) -> None:
         ch.CurrentMP = max(0, min(ch.MaxMP, mp - bonus))
         if uses_sg(u):
             ch.SG = u.sg
+
+
+def status_snapshot(u: "BattleUnit") -> SimpleNamespace:
+    """exe FUN_004a4e42: 状态栏显示的快照 (HP/MP/SG/状态字), 由 TacticsBattle.refresh_status_snapshot 在
+    回合开始 / 单位开始行动 / 行动结束 / 紫河闪烁结束 时刷新 — 状态栏不显示实时值."""
+    return SimpleNamespace(name=u.name, level=u.level, hp=u.hp, max_hp=u.max_hp, mp=u.mp, max_mp=u.max_mp,
+                           sg=u.sg, status_bits=getattr(u, 'status_bits', 0), etype=energy_type(u), sg_ok=uses_sg(u))

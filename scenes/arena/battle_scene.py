@@ -197,6 +197,7 @@ class ArenaBattleScene(BattleScene):
         v = max(1, min(u.max_hp, value))
         u.hp = v
         u.shown_hp_override = None      # 显示值立即同步 (不走受击提交)
+        self.battle.refresh_status_snapshot()   # 调试控制台: 状态栏也立即同步
         self.battle._log(f"[控制台] {u.name} HP → {v}/{u.max_hp}")
 
     def _add_enemy(self, name: str) -> None:

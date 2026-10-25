@@ -52,19 +52,32 @@ def make_story_enemy(name: str) -> "BattleUnit":
 RANDOM_BATTLE_EVERY = 3
 RANDOM_BATTLE_CHANCE = 0.00
 REAL_MAP_BATTLE_CHANCE = 0.25
-PARTY_SIZE = 2
+
+
+def battle_party_slots(scene: "WorldMapScene") -> list[int]:
+    """出场队员槽位 (按队伍顺序, 最多 5 = exe 0x867e84 上限; 状态栏也按这个顺序排).
+    原版存档: 0xBF8 人数 + 0xBFC 名单 (core.save_manager.party_slots); 重制版 JSON 存档: 导演记录的入队名单."""
+    from core.party import NAME_TO_SLOT
+    from core.save_manager import PARTY_MAX, party_slots
+    save = scene.save
+    slots = party_slots(save)
+    if not slots:
+        names = list(getattr(getattr(scene, "story", None), "party", []) or [])
+        slots = [NAME_TO_SLOT[n] for n in names if n in NAME_TO_SLOT]
+    if not slots:
+        slots = list(PLAYABLE_SLOTS)
+    out = []
+    for s in slots:
+        ch = save.characters.get(s)
+        if ch is not None and ch.MaxHP > 0 and s not in out:
+            out.append(s)
+    return out[:PARTY_MAX]
 
 
 def build_party(scene: "WorldMapScene") -> list[BattleUnit]:
     if scene.save is not None:
-        chars: list[BattleUnit] = []
-        for slot in PLAYABLE_SLOTS:
-            ch = scene.save.characters.get(slot)
-            if ch is None or ch.MaxHP <= 0:
-                continue
-            chars.append(unit_from_character(CHARACTER_NAMES[slot], ch))
-            if len(chars) >= PARTY_SIZE:
-                break
+        chars = [unit_from_character(CHARACTER_NAMES[s], scene.save.characters[s])
+                 for s in battle_party_slots(scene)]
         if chars:
             return chars
     # 无存档时的默认队伍 (主角美娜开局)

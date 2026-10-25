@@ -125,3 +125,18 @@ def test_write_back():
     m.save_ref = ch2
     energy.write_back(SimpleNamespace(players=[p, m]))
     assert ch.SG == 9 and ch2.CurrentMP == 12
+
+
+def test_status_snapshot_refresh_points():
+    """exe FUN_004a4e42: 状态栏是快照 — 中途扣血/扣 MP 不变, 行动结束才刷新."""
+    p = _u('美娜', 10, 10, mp=20, max_mp=20, agile=99)
+    e = _u('e', 10, 11, is_player=False, agile=1)
+    bt = _battle([p], [e])
+    snap = lambda: bt.status_snapshot[0]                         # noqa: E731
+    assert (snap().hp, snap().mp) == (600, 20)
+    from core.battle import combat
+    combat.apply_damage(bt, e, p, 50, "")
+    energy.pay(p, 0x0a)                                         # 小回復 5 MP
+    assert (snap().hp, snap().mp) == (600, 20)                  # 行动中: 不变
+    bt.end_unit_turn()                                          # 行动结束 → 刷新
+    assert (snap().hp, snap().mp) == (550, 15)

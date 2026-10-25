@@ -260,12 +260,19 @@ class TacticsBattle:
                 z_u.zihe['pending'] = False
         from core.battle import status_icons
         status_icons.sync(self, create=False)    # exe FUN_004a3c1f: 到期的状态摘图标
+        self.refresh_status_snapshot(working=False)   # exe 新回合 FUN_004a4e42(0)
         self._turn_order = sorted(self.alive_units, key=lambda u: -u.agile)
         for u in self._turn_order:
             u.has_acted = False
         self._turn_idx = 0
         self._log(f"--- 新回合 ({' > '.join(u.name for u in self._turn_order)}) ---")
         self._enter_current()
+
+    def refresh_status_snapshot(self, working: bool = True) -> None:
+        """exe FUN_004a4e42: 拷一份我方 HP/MP/SG/状态字给状态栏画 (状态栏不显示实时值).
+        working: exe 参数 1 = 工作 HP, 0 = 角色表 HP; 我们只有一份 hp, 两者相同."""
+        from core.battle.energy import status_snapshot
+        self.status_snapshot = [status_snapshot(u) for u in self.players]
 
     def _zihe_turn_point(self, actor: BattleUnit) -> None:
         """exe FUN_004a4f94 case 0xb→0xc (每个单位**行动结束**后): 刚行动完的是已变身的紫河 (无保温瓶) → 变回;
@@ -296,6 +303,7 @@ class TacticsBattle:
         while self._turn_idx < len(self._turn_order):
             u = self._turn_order[self._turn_idx]
             if u.alive:
+                self.refresh_status_snapshot()       # exe case 3: 轮到单位行动 FUN_004a4e42(1)
                 if u.is_player:
                     self.phase = Phase.PLAYER_MOVE
                     self._pre_move_pos = (u.x, u.y)
@@ -315,6 +323,7 @@ class TacticsBattle:
     def end_unit_turn(self) -> None:
         if self._turn_idx < len(self._turn_order):
             self._turn_order[self._turn_idx].has_acted = True
+            self.refresh_status_snapshot()           # exe case 0xb: 行动结束 FUN_004a4e42(1), 在紫河判定之前
             self._zihe_turn_point(self._turn_order[self._turn_idx])
         self._turn_idx += 1
         self._pre_move_pos = None
