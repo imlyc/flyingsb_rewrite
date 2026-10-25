@@ -38,44 +38,84 @@ HEADER_SIZE = 0x44                # 68 bytes
 BLOCK_SIZE = 0xBC                 # 188 bytes per character block
 CHAR_DATA_OFFSET_IN_BLOCK = 4     # block 前 4B 是 identifier, 跳过
 CHARACTERS_START = 0x44
+# ---- 布局 = exe 存档函数 FUN_004ca35d 的写入顺序 (2026-10-25, reverse_engineering/save_io.txt) ----
+# 0x000 头 0x30 (存档栏: 槽号 / 地名 / 队长等级 / 0x8690d0..d8) | 0x030 角色表 16 × 0xbc (exe 0x689d50)
+MAP_ID_OFFSET = 0xBF0             # 当前地图号 (exe 0x654d98)
 MONEY_OFFSET = 0xBF4
 PARTY_COUNT_OFFSET = 0xBF8        # 出场人数 (exe 0x867e84)
-PARTY_LIST_OFFSET = 0xBFC         # 出场名单: 角色槽位 int32 × 人数 (exe 0x654d54), 状态栏/战斗按这个顺序
-PARTY_MAX = 5
-FLAGS_START = 0xC04          # 角色块之后的剧情 flags 位图区 (1 = 已置位)
-FLAGS_END = 0x1C00
+PARTY_LIST_OFFSET = 0xBFC         # 出场名单: 角色槽位 int32 × 10 (exe 0x654d54, 前 人数 个有效), 状态栏/战斗按这个顺序
+PARTY_LIST_LEN = 10
+PARTY_MAX = 5                     # 战斗/状态栏最多 5 人
+LEADER_INDEX_OFFSET = 0xC2C       # 队长在名单里的下标 (exe 0x867e80)
+ITEM_COUNTS_OFFSET = 0xCF8        # 道具数量 int32 × 360, 下标 = 道具 id (exe 0x86b070)
+ITEM_COUNTS_LEN = 360
+LEADER_POS_OFFSET = 0x1298        # 队长 x, y, z>>16, 朝向
+ENCOUNTER_GROUPS_OFFSET = 0x12A8  # 各地图遇敌组 int32 × 500 (exe 0x64191c)
+EVENT_BLOCK_OFFSET = 0x1BFC       # 变长块 1: [len][异或加密的剧情状态] (exe FUN_004cac73), 之后变长块 2 (0x7d72e8, 0x2a4 B)
+EVENT_VARS_VA = 0x80F950          # 事件脚本全局变量数组 (块 1 内, 1023 个 int32); VM 按 VA 访问
 
 
 @dataclass
 class SaveData:
     location: str                              # Big5 解码后的地点名
     flag: int                                  # offset 0x00 的 DWORD
-    state: tuple[int, ...]                     # offset 0x20 的 5 个 DWORD
+    state: tuple[int, ...]                     # offset 0x20 的 5 个 DWORD: 队长等级, 游戏时间 时/分/秒, ?
     money: int
     characters: dict[int, Character]           # slot -> Character (含 gap)
-    flags: bytes = field(repr=False)           # 剧情 flags 位图 (FLAGS_START..FLAGS_END)
     raw: bytes = field(repr=False)
+    event_vars: tuple = field(default=(), repr=False)   # 事件脚本全局变量 (exe 0x80f950 起, decode_event_block)
     inventory: Inventory = field(default_factory=Inventory)  # 背包 (本 remake 自控模型)
     chests_opened: list = field(default_factory=list)         # 已开宝箱 key 列表 "base:x:y"
     world_visited: list = field(default_factory=list)         # 去过的世界地图位置 ID (M 键地图显示)
 
     @property
-    def progress(self) -> int:
-        """章节/剧情进度 (state[2], 实测随进度变化: 新档 0 → 进度档 19)."""
-        return self.state[2] if len(self.state) > 2 else 0
+    def leader_level(self) -> int:
+        """存档栏显示的队长等级 (头 0x20, exe 0x868f40)."""
+        return self.state[0] if self.state else 0
 
-    def flag_bit(self, idx: int) -> bool:
-        return bool((self.flags[idx // 8] >> (idx % 8)) & 1)
+    @property
+    def play_time(self) -> tuple[int, int, int]:
+        """游戏时间 (时, 分, 秒) = 头 0x24..0x2c (exe 0x8690d0..d8, FUN_004c7ed0 按 h:mm:ss 显示).
+        旧代码把 state[2] 当 "剧情进度", 其实是分钟."""
+        return tuple(self.state[1:4]) if len(self.state) >= 4 else (0, 0, 0)
 
-    def set_flag_bits(self) -> list[int]:
-        """所有置 1 的 flag 位下标."""
-        out = []
-        for byte_i, byte in enumerate(self.flags):
-            if byte:
-                for bit in range(8):
-                    if (byte >> bit) & 1:
-                        out.append(byte_i * 8 + bit)
-        return out
+    def event_var(self, va: int) -> int:
+        """事件脚本全局变量 (按 VA, 同 core.event_script 的 gvar 地址); 存档没有则 0."""
+        i = (va - EVENT_VARS_VA) // 4
+        return self.event_vars[i] if 0 <= i < len(self.event_vars) else 0
+
+    def nonzero_event_vars(self) -> dict[int, int]:
+        """{VA: 值} 非零的事件变量."""
+        return {EVENT_VARS_VA + 4 * i: v for i, v in enumerate(self.event_vars) if v}
+
+
+def decode_event_block(data: bytes) -> tuple[int, ...]:
+    """变长块 1 (exe FUN_004cac73): 整块按 dword 异或存档时的 GetTickCount, 密钥 ^ 0x66666666 存在 dword[5].
+    解密后: [0]总长 [1]=0x34 [2]变量区字节 [3]12B 表字节 [4]4B 表字节 [5]密钥 [6..18] 0x34B (exe 0x86ad6c),
+    0x4c 起 事件变量 int32 × (dword[2]/4) (exe 0x80f950), 再 12B × n (0x54b438 表), 4B × m (0x54eadc 表)."""
+    if len(data) < EVENT_BLOCK_OFFSET + 4:
+        return ()
+    n = struct.unpack_from("<i", data, EVENT_BLOCK_OFFSET)[0]
+    start = EVENT_BLOCK_OFFSET + 4
+    if not 0x4c <= n <= len(data) - start:
+        return ()
+    words = list(struct.unpack_from(f"<{n // 4}I", data, start))
+    key = words[5] ^ 0x66666666
+    dec = [w ^ key if i != 5 else w for i, w in enumerate(words)]
+    if dec[0] != n or dec[1] != 0x34:
+        return ()                               # 不是原版加密块 (全 0 的空档等)
+    var_bytes = dec[2]
+    count = var_bytes // 4
+    vals = dec[0x4c // 4:0x4c // 4 + count]
+    return tuple(v - (1 << 32) if v & 0x80000000 else v for v in vals)
+
+
+def item_counts(data: bytes) -> dict[int, int]:
+    """原版背包: 道具 id → 数量 (只含 > 0)."""
+    if len(data) < ITEM_COUNTS_OFFSET + 4 * ITEM_COUNTS_LEN:
+        return {}
+    vals = struct.unpack_from(f"<{ITEM_COUNTS_LEN}i", data, ITEM_COUNTS_OFFSET)
+    return {i: v for i, v in enumerate(vals) if v > 0}
 
 
 def load_save(path: str | Path) -> SaveData:
@@ -104,13 +144,14 @@ def load_save(path: str | Path) -> SaveData:
         ch.skills = [v for v in extra[3:13] if v != UNSET and v >= 0]
         characters[slot] = ch
 
-    # 背包: 原版库存区 (开关位图+变量) 需 exe 逆向才能解码, 此处为 0;
-    # 若文件带本 remake 的 INV trailer 则解析之.
-    inventory = Inventory()
+    # 背包: 带本 remake 的 INV trailer 则用之; 否则读原版道具数量表 (0xCF8, 下标 = 道具 id)
+    inventory = None
     if len(full) > SAVE_SIZE:
-        inv = Inventory.from_bytes(full[SAVE_SIZE:])
-        if inv is not None:
-            inventory = inv
+        inventory = Inventory.from_bytes(full[SAVE_SIZE:])
+    if inventory is None:
+        inventory = Inventory()
+        for iid, n in item_counts(data).items():
+            inventory.add(iid, n)
 
     return SaveData(
         location=location,
@@ -119,7 +160,7 @@ def load_save(path: str | Path) -> SaveData:
         money=money,
         characters=characters,
         inventory=inventory,
-        flags=data[FLAGS_START:FLAGS_END],
+        event_vars=decode_event_block(data),
         raw=data,
     )
 
@@ -157,7 +198,6 @@ def new_game_save() -> SaveData:
         money=800,  # 起始金: 覆盖前3章唯一花费 (c2 嗜酒老人 300G), 避免软锁
         characters=characters,
         inventory=inventory,
-        flags=bytes(FLAGS_END - FLAGS_START),
         raw=bytes(SAVE_SIZE),
     )
 
@@ -239,10 +279,10 @@ if __name__ == "__main__":
 def party_slots(save: "SaveData") -> list[int]:
     """原版存档里的出场名单 (槽位, 按队伍顺序). 读不出合法名单 (重制版 JSON 存档 raw 全 0 等) → []."""
     raw = getattr(save, "raw", b"") or b""
-    if len(raw) < PARTY_LIST_OFFSET + 4 * PARTY_MAX:
+    if len(raw) < PARTY_LIST_OFFSET + 4 * PARTY_LIST_LEN:
         return []
     n = struct.unpack_from("<i", raw, PARTY_COUNT_OFFSET)[0]
-    if not 1 <= n <= PARTY_MAX:
+    if not 1 <= n <= PARTY_LIST_LEN:
         return []
     slots = list(struct.unpack_from(f"<{n}i", raw, PARTY_LIST_OFFSET))
     chars = getattr(save, "characters", {}) or {}

@@ -1,17 +1,11 @@
-"""存档检查 / 对比工具: 打印布局与剧情 flags 位, 或对比两个存档.
+"""存档检查 / 对比工具: 打印布局摘要与事件变量, 或对比两个存档的事件变量.
 
 用法:
-  python -m tools.inspect_save <save.dat>            # 打印布局 + 置位 flag
-  python -m tools.inspect_save <saveA> <saveB>       # 对比两个存档的 flags 差异
+  python -m tools.inspect_save <save.dat>            # 打印布局摘要 + 非零事件变量
+  python -m tools.inspect_save <saveA> <saveB>       # 对比两个存档的事件变量差异
 
-存档布局 (15232 字节, little-endian):
-  0x00  DWORD  标记
-  0x04  24B    地点名 (Big5)
-  0x20  5×DWORD 游戏状态 (state[2] = 剧情进度)
-  0x44  16×0xBC 角色块
-  0xBF4 DWORD  金钱
-  0xC04-0x1C00 剧情 flags 位图 (1 = 已置位)
-  0x1C00+      其它状态表 (待解析)
+布局见 core.save_manager (= exe 存档函数 FUN_004ca35d 的写入顺序): 头 0x30 / 角色表 0x30 / 地图号 0xBF0 / 金钱 0xBF4 /
+队伍 0xBF8 / 道具数量 0xCF8 / 队长坐标 0x1298 / 遇敌组 0x12A8 / 加密的事件状态块 0x1BFC (事件变量 VA 0x80F950 起).
 """
 
 from __future__ import annotations
@@ -23,33 +17,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from core.save_manager import (  # noqa: E402
-    FLAGS_END, FLAGS_START, load_save,
-)
+from core.save_manager import item_counts, load_save, party_slots  # noqa: E402
 
 
 def describe(path: Path) -> None:
     save = load_save(path)
-    bits = save.set_flag_bits()
-    n = (FLAGS_END - FLAGS_START) * 8
+    nz = save.nonzero_event_vars()
     print(f"=== {path.name} ===")
-    print(f"  地点: {save.location}   金钱: {save.money}   进度: {save.progress}")
-    print(f"  状态 state: {save.state}")
-    print(f"  flags 区 0x{FLAGS_START:X}..0x{FLAGS_END:X}: 置位 {len(bits)}/{n}")
-    print(f"  置位下标: {bits[:64]}{' ...' if len(bits) > 64 else ''}")
-    print(f"  raw: {save.flags.hex()[:120]}{'...' if len(save.flags) * 2 > 120 else ''}")
+    print(f"  地点: {save.location}   金钱: {save.money}   队长 Lv{save.leader_level}   游戏时间 {save.play_time}")
+    print(f"  队伍槽位: {party_slots(save)}")
+    print(f"  道具: {sorted(item_counts(save.raw).items())[:40]}")
+    print(f"  事件变量: {len(save.event_vars)} 个, 非零 {len(nz)}")
+    print("  " + "  ".join(f"{va:#x}={v}" for va, v in list(nz.items())[:60]) + (" ..." if len(nz) > 60 else ""))
 
 
 def diff(pa: Path, pb: Path) -> None:
     a, b = load_save(pa), load_save(pb)
-    ba, bb = set(a.set_flag_bits()), set(b.set_flag_bits())
+    va, vb = a.nonzero_event_vars(), b.nonzero_event_vars()
     print(f"=== diff {pa.name} -> {pb.name} ===")
-    print(f"  进度: {a.progress} -> {b.progress}")
-    print(f"  置位数: {len(ba)} -> {len(bb)}")
-    added = sorted(bb - ba)
-    removed = sorted(ba - bb)
-    print(f"  新增置位 ({len(added)}): {added[:80]}{' ...' if len(added) > 80 else ''}")
-    print(f"  取消置位 ({len(removed)}): {removed[:80]}{' ...' if len(removed) > 80 else ''}")
+    keys = sorted(set(va) | set(vb))
+    changed = [(k, va.get(k, 0), vb.get(k, 0)) for k in keys if va.get(k, 0) != vb.get(k, 0)]
+    print(f"  事件变量变化 ({len(changed)}):")
+    for k, x, y in changed[:120]:
+        print(f"    {k:#x}: {x} -> {y}")
 
 
 def main() -> int:

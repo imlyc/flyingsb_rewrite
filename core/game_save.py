@@ -1,6 +1,6 @@
 """整局存档 (remake 自有格式).
 
-原版 `.dat` (15232B) 只含**角色/金钱/剧情 flags**, 不含本 remake 的背包/宝箱/世界访问/
+原版 `.dat` (15232B) 含角色/金钱/队伍/道具数量/加密的事件变量 (布局见 core.save_manager), 不含本 remake 的背包/宝箱/世界访问/
 剧情节点进度, 故此处用独立 JSON 存档 (可读、可手改), 落在 `<repo>/saves/saveN.json`:
 
     {version, saved_at, place, world:{base,x,y}, save:{...}, story:{done,flags}}
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from core.character import TOTAL_SLOTS, Character
 from core.inventory import Inventory
-from core.save_manager import FLAGS_END, FLAGS_START, SAVE_SIZE, SaveData
+from core.save_manager import SAVE_SIZE, SaveData
 
 ROOT = Path(__file__).resolve().parents[1]
 SAVE_DIR = ROOT / "saves"
@@ -137,7 +137,7 @@ def save_game(save: SaveData, director_state, base: str, x: int, y: int,
             "flag": save.flag,
             "state": list(save.state),
             "money": save.money,
-            "flags": save.flags.hex(),
+            "event_vars": list(save.event_vars),    # 原版事件变量 (读原版档才有); 旧档的 "flags" 字段是错位的字节, 弃用
             "characters": chars,
             "inventory": [[iid, n] for iid, n in save.inventory.sorted()],
             "chests_opened": list(save.chests_opened),
@@ -194,8 +194,7 @@ def load_game(slot: int) -> LoadedGame | None:
         inventory=inv,
         chests_opened=list(s.get("chests_opened") or []),
         world_visited=list(s.get("world_visited") or []),
-        flags=bytes.fromhex(s["flags"]) if s.get("flags") else
-        bytes(FLAGS_END - FLAGS_START),
+        event_vars=tuple(int(v) for v in (s.get("event_vars") or ())),
         raw=bytes(SAVE_SIZE),
     )
     w = d.get("world", {})
