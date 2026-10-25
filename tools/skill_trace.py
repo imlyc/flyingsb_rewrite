@@ -60,7 +60,7 @@ def main():
     ap.add_argument('--caster', default='紫河'); ap.add_argument('--caster-idx', type=int, default=4, help='原版实录里施法者的实体下标 (队伍位置)')
     ap.add_argument('--enemy-dx', type=int, default=-1); ap.add_argument('--enemy-dy', type=int, default=2)
     ap.add_argument('--facing', default='down'); ap.add_argument('--enemy-facing', default=None, help='敌人朝向 (受击推开方向取决于它)'); ap.add_argument('--more-enemies', default='', help='更多敌人 dx,dy;dx,dy (相对施法者)'); ap.add_argument('--seed', type=int, default=1)
-    ap.add_argument('--ally-dx', type=int); ap.add_argument('--ally-dy', type=int, help='加一个队友 (我方目标技能用)')
+    ap.add_argument('--ally-facing', default=None); ap.add_argument('--ally-dx', type=int); ap.add_argument('--ally-dy', type=int, help='加一个队友 (我方目标技能用)')
     ap.add_argument('--cursor-dx', type=int); ap.add_argument('--cursor-dy', type=int, help='光标相对施法者格 (默认敌人格, 失败回施法者)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
     a = ap.parse_args()
@@ -69,13 +69,15 @@ def main():
     players = [p]
     if a.ally_dx is not None and (a.ally_dx, a.ally_dy) != (0, 0):      # (0,0) = 目标就是施法者自己
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
-        if a.skill in (0x09, 0x2b):             # M凤凰 复活术 / 回生舞步: 队友得是倒下的才是目标
+        if a.skill in (0x09, 0x2b, 0x0f):       # M凤凰 复活术 / 回生舞步 / 甦生: 队友得是倒下的才是目标
             ally.hp = 0; ally.death_anim_time_ms = 0
     es = [e] + [_unit(f'enemy{i}', 15 + int(t.split(',')[0]), 53 + int(t.split(',')[1]), is_player=False, agile=1)
                 for i, t in enumerate(x for x in a.more_enemies.split(';') if x)]
     b = TacticsBattle(players=players, enemies=es, battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
                       player_positions=[(u.x, u.y) for u in players], enemy_positions=[(u.x, u.y) for u in es])
     p.facing = FACING[a.facing]
+    if a.ally_facing and len(players) > 1:
+        players[1].facing = FACING[a.ally_facing]
     if a.skill == 0x13:                         # 召喚精靈: 实录目标是自己/队友 → 回血精灵, 否则攻击精灵
         b.spirit_pick = 'ally' if a.ally_dx is not None else 'enemy'
     if a.enemy_facing:

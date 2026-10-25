@@ -725,7 +725,7 @@ def _revive_think(e: "Entity", eng: "Engine") -> None:
     age = ud['age']
     if ud['state'] == 0:
         if age < 0x28 and age & 1:
-            _spawn_gather(battle, t)
+            _spawn_gather(battle, t, ud['coord'].user_data.get('seq_signal', False))
         if age > 0x56:
             _sfx(battle, 0xc5)
             _revive(battle, ud['coord'].user_data['caster'], t, full=False)
@@ -749,7 +749,7 @@ def _attach_unit_seq(battle, unit, seq) -> None:
     battle.engine.attach_seq(unit.entity, tuple_to_bytecode(seq))
 
 
-def _spawn_gather(battle, t) -> None:
+def _spawn_gather(battle, t, birth_think: bool = False) -> None:
     """FUN_004fb6a7: 目标 ±(32..63, 24..47) z64, 落地后聚向目标, seq 656abc[rand&3]."""
     x, y = _pos(t)
     u = _rand(battle) & 31
@@ -760,8 +760,10 @@ def _spawn_gather(battle, t) -> None:
         ox = -ox
     if not (_rand(battle) & 1):
         oy = -oy
-    _fx(battle, _gather_think, x + ox, y + oy, 64 * FP, FEATHER_SEQS[_rand(battle) & 3], gather=True, tx=x, ty=y,
-        vx0=0, vy0=0, state=0)
+    e = _fx(battle, _gather_think, x + ox, y + oy, 64 * FP, FEATHER_SEQS[_rand(battle) & 3], gather=True, tx=x, ty=y,
+            vx0=0, vy0=0, state=0)
+    if birth_think:
+        _gather_think(e, battle.engine)         # 池序在控制体之后 → 出生 tick 就 think (实录 mina_0f 首帧 z62)
 
 
 def _spawn_revive(battle, caster, coord, targets) -> None:
