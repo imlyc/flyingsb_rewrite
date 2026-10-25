@@ -109,3 +109,65 @@ def test_status_immunity():
     b = _battle([p], [e])
     p.attack_cur = p.attack_normal
     assert all(NA.roll_status(b, p, e) is None for _ in range(100))
+
+
+# ---------------- 远程普攻 (core.ranged_attack) ----------------
+import pytest
+from types import SimpleNamespace
+
+
+def _run_attack(b, n=3000):
+    from scenes.battle.update import _tick_reactions
+    from core.attack_seq import ATTACK_TICK_MS
+    stub = SimpleNamespace(battle=b)
+    for _ in range(n):
+        b.engine.tick()
+        _tick_reactions(stub, ATTACK_TICK_MS)
+        if b._pending_turn_end:
+            return True
+    return False
+
+
+@pytest.mark.parametrize('name,weapon,idx,dist', [
+    ('猪八戒', 145, 24, 3), ('猪八戒', 146, 25, 3), ('猪八戒', 148, 27, 3), ('猪八戒', 149, 28, 3), ('猪八戒', 150, 29, 3),
+    ('猪八戒', 151, 30, 3), ('猪八戒', 152, 31, 3),
+    ('破无', 176, 64, 3), ('破无', 179, 67, 3), ('破无', 183, 70, 3),
+    ('捕山', 184, 72, 3), ('捕山', 186, 74, 2), ('捕山', 187, 75, 3), ('捕山', 189, 77, 2), ('捕山', 190, 78, 3),
+])
+def test_ranged_attack_finishes_and_damages(name, weapon, idx, dist):
+    p = _u(name, 15, 53, agile=99, weapon=weapon)
+    p.facing = (0, 1)
+    e = _u('e', 15, 53 + dist, is_player=False, agile=1)
+    b = _battle([p], [e])
+    assert b.enter_attack_aim()
+    assert p.attack_cur == idx
+    b.aim_cursor = (15, 53 + dist)
+    if not b.confirm_attack_aim():
+        b.aim_cursor = next(c for c in b.aim_attack_range if e.x == c[0])
+        assert b.confirm_attack_aim()
+    assert _run_attack(b), f'{idx} 没收尾'
+    assert e.hp < 600 or e.hp == 600 and any(ev.miss for ev in b.damage_events)
+
+
+def test_ranged_char_melee_when_adjacent():
+    p = _u('猪八戒', 15, 53, agile=99, weapon=145)
+    p.facing = (0, 1)
+    e = _u('e', 15, 54, is_player=False, agile=1)
+    b = _battle([p], [e])
+    assert b.enter_attack_aim() and p.attack_cur == 91
+    b.aim_cursor = (15, 54)
+    assert b.confirm_attack_aim()
+    assert _run_attack(b)
+
+
+def test_zihe_form3_leap():
+    z = _u('紫河', 15, 53, agile=99, acc=(0x12a, 0x144))
+    z.sprite_key = 'ps_CJAH000'
+    z.facing = (0, 1)
+    e = _u('e', 15, 54, is_player=False, agile=1)
+    b = _battle([z], [e])
+    assert z.attack_normal == 90
+    assert b.enter_attack_aim()
+    b.aim_cursor = (15, 54)
+    assert b.confirm_attack_aim()
+    assert _run_attack(b)

@@ -142,6 +142,10 @@ class TacticsBattle:
         # 技能 seq 专属信号 (jump -1000..-1005): exe dispatcher 在这些 case 播挥击音 / 登记命中音
         # (DAT_006566c0 → engine.swing_sound, IMPACT 时播). 表见 core.skill_seq.SKILL_SIGNAL_*.
         # 放在 coord 拦截之前: 破天舞 cdit1_g0 挥刀的 -1001 也要播 (coord 只吞 IMPACT/END).
+        if sig <= -1000 and unit.pending_skill_id is None and getattr(unit, 'ra_coord', None) is not None:
+            from core.ranged_attack import on_signal as _ra_signal
+            if _ra_signal(self, unit, sig):          # 远程普攻专用信号 (RA_*)
+                return
         if sig <= -1000 and unit.pending_skill_id is not None:
             from core.skill_seq import skill_signal_sounds
             play, hit = skill_signal_sounds(unit.pending_skill_id, sig)

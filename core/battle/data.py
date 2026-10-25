@@ -161,6 +161,7 @@ class BattleUnit:
     attack_melee: int | None = None
     attack_cur: int | None = None
     zihe: dict | None = None         # 紫河变身状态 (core.normal_attack.zihe_setup)
+    ra_coord: object | None = None   # 远程普攻协调实体 (core.ranged_attack)
     flicker: dict | None = None      # 变身闪烁 {t, other, to} (渲染按 FLICKER_MASK 选 sprite)
     # 状态 (exe 角色表状态字 A @0x689d58 的 bit + nibble 计数; 见 core.battle.status)
     status_bits: int = 0

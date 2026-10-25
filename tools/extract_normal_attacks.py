@@ -118,6 +118,14 @@ def main() -> None:
         t = e['seq_table']
         if t is not None and t not in tables:
             tables[t] = [exe.seq(exe.u32(t + 4 * d)) for d in range(4)]
+    # 远程普攻 / 紫河第三形态 (core.ranged_attack) 用到的 seq: 4 方向表 + 单条
+    extra_tables = [0x67439c, 0x6747dc, 0x674f5c, 0x67511c, 0x6780bc, 0x67823c, 0x677c8c, 0x677e3c, 0x677ecc,
+                    0x67895c, 0x678b4c, 0x678d1c, 0x678e1c, 0x678ecc, 0x678f0c, 0x67442c, 0x674fec, 0x67a7e4,
+                    0x655960]
+    for t in extra_tables:
+        if t not in tables:
+            tables[t] = [exe.seq(exe.u32(t + 4 * d)) for d in range(4)]
+    singles = {a: exe.seq(a) for a in (0x674ffc, 0x67512c, 0x656014, 0x655fa4, 0x656084, 0x66a870)}
     items = json.loads((ROOT / 'assets' / 'items_table.json').read_text())
     it = items if isinstance(items, list) else items.get('items', items)
     pairs = it.items() if isinstance(it, dict) else enumerate(it)
@@ -141,6 +149,9 @@ def main() -> None:
         for s in dirs:
             lines.append(f'        {s!r},')
         lines.append('    ],')
+    lines += ['}', '', '# 单条 seq (地址 → seq)', 'SEQS: dict[int, list[tuple]] = {']
+    for a, sq in singles.items():
+        lines.append(f'    {a:#x}: {sq!r},')
     lines += ['}', '', '# 武器道具 id → (普攻 idx, 武器类型, 可装备角色位)', 'WEAPON_ATTACK: dict[int, tuple[int, int, int]] = {']
     for iid, (a, t, m) in sorted(weapons.items()):
         lines.append(f'    {iid}: ({a}, {t:#x}, {m:#x}),')

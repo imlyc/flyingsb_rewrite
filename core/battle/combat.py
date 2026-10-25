@@ -200,7 +200,8 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     if skill_id is None and attacker.is_player and attacker.attack_cur is not None:
         from core.normal_attack import entry as _na_entry
         na_entry = _na_entry(attacker.attack_cur)
-        if na_entry.kind != 'doit':
+        from core.ranged_attack import handles as _ra_handles
+        if na_entry.kind != 'doit' and not _ra_handles(na_entry.idx):
             na_entry = None
     if na_entry is not None:
         # 普攻表项 (core.normal_attack): 挥击音在其 seq 信号播, 命中音登记 (0 = 攻击开始就登记)
@@ -240,9 +241,14 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     attacker.pending_impact_count = 0
     # 数 seq 里 IMPACT 总数, 给 apply_pending_attack 判断"是否最后一段"
     seq_tuples = None
+    ra = False
     if na_entry is not None:
-        from core.normal_attack import seq_for as _na_seq
-        seq_tuples = _na_seq(na_entry.idx, attacker.facing)
+        from core.ranged_attack import handles as _ra_handles, cast_seq as _ra_cast
+        if _ra_handles(na_entry.idx):
+            seq_tuples, ra = _ra_cast(na_entry.idx, attacker.facing), True
+        else:
+            from core.normal_attack import seq_for as _na_seq
+            seq_tuples = _na_seq(na_entry.idx, attacker.facing)
     if seq_tuples is None:
         seq_tuples = attack_seq_for(attacker.name, attacker.facing, skill_id)
     attacker.pending_impact_total = max(1, sum(1 for t in seq_tuples
@@ -279,6 +285,9 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     else:
         battle.engine.attach_seq(attacker.entity, seq_bc)
         attacker.cast_hold = hold
+        if ra:
+            from core.ranged_attack import on_attach as _ra_attach
+            _ra_attach(battle, attacker)          # 远程普攻 / 紫河第三形态: 协调实体 (core.ranged_attack)
 
 
 def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
