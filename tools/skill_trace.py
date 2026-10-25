@@ -76,6 +76,8 @@ def main():
     b = TacticsBattle(players=players, enemies=es, battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
                       player_positions=[(u.x, u.y) for u in players], enemy_positions=[(u.x, u.y) for u in es])
     p.facing = FACING[a.facing]
+    if a.skill == 0x13:                         # 召喚精靈: 实录目标是自己/队友 → 回血精灵, 否则攻击精灵
+        b.spirit_pick = 'ally' if a.ally_dx is not None else 'enemy'
     if a.enemy_facing:
         for u in es:
             u.facing = FACING[a.enemy_facing]

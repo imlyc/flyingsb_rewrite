@@ -211,6 +211,10 @@ def on_attach(battle, caster) -> None:
     if caster.pending_skill_id != 0x13:
         return
     cand = _targets(battle, caster, 0x13)
+    pick = getattr(battle, 'spirit_pick', None)          # 调试/实录对照: 'ally' / 'enemy' 强制阵营
+    if pick is not None:
+        cand = [u for u in cand if (u.is_player == caster.is_player) == (pick == 'ally')] or cand
+        cand = [u for u in cand if u is not caster] or cand
     t = cand[battle.rng.randrange(len(cand))] if cand else None
     caster.mina_spirit_target = t
     if t is not None:
@@ -709,8 +713,9 @@ def _drop_feather(battle, src: "Entity") -> None:
     """FUN_004fbfb6: 精灵处 z+48 落羽 (vx/vy 0x4000/(rand&3+1), vz -2, 无加速)."""
     vx = 0x4000 // ((_rand(battle) & 3) + 1)
     vy = 0x4000 // ((_rand(battle) & 3) + 1)
-    _fx(battle, _drop_think, src.x, src.y, _getz(src) + 0x300000, FEATHER_SEQS[_rand(battle) & 3], drop=True, age=0,
-        **_motion(m=0x71, vx=vx, vy=vy, vz=-2 * FP, tx=0x7fffffff, ty=0x7fffffff))
+    e = _fx(battle, _drop_think, src.x, src.y, _getz(src) + 0x300000, FEATHER_SEQS[_rand(battle) & 3], drop=True,
+            age=0, **_motion(m=0x71, vx=vx, vy=vy, vz=-2 * FP, tx=0x7fffffff, ty=0x7fffffff))
+    _drop_think(e, battle.engine)            # 池序在精灵之后 → 出生 tick 就 think (实录 mina_13 首帧 z46)
 
 
 def _drop_think(e: "Entity", eng: "Engine") -> None:
