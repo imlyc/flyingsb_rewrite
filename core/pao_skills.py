@@ -157,6 +157,8 @@ def _chiri_think(e: "Entity", eng: "Engine") -> None:
     ud = e.user_data
     if 'chiri' not in ud:
         return
+    if ud.pop('chiri_pending', False):
+        eng.attach_seq(e, tuple_to_bytecode(CHIRI_SEQ))
     e.x += ud['vx']
     e.y += ud['vy']
     ud['vz'] -= CHIRI_GRAVITY
@@ -166,8 +168,9 @@ def _chiri_think(e: "Entity", eng: "Engine") -> None:
         eng.destroy(e)
 
 
-def _chiri(battle, victim) -> None:
-    """FUN_004e52de: 8 粒碎屑."""
+def _chiri(battle, victim, birth_think: bool = True) -> None:
+    """FUN_004e52de: 8 粒碎屑. birth_think=False: 由施法者自己 seq 的信号生成 (远程普攻 八戒 25-27 / 捕山),
+    出生当 tick 不 think, 下 tick 才挂 seq → 寿命 11 (实录 na0_19 / na1_48)."""
     vx0, vy0 = hit_pos(victim)
     for _ in range(CHIRI_COUNT):
         vx = _rand(battle) * 16 - 0x40000
@@ -179,8 +182,11 @@ def _chiri(battle, victim) -> None:
         e.user_data.update(kind='hit_effect', projectile=True, chiri=True, vx=vx, vy=vy, vz=0, ez=CHIRI_Z << 16)
         e.z = -e.user_data['ez']
         # 实录 pao_2f: 出生当 tick 已挂 seq 且首帧只停 1 t, 物理也已走 1 步 (首帧 z 435) → 寿命 10
-        battle.engine.attach_seq(e, tuple_to_bytecode(CHIRI_SEQ))
-        _chiri_think(e, battle.engine)
+        if birth_think:
+            battle.engine.attach_seq(e, tuple_to_bytecode(CHIRI_SEQ))
+            _chiri_think(e, battle.engine)
+        else:
+            e.user_data['chiri_pending'] = True
 
 
 def _ring_think(e: "Entity", eng: "Engine") -> None:

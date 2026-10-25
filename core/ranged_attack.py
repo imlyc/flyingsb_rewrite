@@ -167,7 +167,7 @@ def _done(coord, k: int = 1) -> None:
 
 
 # ---------------- 命中件 ----------------
-def _hit(battle, caster, v, *, face: bool = False, spark: bool = True, chiri: int = 0) -> None:
+def _hit(battle, caster, v, *, face: bool = False, spark: bool = True, chiri: int = 0, birth: bool = True) -> None:
     from core.battle import combat
     from core.pao_skills import _spark, _chiri
     if not v.alive:
@@ -176,7 +176,7 @@ def _hit(battle, caster, v, *, face: bool = False, spark: bool = True, chiri: in
     if spark:
         _spark(battle, caster, v)
     for _ in range(chiri):
-        _chiri(battle, v)
+        _chiri(battle, v, birth)
 
 
 def _float(battle, caster, v) -> None:
@@ -244,13 +244,14 @@ def _proj_think(e: "Entity", eng: "Engine") -> None:
     ud = e.user_data
     if 'ra_proj' not in ud:
         return
-    if ud.get('accel_trail'):                  # 八戒 30: FUN_00500499
+    arrived = _move_axes(e)
+    if ud.get('accel_trail'):                  # 八戒 30: FUN_00500499 先积分, 再按新速度判冒烟, 最后判到达
         if abs(ud['vx']) <= 0x40000 and abs(ud['vy']) <= 0x40000:
             _smoke(ud['battle'], e)
         else:
             ud['ax'] <<= 1
             ud['ay'] <<= 1
-    if _move_axes(e):
+    if arrived:
         ud['on_arrive']()
         eng.destroy(e)
 
@@ -370,7 +371,7 @@ def _pig_hitscan_hit(battle, caster, coord) -> None:
     from core.pao_skills import _chiri
     for v in coord.user_data['targets']:
         _hit(battle, caster, v, face=True)
-        _chiri(battle, v)
+        _chiri(battle, v, False)
 
 
 def _pig_aoe5_hit(battle, caster, coord) -> None:
@@ -461,7 +462,7 @@ def _bosan_multi_hit(battle, caster, coord) -> None:
     _sfx(battle, SFX_GUN)
     for v in ud['targets']:
         _float(battle, caster, v)
-        _hit(battle, caster, v, chiri=ud['arg'])
+        _hit(battle, caster, v, chiri=ud['arg'], birth=False)
     _sfx(battle, SFX_GUN)
     _sfx(battle, 0xbd)
     _sfx(battle, SFX_GUN)
@@ -475,7 +476,7 @@ def _bosan_seq_hit(battle, caster, coord) -> None:
         v = targets[ud['n']]
         ud['n'] += 1
         _float(battle, caster, v)
-        _hit(battle, caster, v, chiri=ud['arg'])
+        _hit(battle, caster, v, chiri=ud['arg'], birth=False)
     _sfx(battle, SFX_GUN)
     _sfx(battle, 0xbf)
 
