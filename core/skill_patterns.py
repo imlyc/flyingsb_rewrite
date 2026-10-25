@@ -52,7 +52,11 @@ def skill_template_idx(skill_id: int) -> int | None:
 
 def compute_skill_pattern(u: BattleUnit, m: BattleMap, skill_id: int) -> set[tuple[int, int]]:
     """AIM 阶段 cursor 可游走的 tile 集合 (相对 unit, 按 facing 旋转)."""
-    tmpl_idx = SKILL_TEMPLATE.get(skill_id)
+    return compute_template_pattern(u, m, SKILL_TEMPLATE.get(skill_id))
+
+
+def compute_template_pattern(u: BattleUnit, m: BattleMap, tmpl_idx: int | None) -> set[tuple[int, int]]:
+    """按动作模板号 (技能表 / 普攻表共用 ACTION_TEMPLATES) 算光标可游走格."""
     if tmpl_idx is None or tmpl_idx >= len(ACTION_TEMPLATES):
         return set()
     p1 = ACTION_TEMPLATES[tmpl_idx][0]
@@ -79,7 +83,11 @@ def compute_skill_strike(
 ) -> set[tuple[int, int]]:
     """确认 cursor 后实际命中的 tile 集合 (相对 cursor, 按 facing 旋转).
     m 给出时, "全屏"型 pattern (set2 全 4) 退化为整张 map."""
-    tmpl_idx = SKILL_TEMPLATE.get(skill_id)
+    return compute_template_strike(u, cursor, SKILL_TEMPLATE.get(skill_id), m)
+
+
+def compute_template_strike(u: BattleUnit, cursor: tuple[int, int], tmpl_idx: int | None,
+                            m: BattleMap | None = None) -> set[tuple[int, int]]:
     if tmpl_idx is None or tmpl_idx >= len(ACTION_TEMPLATES):
         return {cursor}
     p2 = ACTION_TEMPLATES[tmpl_idx][1]

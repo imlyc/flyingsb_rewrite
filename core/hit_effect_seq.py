@@ -222,7 +222,8 @@ def _resolve_first_spawn_style(attacker_name: str | None, attacker_form: int | N
 
 def pick_hit_effects(attacker_name: str | None,
                      attacker_form: int | None,
-                     attacker_facing: tuple[int, int]) -> list[HitEffectSpec]:
+                     attacker_facing: tuple[int, int],
+                     style: str | None = None) -> list[HitEffectSpec]:
     """主入口. 返回 IMPACT 时该 spawn 的 effect 列表 (顺序 = 渲染顺序, 后画的在上).
 
     分发逻辑:
@@ -234,7 +235,8 @@ def pick_hit_effects(attacker_name: str | None,
     """
     direction = facing_to_dir(attacker_facing)
 
-    style = _resolve_first_spawn_style(attacker_name, attacker_form)
+    if style is None:                       # style 给定 = 普攻表项的命中特效 (core.normal_attack)
+        style = _resolve_first_spawn_style(attacker_name, attacker_form)
     atlas, by_dir, ticks = _STYLE_PRESETS[style]
 
     return [

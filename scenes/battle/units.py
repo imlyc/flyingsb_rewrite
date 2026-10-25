@@ -81,7 +81,16 @@ def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         r = rect.inflate(-8, -8)
         body_cy = cy - int(round(u.wind_lift))
         if u.sprite_key:
-            _draw_live_sprite(scene, u, cx, body_cy)
+            from core.normal_attack import flicker_sprite
+            fk = flicker_sprite(u)                  # 紫河变身闪烁: 这一 tick 显示新/旧形态
+            if fk is not None and fk != u.sprite_key:
+                saved, u.sprite_key = u.sprite_key, fk
+                try:
+                    _draw_live_sprite(scene, u, cx, body_cy)
+                finally:
+                    u.sprite_key = saved
+            else:
+                _draw_live_sprite(scene, u, cx, body_cy)
         else:
             color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
             pygame.draw.rect(scene.surface, color, r)
@@ -266,7 +275,7 @@ def _resolve_attack_frame(scene: "BattleScene", u, cs):
     # 路径选择: 抽象槽 {0,1,5} (= ATK_A/B/C 普攻, 走 per-character atlas remap), 其余都是
     # 真实全局 atlas idx (技能 seq + 敌人 + 三藏 SAM_ATK_B). 注意 csam_g0=7 < 8 也是真实 atlas,
     # 旧的 ">=8" 阈值会把它误判成 per-character → 生命之火 (atlas 7) 方向/sprite 全错.
-    is_global_atlas = slot_lo not in (0, 1, 5)
+    is_global_atlas = slot_lo not in (0, 1, 5) or bool(ent.user_data.get('global_atlas'))   # 普攻表原 seq: 槽号即全局图集
     if is_global_atlas and fm_frame_idx is not None:
         atlas_key = atlas_resource(slot_lo)
         if atlas_key:

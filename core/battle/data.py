@@ -156,6 +156,12 @@ class BattleUnit:
     # 已学技能 id 列表 (顺序 = 显示顺序 = 习得顺序). 玩家创建时由 setup.py 按
     # core.skills.CHARACTER_SKILL_POOL 初始化, 敌方留空. 后续 level-up 解锁动这个字段.
     known_skills: list[int] = field(default_factory=list)
+    # 普攻 (core.normal_attack): +0x74 / +0x78 普攻表 idx (None = 非玩家/未接), 本次出招用的 idx
+    attack_normal: int | None = None
+    attack_melee: int | None = None
+    attack_cur: int | None = None
+    zihe: dict | None = None         # 紫河变身状态 (core.normal_attack.zihe_setup)
+    flicker: dict | None = None      # 变身闪烁 {t, other, to} (渲染按 FLICKER_MASK 选 sprite)
     # 状态 (exe 角色表状态字 A @0x689d58 的 bit + nibble 计数; 见 core.battle.status)
     status_bits: int = 0
     status_turns: dict[int, int] = field(default_factory=dict)

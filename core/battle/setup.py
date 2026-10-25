@@ -39,7 +39,7 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
     base_atk = ch.Unknow_5 if ch.Unknow_5 > 0 else max(10, ch.Power)
     base_def = ch.Unknow_6 if ch.Unknow_6 > 0 else max(5, ch.Wisdom // 2)
     eb = _equip_bonus(ch)
-    return BattleUnit(
+    u = BattleUnit(
         name=name,
         level=ch.Level,
         max_hp=ch.MaxHP + eb.get("hp", 0), hp=max(1, ch.CurrentHP + eb.get("hp", 0)),
@@ -55,6 +55,13 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
         # 已学技能: 优先用存档角色块里解出的真实列表 (原版存档载入时), 否则按学习表推算
         known_skills=list(getattr(ch, "skills", []) or []) or _default_known_skills(name, ch.Level),
     )
+    # 普攻: 武器决定普攻表项 (+0x74), 贴身项 (+0x78); 紫河按饰品预生成变身角色卡 (core.normal_attack)
+    from core import normal_attack as NA
+    weapon = None if ch.Hand in (0xFFFFFFFF, -1) else ch.Hand
+    acc = tuple(a for a in (ch.Accessories1, ch.Accessories2) if a not in (0xFFFFFFFF, -1))
+    u.attack_normal, u.attack_melee = NA.attack_ids(name, weapon, acc)
+    NA.zihe_setup(u, acc)
+    return u
 
 
 def _default_known_skills(name: str, level: int = 99) -> list[int]:

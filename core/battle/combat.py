@@ -77,6 +77,10 @@ def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
     # 结算时机: 单体/同时 AOE = 该飘字进 flash (update._tick_settlement); 大金刚 = 全砸完批量.
     old_hp = defender.hp
     defender.hp = max(0, old_hp - dmg)
+    # 紫河: 被类型标志 0x2000000 的敌人打中且未倒 → 待变身 (exe FUN_004a6efe 置 DAT_007e2d4c)
+    z = getattr(defender, 'zihe', None)
+    if z is not None and not z['transformed'] and defender.hp > 0 and (attacker.type_flags & 0x2000000):
+        z['pending'] = True
     defender.shown_hp_override = old_hp
     defender.settle_pending = True
     push_damage_event(battle, defender, DamageEvent(dmg, defender.hp, defender.x, defender.y))
@@ -99,7 +103,12 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
     from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
     from core.skill_seq import has_skill_impact_extra, skill_impact_extra_seq
     from core.sprites.base import TILE_W, TILE_H
-    specs = hit_effect_specs(defender, attacker.name)
+    style = None
+    if attacker.pending_skill_id is None and attacker.is_player and attacker.attack_cur is not None:
+        from core.normal_attack import entry as _na_entry
+        fx = _na_entry(attacker.attack_cur).fx
+        style = fx.upper() if fx else None
+    specs = hit_effect_specs(defender, attacker.name, style)
     cx = defender.x * TILE_W + TILE_W // 2
     cy = defender.y * TILE_H + TILE_H // 2
     for spec in specs:
@@ -132,12 +141,13 @@ def _spawn_skill_extra_effect(battle: "TacticsBattle", world_x: int, world_y: in
     battle.engine.attach_seq(e, tuple_to_bytecode(seq_tuples))
 
 
-def hit_effect_specs(defender: BattleUnit, attacker_name: str | None) -> list:
+def hit_effect_specs(defender: BattleUnit, attacker_name: str | None, style: str | None = None) -> list:
     """命中产生的特效 spec 列表 (et00 紫星/长椭圆 + ef010 红刺). 供 _emit_hit_effect 及召唤技
-    (如月兔累积受击特效) 共用 — 受击特效"放哪些"是一处真值. hit-fx 朝向 = victim 原朝向反向."""
+    (如月兔累积受击特效) 共用 — 受击特效"放哪些"是一处真值. hit-fx 朝向 = victim 原朝向反向.
+    style: 普攻表项的命中特效 ('STARBURST'/'OVAL'/'CLAW'), None = 按角色旧规则."""
     from core.hit_effect_seq import pick_hit_effects
     ef_facing = (-defender.facing[0], -defender.facing[1])
-    return pick_hit_effects(attacker_name, None, ef_facing)
+    return pick_hit_effects(attacker_name, None, ef_facing, style)
 
 
 def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, spec,
@@ -186,7 +196,18 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # cid 0-7 组=jump -1000, cid 8-15 组=jump -1001 (exe wrapper FUN_004f3230 vs 94a0). 见 tactics 信号路由.
     # 技能/敌人不在这里设 (swing 复位 -1).
     attacker.pending_draw_sound = -1
-    if skill_id is None and attacker.is_player:
+    na_entry = None
+    if skill_id is None and attacker.is_player and attacker.attack_cur is not None:
+        from core.normal_attack import entry as _na_entry
+        na_entry = _na_entry(attacker.attack_cur)
+        if na_entry.kind != 'doit':
+            na_entry = None
+    if na_entry is not None:
+        # 普攻表项 (core.normal_attack): 挥击音在其 seq 信号播, 命中音登记 (0 = 攻击开始就登记)
+        battle.engine.swing_sound = na_entry.hit[0] if na_entry.hit else -1
+        attacker.pending_draw_sound = na_entry.swing[0] if na_entry.swing else -1
+        attacker.pending_draw_signal = na_entry.swing[1] if na_entry.swing else -1
+    elif skill_id is None and attacker.is_player:
         from core.character_sprites import char_id_for
         cid = char_id_for(attacker.name)
         draw, swing = PLAYER_ATTACK_SOUNDS.get(
@@ -218,8 +239,14 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     attacker.pending_attack_dmg = 0
     attacker.pending_impact_count = 0
     # 数 seq 里 IMPACT 总数, 给 apply_pending_attack 判断"是否最后一段"
-    seq_tuples = attack_seq_for(attacker.name, attacker.facing, skill_id)
-    attacker.pending_impact_total = max(1, sum(1 for t in seq_tuples if t[0] == 'impact'))
+    seq_tuples = None
+    if na_entry is not None:
+        from core.normal_attack import seq_for as _na_seq
+        seq_tuples = _na_seq(na_entry.idx, attacker.facing)
+    if seq_tuples is None:
+        seq_tuples = attack_seq_for(attacker.name, attacker.facing, skill_id)
+    attacker.pending_impact_total = max(1, sum(1 for t in seq_tuples
+                                               if t[0] == 'impact' or (t[0] == 'jump' and t[1] == -100)))
     # 创建/复用 entity, 关联回 BattleUnit (signal handler 用)
     if attacker.entity is None:
         attacker.entity = battle.engine.spawn()
@@ -229,6 +256,8 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # 清掉上一次攻击残留的 render snapshot (_move_start_*, _fm_total_ticks 等),
     # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
     attacker.entity.user_data = {'unit': attacker}
+    if na_entry is not None:
+        attacker.entity.user_data['global_atlas'] = True     # exe 原 seq: fm 槽号是全局图集号 (渲染不走 ATK_A/B/C 抽象槽)
     # 施法姿保持 (见 BattleUnit.cast_hold): 有帧 op 的 seq 播完后停在最后一帧直到攻击收尾 (= exe 清 0x10000).
     hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in seq_tuples)
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
@@ -471,6 +500,10 @@ def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: Batt
         return
     apply_damage(battle, attacker, target, dmg, "无效" if dmg == 0 and raw > 0 else "",
                  face_attacker=face_attacker)
+    # 普攻表项附带异常 (武器 flags): 命中 23% 掷骰 (exe FUN_004a69e7(.., 0x17))
+    if dmg > 0 and attacker.is_player and attacker.pending_skill_id is None and attacker.attack_cur is not None:
+        from core.normal_attack import roll_status
+        roll_status(battle, attacker, target)
 
 
 def clear_pending_attack(attacker: BattleUnit) -> None:

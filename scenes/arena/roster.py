@@ -25,9 +25,9 @@ _PLAYER_AGILE = {
 }
 
 
-def build_player_unit(name: str) -> BattleUnit:
+def build_player_unit(name: str, weapon: int | None = None, accessories: tuple = ()) -> BattleUnit:
     agile = _PLAYER_AGILE.get(name, 45)
-    return BattleUnit(
+    u = BattleUnit(
         name=name, level=10,
         max_hp=60, hp=60, max_mp=40, mp=40, sg=50,
         attack=24, defence=14, agile=agile,
@@ -37,6 +37,10 @@ def build_player_unit(name: str) -> BattleUnit:
         sprite_key=sprite_resource(name),
         known_skills=default_skills_for(name),
     )
+    from core import normal_attack as NA
+    u.attack_normal, u.attack_melee = NA.attack_ids(name, weapon, accessories)   # 无武器 = 本组第 0 项
+    NA.zihe_setup(u, accessories)
+    return u
 
 
 def build_enemy_unit(name: str) -> BattleUnit:

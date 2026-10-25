@@ -229,6 +229,18 @@ def _tick_anim_engine(scene: "BattleScene", dt_ms: int) -> None:
     while scene._eng_acc_ms >= ATTACK_TICK_MS:
         scene._eng_acc_ms -= ATTACK_TICK_MS
         scene.battle.engine.tick()
+        _tick_flicker(scene.battle)
+
+
+def _tick_flicker(battle) -> None:
+    """紫河变身闪烁 31t (core.normal_attack.FLICKER_MASK)."""
+    from core.normal_attack import FLICKER_TICKS
+    for u in battle.all_units:
+        fl = u.flicker
+        if fl:
+            fl['t'] += 1
+            if fl['t'] >= FLICKER_TICKS:
+                u.flicker = None
 
 
 def _tick_camera(scene: "BattleScene") -> None:

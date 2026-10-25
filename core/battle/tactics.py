@@ -104,6 +104,7 @@ class TacticsBattle:
         self._SIG_END = SIG_END
         self.engine.on('signal', self._on_anim_signal)
         self._place_units(player_positions, enemy_positions)
+        self._zihe_battle_start()
         self._start_round()
 
     def _on_anim_signal(self, source_entity: Entity, sig: int) -> None:
@@ -254,10 +255,35 @@ class TacticsBattle:
         self._log(f"--- 新回合 ({' > '.join(u.name for u in self._turn_order)}) ---")
         self._enter_current()
 
+    def _zihe_turn_point(self, actor: BattleUnit) -> None:
+        """exe FUN_004a4f94 case 0xc (每个行动者开始前): 紫河 (无保温瓶) 轮到自己且已变身 → 变回;
+        否则有待变身标记 → 变身. 换卡即刻生效, 闪烁 31t 只是表现."""
+        from core.normal_attack import zihe_switch
+        for z_u in self.players:
+            z = getattr(z_u, 'zihe', None)
+            if z is None or z['thermos'] or not z_u.alive:
+                continue
+            if z_u is actor and z['transformed']:
+                zihe_switch(z_u, to_beast=False)
+                self._log(f"{z_u.name} 变回人形")
+            elif z['pending'] and not z['transformed']:
+                z['pending'] = False
+                zihe_switch(z_u, to_beast=True)
+                self._log(f"{z_u.name} 变身 (形态 {z['form']})")
+
+    def _zihe_battle_start(self) -> None:
+        """exe FUN_004a31c8 case 5/6: 装了滿的保溫瓶 → 开战闪 31t 变身, 整场保持."""
+        from core.normal_attack import zihe_switch
+        for z_u in self.players:
+            z = getattr(z_u, 'zihe', None)
+            if z is not None and z['thermos']:
+                zihe_switch(z_u, to_beast=True)
+
     def _enter_current(self) -> None:
         while self._turn_idx < len(self._turn_order):
             u = self._turn_order[self._turn_idx]
             if u.alive:
+                self._zihe_turn_point(u)
                 if u.is_player:
                     self.phase = Phase.PLAYER_MOVE
                     self._pre_move_pos = (u.x, u.y)
@@ -427,8 +453,21 @@ class TacticsBattle:
         u = u or self.current
         if skill_id is not None:
             return compute_skill_pattern(u, self.map, skill_id)
+        idx = self._normal_attack_idx(u)
+        if idx is not None:
+            from core.normal_attack import entry
+            from core.skill_patterns import compute_template_pattern
+            return compute_template_pattern(u, self.map, entry(idx).template)
         pattern_fn, _ = get_aim_funcs(u.name)
         return pattern_fn(u, self.map)
+
+    def _normal_attack_idx(self, u: BattleUnit) -> int | None:
+        """普攻表项: 瞄准中 = 进瞄准时定下的 (贴身 → 近身项); 其余 (移动阶段预览) = +0x74 (exe FUN_004a4f94 同)."""
+        if u.attack_normal is None:
+            return None
+        if self.phase == Phase.PLAYER_AIM and u is self.current and self.aim_skill_id is None and u.attack_cur is not None:
+            return u.attack_cur
+        return u.attack_normal
 
     def damage_range(self, cursor: tuple[int, int],
                      u: BattleUnit | None = None,
@@ -441,6 +480,12 @@ class TacticsBattle:
             skill_id = self.aim_skill_id
         if skill_id is not None:
             return {(x, y) for (x, y) in compute_skill_strike(u, cursor, skill_id, self.map)
+                    if self.map.in_bounds(x, y)}
+        idx = self._normal_attack_idx(u)
+        if idx is not None:
+            from core.normal_attack import entry
+            from core.skill_patterns import compute_template_strike
+            return {(x, y) for (x, y) in compute_template_strike(u, cursor, entry(idx).template, self.map)
                     if self.map.in_bounds(x, y)}
         _, strike_fn = get_aim_funcs(u.name)
         return {(x, y) for (x, y) in strike_fn(u, cursor) if self.map.in_bounds(x, y)}
@@ -475,10 +520,16 @@ class TacticsBattle:
         u = self.current
         if self.phase != Phase.PLAYER_MOVE or not u.is_player:
             return False
+        if skill_id is None:
+            # FUN_004a47d3: 开普攻那一刻定普攻项 — 上下左右有可打敌人 → 贴身项 (+0x78), 否则 +0x74
+            from core.normal_attack import current_attack
+            u.attack_cur = current_attack(self, u, aiming=True)
+        self.aim_skill_id = skill_id
+        self.phase = Phase.PLAYER_AIM
         rng = self.attack_range(u, skill_id)
         if not rng:
+            self.phase = Phase.PLAYER_MOVE
             return False
-        self.phase = Phase.PLAYER_AIM
         self.aim_skill_id = skill_id
         self.aim_attack_range = rng
         self.aim_cursor = self._pick_initial_cursor(u, rng)
