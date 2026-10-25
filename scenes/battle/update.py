@@ -230,6 +230,8 @@ def _tick_anim_engine(scene: "BattleScene", dt_ms: int) -> None:
         scene._eng_acc_ms -= ATTACK_TICK_MS
         scene.battle.engine.tick()
         _tick_flicker(scene.battle)
+        from scenes.battle import status_bar
+        status_bar.tick(scene)                   # 状态栏滑入/滑出 (exe FUN_004cf1ed, 每 tick 4px)
 
 
 def _tick_flicker(battle) -> None:

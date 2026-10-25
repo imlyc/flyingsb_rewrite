@@ -18,10 +18,6 @@ if TYPE_CHECKING:
 
 
 # HUD 布局常量 (顶部双卡片)
-HUD_X = 12
-HUD_Y = 12
-HUD_W_CUR = 280
-HUD_W_NEXT = 220
 LOG_H = 100
 
 # 技能二级菜单尺寸 (跨 _draw_skill_submenu + 过渡动画白框落点 + desc 栏共享)
@@ -349,71 +345,9 @@ def draw_skill_desc_bar(scene: "BattleScene") -> None:
 
 
 def draw_hud(scene: "BattleScene") -> None:
-    draw_actor_card(scene, HUD_X, HUD_Y, HUD_W_CUR, 70, scene.battle.current,
-                    label="当前行动", highlight=True)
-    nxt = scene.battle.next_actor()
-    if nxt is not None:
-        draw_actor_card(scene, HUD_X + HUD_W_CUR + 12, HUD_Y, HUD_W_NEXT, 70, nxt,
-                        label="下一行动", highlight=False)
-
-
-def draw_actor_card(scene: "BattleScene", x: int, y: int, w: int, h: int,
-                    u: BattleUnit, label: str, highlight: bool) -> None:
-    rect = pygame.Rect(x, y, w, h)
-    # 半透明底
-    bg = pygame.Surface(rect.size, pygame.SRCALPHA)
-    bg.fill((28, 22, 40, 220))
-    scene.surface.blit(bg, rect)
-    pygame.draw.rect(scene.surface,
-                     scene.HIGHLIGHT if highlight else scene.PANEL_BORDER,
-                     rect, 2 if highlight else 1)
-    avatar = pygame.Rect(x + 6, y + 6, h - 12, h - 12)
-    pygame.draw.rect(scene.surface, u.color, avatar)
-    pygame.draw.rect(scene.surface, (0, 0, 0), avatar, 1)
-    side = (u.name[0] if u.is_player else "敌")
-    t = scene.font.render(side, True, (0, 0, 0))
-    scene.surface.blit(t, t.get_rect(center=avatar.center))
-
-    tx = avatar.right + 10
-    ty = y + 4
-    tag = scene.tiny.render(label, True,
-                            scene.HIGHLIGHT if highlight else scene.DIM)
-    scene.surface.blit(tag, (tx, ty)); ty += 14
-    name_text = f"{u.name}  Lv{u.level}"
-    t = scene.font.render(name_text, True, scene.TEXT)
-    scene.surface.blit(t, (tx, ty)); ty += 22
-    from core.battle import energy
-    sg_type = energy.uses_sg(u)
-    line = f"HP {u.display_hp}/{u.max_hp}"                     # 显示滞后到结算 (见 BattleUnit.display_hp)
-    if not sg_type and u.max_mp > 0:
-        line += f"   MP {u.mp}/{u.max_mp}"                    # exe 状态栏: MaxMP > 0 才画 MP
-    t = scene.small.render(line, True, scene.TEXT)
-    scene.surface.blit(t, (tx, ty)); ty += 16
-    if sg_type:
-        draw_sg_icons(scene, tx, ty, u)
-    agi_text = f"敏 {u.agile}  移 {u.move}"
-    t = scene.tiny.render(agi_text, True, scene.DIM)
-    scene.surface.blit(t, (tx + 110, ty + 1))
-
-
-def draw_sg_icons(scene: "BattleScene", x: int, y: int, u) -> None:
-    """SG (兴奋值) 槽: exe FUN_004ce480 按 0x54ca40 / 0x54ca84 槽宽表裁图 — 5 格 × 16px (沙悟净 2 格),
-    门槛 2/5/8/12/16 (沙悟净 6/16) 正好填满一格. 这里用色块画同样的宽度."""
-    from core.battle import energy
-    t = energy.energy_type(u)
-    px = energy.SG_GAUGE_PX.get(t)
-    if px is None:
-        return
-    sg = max(0, min(energy.SG_MAX, u.sg))
-    label = scene.tiny.render("SG", True, scene.DIM)
-    scene.surface.blit(label, (x, y))
-    ox = x + 22
-    cells = len(energy.SG_THRESHOLDS[t])
-    pygame.draw.rect(scene.surface, scene.DIM, pygame.Rect(ox, y + 2, cells * 16, 10), 1)
-    if px[sg] > 0:
-        pygame.draw.rect(scene.surface, scene.HIGHLIGHT, pygame.Rect(ox, y + 2, px[sg], 10))
-    for i in range(1, cells):
-        pygame.draw.line(scene.surface, scene.DIM, (ox + i * 16, y + 2), (ox + i * 16, y + 11))
+    """原版战斗状态栏 (scenes.battle.status_bar, exe FUN_004ce480)."""
+    from scenes.battle import status_bar
+    status_bar.draw(scene)
 
 
 def draw_log(scene: "BattleScene") -> None:
