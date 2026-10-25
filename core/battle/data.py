@@ -73,6 +73,9 @@ class BattleUnit:
     exp_reward: int = 0
     money_reward: int = 0
     ai_group: int = 0                # 原版敌人表 +0x18 (1..50): 影响「放技能 vs 普攻」的倾向
+    wisdom: int = 0                  # 智力 (角色表 +0x48; 战斗中道具回复量用, core.battle.energy)
+    equipment: tuple = ()            # 装备着的道具 id (exe FUN_0049cc2d 查 5 槽; 脱皮盾/血盾/丝巾 等影响 MP/SG)
+    save_ref: object = None          # 存档 Character (战斗结束 MP/SG 写回, energy.write_back)
     type_flags: int = 0              # 原版敌人表 +0x00 flags (摆阵 FUN_0049ff07 拷进实例表 0x86ada8); 0x10000000 = 不触发地雷
     sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
     # 渲染态 (UI 写入, 战斗逻辑不动)

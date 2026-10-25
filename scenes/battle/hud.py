@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 import pygame
 
 from core.battle.data import BattleUnit, LevelUpReport, Phase
-from core.character import UNSET
 from core.sprites.base import TILE_W, TILE_H
 
 if TYPE_CHECKING:
@@ -310,14 +309,20 @@ def _draw_skill_submenu(scene: "BattleScene", *,
         empty = scene._menu_font.render("(无)", True, scene.DIM)
         scene.surface.blit(empty, empty.get_rect(midleft=(row.x + 8, row.centery)))
     else:
+        from core.battle import energy
+        u = scene.battle.current
         for i, sid in enumerate(skills):
             row = pygame.Rect(panel.x + 12, list_top + i * SKILL_ROW_H,
                               panel.w - 24, SKILL_ROW_H - 2)
             if draw_highlight_row and i == cursor:
                 pygame.draw.rect(scene.surface, PANEL_LIGHT, row, 1)
-            text_color = PANEL_LIGHT if i == cursor else (220, 220, 220)
+            ok = energy.can_cast(u, sid)               # exe FUN_0042878a: 不够的灰掉
+            text_color = (PANEL_LIGHT if i == cursor else (220, 220, 220)) if ok else scene.DIM
             name = scene._menu_font.render(get_skill_name(sid), True, text_color)
             scene.surface.blit(name, name.get_rect(midleft=(row.x + 8, row.centery)))
+            if energy.energy_type(u) == energy.ENERGY_MP:
+                cost = scene._menu_font.render(str(energy.mp_cost(u, sid)), True, text_color)
+                scene.surface.blit(cost, cost.get_rect(midright=(row.right - 8, row.centery)))
 
 
 def draw_skill_desc_bar(scene: "BattleScene") -> None:
@@ -377,29 +382,38 @@ def draw_actor_card(scene: "BattleScene", x: int, y: int, w: int, h: int,
     name_text = f"{u.name}  Lv{u.level}"
     t = scene.font.render(name_text, True, scene.TEXT)
     scene.surface.blit(t, (tx, ty)); ty += 22
-    line = f"HP {u.display_hp}/{u.max_hp}   MP {u.mp}/{u.max_mp}"   # 显示滞后到结算 (见 BattleUnit.display_hp)
+    from core.battle import energy
+    sg_type = energy.uses_sg(u)
+    line = f"HP {u.display_hp}/{u.max_hp}"                     # 显示滞后到结算 (见 BattleUnit.display_hp)
+    if not sg_type and u.max_mp > 0:
+        line += f"   MP {u.mp}/{u.max_mp}"                    # exe 状态栏: MaxMP > 0 才画 MP
     t = scene.small.render(line, True, scene.TEXT)
     scene.surface.blit(t, (tx, ty)); ty += 16
-    draw_sg_icons(scene, tx, ty, u.sg)
+    if sg_type:
+        draw_sg_icons(scene, tx, ty, u)
     agi_text = f"敏 {u.agile}  移 {u.move}"
     t = scene.tiny.render(agi_text, True, scene.DIM)
-    scene.surface.blit(t, (tx + 80, ty + 1))
+    scene.surface.blit(t, (tx + 110, ty + 1))
 
 
-def draw_sg_icons(scene: "BattleScene", x: int, y: int, sg: int, max_slots: int = 5) -> None:
-    if sg == UNSET:
-        t = scene.small.render("SG ∞", True, scene.HIGHLIGHT)
-        scene.surface.blit(t, (x, y - 1))
+def draw_sg_icons(scene: "BattleScene", x: int, y: int, u) -> None:
+    """SG (兴奋值) 槽: exe FUN_004ce480 按 0x54ca40 / 0x54ca84 槽宽表裁图 — 5 格 × 16px (沙悟净 2 格),
+    门槛 2/5/8/12/16 (沙悟净 6/16) 正好填满一格. 这里用色块画同样的宽度."""
+    from core.battle import energy
+    t = energy.energy_type(u)
+    px = energy.SG_GAUGE_PX.get(t)
+    if px is None:
         return
+    sg = max(0, min(energy.SG_MAX, u.sg))
     label = scene.tiny.render("SG", True, scene.DIM)
     scene.surface.blit(label, (x, y))
-    slot_w = 6; gap = 2; ox = x + 22
-    slots = max(1, min(max_slots, max(1, sg // 5 if sg > 0 else 1)))
-    filled = min(slots, max(0, sg // 2))
-    for i in range(slots):
-        r = pygame.Rect(ox + i * (slot_w + gap), y + 2, slot_w, 10)
-        color = scene.HIGHLIGHT if i < filled else scene.DIM
-        pygame.draw.rect(scene.surface, color, r)
+    ox = x + 22
+    cells = len(energy.SG_THRESHOLDS[t])
+    pygame.draw.rect(scene.surface, scene.DIM, pygame.Rect(ox, y + 2, cells * 16, 10), 1)
+    if px[sg] > 0:
+        pygame.draw.rect(scene.surface, scene.HIGHLIGHT, pygame.Rect(ox, y + 2, px[sg], 10))
+    for i in range(1, cells):
+        pygame.draw.line(scene.surface, scene.DIM, (ox + i * 16, y + 2), (ox + i * 16, y + 11))
 
 
 def draw_log(scene: "BattleScene") -> None:

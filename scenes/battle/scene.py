@@ -242,21 +242,22 @@ class BattleScene(Scene):
         if u is None or not u.is_player or self.inventory is None:
             self._item_submenu = False
             return
-        hp, mp = item_effect(item_id)
-        if not (hp or mp):
+        from core.battle import energy
+        if item_id not in energy.HP_ITEMS + energy.MP_ITEMS + energy.REVIVE_ITEMS + (energy.ITEM_SG_FULL,):
             self.battle._log(f"{get_item_name(item_id)} 无法使用")
             return
-        u.hp = min(u.max_hp, u.hp + hp)
-        u.mp = min(u.max_mp, u.mp + mp)
+        res = energy.battle_item(self.battle, u, u, item_id)   # exe FUN_004a6efe act==3 (目标暂为使用者自己)
         self.inventory.remove(item_id, 1)
         self._item_submenu = False
         self._menu_open = False
         self._input_gated = False
         bits = []
-        if hp:
-            bits.append(f"+{hp} HP")
-        if mp:
-            bits.append(f"+{mp} MP")
+        if res.get('hp'):
+            bits.append(f"+{res['hp']} HP")
+        if res.get('mp'):
+            bits.append(f"+{res['mp']} MP")
+        if res.get('sg'):
+            bits.append(f"SG +{res['sg']}")
         self.battle._log(f"{u.name} 使用 {get_item_name(item_id)} {' '.join(bits)}")
 
     def _draw_item_menu(self) -> None:

@@ -9,7 +9,7 @@ from core.skill_seq import SKILL_SAO_CAST, SKILL_SEQS, SKILL_STATUS_EFFECTS, ski
 
 
 def _unit(name, x, y, *, is_player, attack=20, defence=5, agile=10, hp=200):
-    u = BattleUnit(name=name, level=1, max_hp=hp, hp=hp, max_mp=999, mp=999, sg=0,
+    u = BattleUnit(name=name, level=1, max_hp=hp, hp=hp, max_mp=999, mp=999, sg=16,
                    attack=attack, defence=defence, agile=agile, move=0, is_player=is_player)
     u.x, u.y = x, y
     return u

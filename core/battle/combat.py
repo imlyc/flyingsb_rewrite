@@ -78,6 +78,8 @@ def apply_damage(battle: "TacticsBattle", attacker: BattleUnit,
     old_hp = defender.hp
     defender.hp = max(0, old_hp - dmg)
     # 紫河: 被类型标志 0x2000000 的敌人打中且未倒 → 待变身 (exe FUN_004a6efe 置 DAT_007e2d4c)
+    from core.battle import energy
+    energy.on_hit(attacker, defender)           # 被敌人命中 → SG +1
     z = getattr(defender, 'zihe', None)
     if z is not None and not z['transformed'] and defender.hp > 0 and (attacker.type_flags & 0x2000000):
         z['pending'] = True

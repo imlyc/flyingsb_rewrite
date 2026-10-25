@@ -126,7 +126,10 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
             # 技能选定: 关 L2, 进 AIM 阶段 (with skill_id). 没 dump 真 seq 的技能
             # 会回落普攻 seq (= 暂时占位), 暂不强制阻止.
             from core.skills import get_skill_name
+            from core.battle import energy
             sid = skills[scene._skill_cursor]
+            if not energy.can_cast(scene.battle.current, sid):
+                return                              # exe: MP / SG 不够的技能是灰的, 选不了 (菜单不关)
             # 关 L2 (无动画, 直接收掉) — 进 AIM 后是新阶段, 不需要原 L1/L2 状态
             scene._submenu = None
             scene._menu_open = False
@@ -193,6 +196,8 @@ def _advance_end_screen(scene: "BattleScene") -> None:
     ``_on_story_battle_end`` 钩子) —— 供剧情战斗在胜利后才入队/置进度。
     """
     won = scene.battle.phase == Phase.VICTORY
+    from core.battle import energy
+    energy.write_back(scene.battle)              # MP / SG 留在角色身上 (原版角色表), 跨战斗保留
     rs = scene.return_scene
     if hasattr(rs, "_on_story_battle_end"):
         try:

@@ -254,33 +254,3 @@ def test_next_actor_skips_current():
     assert b.next_actor() is p2
 
 
-def test_player_use_skill_consumes_sg():
-    """必杀消耗 10 SG; 范围内只一敌, ×2 伤害."""
-    p = _player("p", 5, 5, agile=20)
-    p.sg = 30
-    e = _enemy("e", 6, 5, agile=5, hp=999)   # 邻接, 够 attack range
-    b = _battle(players=[p], enemies=[e])
-    p.facing = (1, 0)
-    ok = b.player_use_skill()
-    assert ok
-    assert p.sg == 20                        # 扣了 10
-    assert e.hp < 999                        # 受伤
-
-
-def test_player_use_skill_no_target():
-    """攻击范围内无敌人 → 不消耗 SG, 返回 False."""
-    p = _player("p", 5, 5, agile=20)
-    p.sg = 30
-    e = _enemy("e", 9, 9, agile=5)           # 太远
-    b = _battle(players=[p], enemies=[e])
-    assert not b.player_use_skill()
-    assert p.sg == 30                        # 未扣
-
-
-def test_player_use_skill_insufficient_sg():
-    p = _player("p", 5, 5, agile=20)
-    p.sg = 5
-    e = _enemy("e", 6, 5, agile=5)
-    b = _battle(players=[p], enemies=[e])
-    assert not b.player_use_skill()
-    assert p.sg == 5

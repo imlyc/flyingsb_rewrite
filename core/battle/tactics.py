@@ -5,7 +5,7 @@
 (BattleQueries 实例, 见 core.battle.queries).
 本文件只管:
   - 摆阵 / 回合流转 (start_round, enter_current, end_unit_turn, post_enemy_turn)
-  - 玩家行动公开 API (player_step / enter_attack_aim / confirm_attack_aim / player_use_skill / ...)
+  - 玩家行动公开 API (player_step / enter_attack_aim / confirm_attack_aim / ...)
   - anim_engine glue (engine.on signal → 派发)
   - 胜负检测 + 升级分配
 """
@@ -253,6 +253,8 @@ class TacticsBattle:
         # 状态回合递减 (exe 回合管理器 FUN_004a4f94 state 1 → FUN_004a3738, 每新回合对全体一次)
         from core.battle.status import round_tick
         round_tick(self.all_units)
+        from core.battle import energy
+        energy.round_start(self)                 # exe FUN_004a4108: SG 每回合 +1 (+装备加成)
         for z_u in self.players:                 # exe 新回合清 DAT_007e2d4c (待变身标记)
             if getattr(z_u, 'zihe', None) is not None:
                 z_u.zihe['pending'] = False
@@ -531,6 +533,10 @@ class TacticsBattle:
         u = self.current
         if self.phase != Phase.PLAYER_MOVE or not u.is_player:
             return False
+        if skill_id is not None:
+            from core.battle import energy
+            if not energy.can_cast(u, skill_id):     # exe FUN_0042878a: MP / SG 不够 → 菜单灰掉选不了
+                return False
         if skill_id is None:
             # FUN_004a47d3: 开普攻那一刻定普攻项 — 上下左右有可打敌人 → 贴身项 (+0x78), 否则 +0x74
             from core.normal_attack import current_attack
@@ -591,6 +597,8 @@ class TacticsBattle:
             if not can_place_mine(self, self.aim_cursor):
                 return False
             self._pending_damage_range = None
+            from core.battle import energy
+            energy.pay(u, 0x35)
             combat.begin_attack(self, u, u, skill_id=0x35, cursor=self.aim_cursor)
             self._clear_aim_overlay()
             return True
@@ -613,6 +621,8 @@ class TacticsBattle:
         primary = cur_occ if cur_occ in targets else targets[0]
         # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
         self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
+        from core.battle import energy
+        energy.pay(u, self.aim_skill_id)         # exe FUN_004a6efe act==2: 出手扣 MP / SG
         # 孙悟空变身技能: 不走标准 attack seq, 由 son_transform coordinator 驱动翻跟头隐现 +
         # 神兽 + AOE 伤害. 手动设 pending (begin_attack 的子集, 不 attach caster seq).
         from core.son_transform import is_son_transform_skill, start_son_transform
@@ -705,31 +715,6 @@ class TacticsBattle:
         """结束当前角色的回合."""
         if self.phase == Phase.PLAYER_MOVE:
             self.end_unit_turn()
-
-    def player_use_skill(self) -> bool:
-        """SG 必杀: 对当前攻击范围内全敌 ×2 伤害. 消耗 10 SG (UNSET 不消耗)."""
-        u = self.current
-        if self.phase != Phase.PLAYER_MOVE or not u.is_player:
-            return False
-        SG_COST = 10
-        if u.sg != UNSET and u.sg < SG_COST:
-            self._log(f"{u.name} SG 不足, 无法释放必杀")
-            return False
-        targets = [e for e in self.alive_units
-                   if e.is_player != u.is_player
-                   and (e.x, e.y) in self.q.attack_tiles(u, u.x, u.y)]
-        if not targets:
-            self._log(f"{u.name} 攻击范围内无敌人")
-            return False
-        if u.sg != UNSET:
-            u.sg = max(0, u.sg - SG_COST)
-        self._log(f"{u.name} 释放必杀!")
-        for t in targets:
-            combat.strike_skill(self, u, t)
-        if self._check_end():
-            return True
-        self.end_unit_turn()
-        return True
 
     # ---- 工具 ----
     def _log(self, msg: str) -> None:

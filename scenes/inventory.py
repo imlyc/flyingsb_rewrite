@@ -171,19 +171,18 @@ class InventoryScene:
 
     # ------- 动作 -------
     def _use_field(self, item_id: int) -> None:
-        hp, mp = item_effect(item_id)
-        if not (hp or mp):
-            self._say(f"{get_item_name(item_id)} 无法在野外使用")
-            return
+        from core.items import field_use
         slots = self._party_slots()
         if not slots:
             return
         slot = slots[0]
         ch = self.save.characters[slot]
-        before_hp, before_mp = ch.CurrentHP, ch.CurrentMP
-        ch.CurrentHP = min(ch.MaxHP, ch.CurrentHP + hp)
-        ch.CurrentMP = min(ch.MaxMP, ch.CurrentMP + mp)
-        gained_hp, gained_mp = ch.CurrentHP - before_hp, ch.CurrentMP - before_mp
+        party = [self.save.characters[s] for s in slots]
+        res = field_use(ch, item_id, party)         # exe FUN_004246dd: 没效果 → 不消耗
+        if res is None:
+            self._say(f"{get_item_name(item_id)} 没有效果")
+            return
+        gained_hp, gained_mp = res
         self.save.inventory.remove(item_id, 1)
         self._refresh_items()
         name = active_party(self.save)[0]

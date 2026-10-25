@@ -61,6 +61,10 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
     acc = tuple(a for a in (ch.Accessories1, ch.Accessories2) if a not in (0xFFFFFFFF, -1))
     u.attack_normal, u.attack_melee = NA.attack_ids(name, weapon, acc)
     NA.zihe_setup(u, acc)
+    u.wisdom = ch.Wisdom
+    u.equipment = tuple(e for e in (ch.Head, ch.Body, ch.Hand, ch.Accessories1, ch.Accessories2)
+                        if e not in (0xFFFFFFFF, -1))
+    u.save_ref = ch
     return u
 
 

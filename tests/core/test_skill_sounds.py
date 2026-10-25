@@ -134,7 +134,7 @@ def _dit_battle(skill_id, enemy_pos):
     import random
     from core.battle.data import BattleMap, BattleUnit
     from core.battle.tactics import TacticsBattle
-    p = BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30, max_mp=999, mp=999, sg=0,
+    p = BattleUnit(name="蒙面人", level=1, max_hp=30, hp=30, max_mp=999, mp=999, sg=16,
                    attack=20, defence=5, agile=20, move=0, is_player=True)
     p.x, p.y = 10, 10
     e = BattleUnit(name="e", level=1, max_hp=500, hp=500, max_mp=0, mp=0, sg=0,
@@ -159,7 +159,7 @@ def _sam_battle(skill_id, enemy_pos):
     import random
     from core.battle.data import BattleMap, BattleUnit
     from core.battle.tactics import TacticsBattle
-    p = BattleUnit(name="三藏法师", level=1, max_hp=30, hp=30, max_mp=999, mp=999, sg=0,
+    p = BattleUnit(name="三藏法师", level=1, max_hp=30, hp=30, max_mp=999, mp=999, sg=16,
                    attack=20, defence=5, agile=20, move=0, is_player=True)
     p.x, p.y = 10, 10
     e = BattleUnit(name="e", level=1, max_hp=500, hp=500, max_mp=0, mp=0, sg=0,

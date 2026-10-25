@@ -27,9 +27,14 @@ _PLAYER_AGILE = {
 
 def build_player_unit(name: str, weapon: int | None = None, accessories: tuple = ()) -> BattleUnit:
     agile = _PLAYER_AGILE.get(name, 45)
+    from core.battle import energy
+    if energy.ENERGY_TYPE.get(name) == energy.ENERGY_MP:
+        max_mp, sg = 999, 0xFFFFFFFF            # MP 型: 沙盒给足 MP, 无 SG (同原版 -1)
+    else:
+        max_mp, sg = 0, energy.SG_MAX           # SG 型: 满格兴奋值, 无 MP
     u = BattleUnit(
         name=name, level=10,
-        max_hp=60, hp=60, max_mp=40, mp=40, sg=50,
+        max_hp=60, hp=60, max_mp=max_mp, mp=max_mp, sg=sg,
         attack=24, defence=14, agile=agile,
         move=max(2, agile // 18),
         is_player=True,

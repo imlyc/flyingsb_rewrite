@@ -257,3 +257,44 @@ def item_effect(item_id: int) -> tuple[int, int]:
     if not hp and not mp:                          # 描述未标 → 按 hp 兜底
         hp = amount
     return (hp, mp)
+
+
+def item_power(item_id: int) -> int:
+    """道具表 +0x6954f4 威力 (战斗中回复量的基数; 见 core.battle.energy.battle_item)."""
+    e = item_table_entry(item_id)
+    return int(e.get("val", 0) or 0) if e else 0
+
+
+# 战斗外用回复品 (exe FUN_004246dd): 固定量, 不看威力/智力. 注意 MP 良药 0x12f 场外 +300 (描述写 150, 战斗内威力 200).
+FIELD_HP = {0x12b: 50, 0x12c: 300, 0x12d: 10000}
+FIELD_MP = {0x12e: 50, 0x12f: 300, 0x130: 10000}
+FIELD_BOTH = (0x131, 0x132)              # 仙桃 / 天桃: HP、MP 各 +10000
+FIELD_PARTY = 0x133                      # 魔法的白粉: 全队 HP、MP 全满
+
+
+def field_use(ch, item_id: int, party=()) -> tuple[int, int] | None:
+    """战斗外对角色 ch 用道具. 返回 (HP 增量, MP 增量); None = 没效果 (道具不消耗).
+    条件同 exe: HP 品要 HP 未满, MP 品要 MaxMP > 0 且 MP 未满 (SG 型角色 MaxMP 0, 用不了 MP 药)."""
+    def add(cur: int, mx: int, n: int) -> int:
+        return min(mx, cur + n)
+    hp0, mp0 = ch.CurrentHP, ch.CurrentMP
+    if item_id in FIELD_HP:
+        if not (ch.CurrentHP < ch.MaxHP and ch.MaxHP > 0):
+            return None
+        ch.CurrentHP = add(ch.CurrentHP, ch.MaxHP, FIELD_HP[item_id])
+    elif item_id in FIELD_MP:
+        if not (ch.CurrentMP < ch.MaxMP and ch.MaxMP > 0):
+            return None
+        ch.CurrentMP = add(ch.CurrentMP, ch.MaxMP, FIELD_MP[item_id])
+    elif item_id in FIELD_BOTH:
+        if not (ch.CurrentHP < ch.MaxHP or (ch.CurrentMP < ch.MaxMP and ch.MaxMP > 0)):
+            return None
+        ch.CurrentHP = add(ch.CurrentHP, ch.MaxHP, 10000)
+        ch.CurrentMP = add(ch.CurrentMP, ch.MaxMP, 10000)
+    elif item_id == FIELD_PARTY:
+        for c in (party or (ch,)):
+            c.CurrentHP = add(c.CurrentHP, c.MaxHP, 10000)
+            c.CurrentMP = add(c.CurrentMP, c.MaxMP, 10000)
+    else:
+        return None
+    return ch.CurrentHP - hp0, ch.CurrentMP - mp0

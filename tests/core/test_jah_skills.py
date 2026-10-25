@@ -31,8 +31,8 @@ def _cursor_for(sid):
 
 def _battle(sid):
     from core.battle.tactics import TacticsBattle
-    p = _unit("紫河", 10, 10, is_player=True, mp=50)
-    p.mp = 10
+    p = _unit("紫河", 10, 10, is_player=True, mp=100)
+    p.mp = 100                                 # 够放最贵的 (冰龙升天 90 MP)
     cur = _cursor_for(sid)
     enemies = []
     if cur != (10, 10):
