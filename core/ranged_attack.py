@@ -521,7 +521,7 @@ def _zihe_hit(battle, caster, coord) -> None:
 
 
 def _toss_think(e: "Entity", eng: "Engine") -> None:
-    """FUN_0050fe1c: 目标 z += vz, vz -= 2; 落地 → 0xf0, 再受击 + 紫星 + 刺爆 + 飘字."""
+    """FUN_0050fe1c: 目标 z += vz, vz -= 2; 落地 → 0xf0, 发 -100 (再走一遍 _zihe_hit) + -106 (受击 + 紫星 + 刺爆 + 飘字)."""
     ud = e.user_data
     if 'toss' not in ud:
         return
@@ -533,7 +533,8 @@ def _toss_think(e: "Entity", eng: "Engine") -> None:
         v.wind_lift = 0.0
         _sfx(battle, SFX_LAND)
         from core.bosan_skills import _starburst
-        _hit(battle, caster, v, face=True)
+        _zihe_hit(battle, caster, coord)          # 落地先发 -100: 整套命中 (受击 + 三爪 + 刺爆 + 0x105), 实录 na4_5a
+        _hit(battle, caster, v, face=True)        # 再发 -106: 受击 + 紫星 + 刺爆 + 飘字
         _starburst(battle, v)
         _float(battle, caster, v)
         _done(coord)
