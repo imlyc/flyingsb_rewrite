@@ -352,9 +352,10 @@ def _spawn_cure_particle(battle, coord, t) -> None:
     cx, cy = _pos(t)
     phi = ((_rand(battle) & 0x3ff) << 16) >> 10
     vz = ((_rand(battle) & 3) + 4) << 16
-    _fx(battle, _cure_particle_think, cx, cy, 64 * FP, SPARKLE_FALL_SEQ, cure=True, coord=coord, state=0, age=0, end=-1,
-        v16c=FP, v170=0, **_motion(tx=cx, ty=cy, tz=0, px=phi, py=phi, vz=vz, az=0x8000))
+    e = _fx(battle, _cure_particle_think, cx, cy, 64 * FP, SPARKLE_FALL_SEQ, cure=True, coord=coord, state=0, age=0,
+            end=-1, v16c=FP, v170=0, **_motion(tx=cx, ty=cy, tz=0, px=phi, py=phi, vz=vz, az=0x8000))
     coord.user_data['live'] += 1                       # 粒子出生 -300 计数 (+0x7c)
+    _cure_particle_think(e, battle.engine)             # 池序在控制体之后 → 出生 tick 就 think (实录 mina_0b 首帧 z 67..70)
 
 
 def _cure_ctrl_think(e: "Entity", eng: "Engine") -> None:
@@ -458,6 +459,7 @@ def _spawn_holy_drop(battle, coord, t, first: bool) -> "Entity":
             **_motion(m=0x72, tx=cx, ty=cy, tz=tz, px=px, py=py, pz=pz, rx=rx, ry=ry, rz=0x30))
     if first:
         _sfx(battle, SFX_HOLY_DROP)
+    _holy_drop_think(e, battle.engine)       # 池序在控制体之后 → 出生 tick 就 think; 首帧用未换算的 16.16 半径, int32 溢出飞到画面外 (实录 mina_0c 同)
     return e
 
 
