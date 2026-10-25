@@ -175,3 +175,37 @@ def test_zihe_form3_leap():
     b.aim_cursor = (15, 54)
     assert b.confirm_attack_aim()
     assert _run_attack(b)
+
+
+def test_zihe_flicker_blocks_next_unit():
+    """exe FUN_004a4f94 0xd/0xe: 闪烁 31t 内状态机不前进 → 下一个单位 (玩家输入 / 敌人 AI) 等闪完."""
+    import os
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    from types import SimpleNamespace
+    from scenes.battle import update as U
+    z = _u('紫河', 15, 53, agile=99, acc=(0x129,))
+    z.sprite_key = 'ps_CJAH000'
+    e = _u('e', 15, 54, is_player=False, agile=1)
+    e.type_flags = 0x2000000
+    b = _battle([z], [e])
+    from core.battle import combat
+    combat.apply_damage(b, e, z, 10, "")
+    b.end_unit_turn()                                              # 处理点变身 → 闪烁开始, 轮到敌人
+    for u in b.all_units:
+        u.reaction_seq = None
+        u.settle_pending = False
+        u.render_x, u.render_y = u.x, u.y
+    b.float_events = []
+    sc = SimpleNamespace(battle=b, ANIM_EPSILON=0.01, ENEMY_DEATH_TOTAL_MS=0, DEATH_FALL_TOTAL_MS=0,
+                         _enemy_pre_move_started_at=None, _enemy_turn_started_at=None, ENEMY_PRE_MOVE_PAUSE_MS=0,
+                         ENEMY_TURN_DELAY_MS=0, _battle_over_signaled=False)
+    assert b.phase == Phase.ENEMY_TURN and b._enemy_ai_pending and z.flicker
+    assert U.units_animating(sc)
+    U._tick_phase_transitions(sc, 10**6)
+    assert b._enemy_ai_pending                                     # 闪烁中: 敌人不开始
+    for _ in range(NA.FLICKER_TICKS):
+        U._tick_flicker(b)
+    assert z.flicker is None
+    U._tick_phase_transitions(sc, 10**6)
+    U._tick_phase_transitions(sc, 10**6)
+    assert not b._enemy_ai_pending                                 # 闪完 → 敌人开始行动

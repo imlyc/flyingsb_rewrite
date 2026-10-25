@@ -267,6 +267,9 @@ def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:
     if scene.battle.phase == Phase.ENEMY_TURN:
         # (a) Pre-move 暂停: AI 还没跑, 给玩家看移动范围
         if scene.battle._enemy_ai_pending:
+            if any(u.flicker for u in scene.battle.all_units):    # 紫河变身闪烁中: 敌人等闪完再开始
+                scene._enemy_pre_move_started_at = None
+                return
             if scene._enemy_pre_move_started_at is None:
                 scene._enemy_pre_move_started_at = now
             if now - scene._enemy_pre_move_started_at >= scene.ENEMY_PRE_MOVE_PAUSE_MS:
@@ -331,6 +334,8 @@ def units_animating(scene: "BattleScene") -> bool:
                 or abs(u.render_y - u.y) > scene.ANIM_EPSILON):
             return True
         if u.is_attacking or u.reaction_seq is not None:
+            return True
+        if u.flicker:                            # 紫河变身闪烁: exe 状态机停在 0xd/0xe 31t, 下一个单位等闪完
             return True
     # 投射物 entity (= 技能 B 类的飞行物) 还在 → 还在动
     for e in scene.battle.engine.entities:
