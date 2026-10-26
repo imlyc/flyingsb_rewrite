@@ -9,6 +9,7 @@ dispatcher: 0 渐暗 → 10 施法者挂 66e948[朝向] (atlas 49, 4 帧, 第 3 
         + FUN_004d0d7b 毒雾 seq 66e978 (atlas 297 帧 1-3 + 298 帧 0-6 各 3t) 在 (目标 x + rand%12-6, y+124, z+172),
         播完发 -210.
   -210: 飘字 (FUN_004d05d8) — 结算.
+实录校准 (wine/captures/en12_t5_F4558.log): 毒瓶 +20 出生 9 t / 刺爆+毒雾 +29 (40 t) / 飘字 +69 / 渐亮 +104 逐 tick 吻合, 无需改动.
 """
 from __future__ import annotations
 

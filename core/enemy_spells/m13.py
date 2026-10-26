@@ -9,6 +9,7 @@ dispatcher: 0 渐暗 → 10 施法者挂 66e948[朝向] (同 12 里可得毒藥)
         + 控制实体 FUN_004e6f6d (age%30 == 0 → -250; age > 80 → 停 0xc2, -200, 自毁) + 播 0xc2.
   -250: 所有目标 受击 6557f0[目标自身朝向] + 刺爆 655c10[施法者朝向] (共 3 次: age 0 / 30 / 60).
   -200: 所有目标飘字 (结算), 0x78--.
+实录校准 (wine/captures/en13_t5_F4214.log): 毒雾出生/寿命 82 t、-250 @+21/+51/+81、-200 @+102、渐亮 @+139 逐 tick 吻合.
 近似: 毒雾 seq 随机起点用 "从第 k 帧开始的展开 seq" 表示 (exe 循环回 seq 开头; 寿命内差别只在首轮之后的相位).
 """
 from __future__ import annotations
@@ -35,6 +36,7 @@ def _cloud_think(e, eng) -> None:
     if 'mist' not in ud:
         return
     b = ud['spell'].battle
+    age = ud['age']                 # exe +0x144 (本 tick 判定用旧值; 实录 en13_t5: 寿命 82 tick)
     ud['age'] += 1
     if ud['st'] == 0:
         if _cdbc2(e):
@@ -46,7 +48,7 @@ def _cloud_think(e, eng) -> None:
             ud['st'] = 10
     else:
         _c3211(e)
-        if ud['age'] > LIFE:
+        if age > LIFE:
             eng.destroy(e)
 
 
