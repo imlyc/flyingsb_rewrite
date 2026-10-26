@@ -75,3 +75,18 @@ def test_item_menu_without_inventory_shows_empty(arena_scene):
     _key(sc, pygame.K_RETURN)               # 无物可用, 不崩
     _key(sc, pygame.K_ESCAPE)               # 回一级
     assert sc._menu_open and not sc._item_submenu
+
+
+def test_item_submenu_left_key_does_not_walk(arena_scene, monkeypatch):
+    """ESC → ← 打开道具子菜单时, 按住的 ← 不能让角色走动 (回归)."""
+    sc = arena_scene
+    _until_player_turn(sc)
+    u = sc.battle.current
+    pos = (u.x, u.y)
+    _key(sc, pygame.K_ESCAPE)
+    sc.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_LEFT, mod=0, unicode="", scancode=0))
+    assert sc._item_submenu
+    held = {pygame.K_LEFT}
+    monkeypatch.setattr(pygame.key, "get_pressed", lambda: type("K", (), {"__getitem__": lambda s, k: k in held})())
+    _step(sc, 60)                                  # 按住 ← 一阵
+    assert (u.x, u.y) == pos and u.facing is not None

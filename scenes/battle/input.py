@@ -222,6 +222,7 @@ def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:
         scene._hold.reset()
     if (scene.battle.phase != Phase.PLAYER_MOVE
             or scene._menu_open
+            or scene._item_submenu                   # 道具子菜单 (ESC → ←): 方向键是选道具, 不能走
             or scene._submenu is not None
             or scene._menu_transition_t is not None
             or scene._menu_close_t is not None
