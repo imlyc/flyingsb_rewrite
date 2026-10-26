@@ -14,7 +14,9 @@ dispatcher: 渐暗 → 施法 seq → -100: 每个目标 FUN_004da35f 生成旋�
   0x1e: 0x78/0x7a 都 0 → 0x28 渐亮 → 自毁.
 hook 招式 (FUN_004df363 = 130, FUN_004e11c1 = 150, FUN_004e1246 = 151): -100 时施法者改挂循环 seq
   (130: 6604b0[朝向]; 150/151: 662364[朝向]); -210 时施法者清 0x20000 (seq 停在当前帧), 150/151 另置 0x10000 (回待机).
-近似: 子实体 age 取 "先判后加" (出生后第一次 think age=0).
+实录校准 (wine/captures/en7_t3_F10564.log, 逐 tick 吻合): 控制体在 -100 当 tick 出生、下一 tick 首次 think (age 0);
+  风粒由控制体 think 生成, 出生当 tick 就 think (首帧 z 已 +3/4, 寿命 32/42 tick); -200 于 +47/77/107/137, -210 于 +137,
+  渐亮起点/施法者回待机均与实录一致.
 """
 from __future__ import annotations
 
@@ -53,8 +55,9 @@ def _ctrl_think(e, eng) -> None:
     first = v is sp.targets[0]
     if age % 4 == 0:
         _c3211(e)
-        fx(b, _particle_think, e.x, e.y, 0, WIND_SEQS[0], wind=True, cur=0,
-           **_motion(m=0x41, vz=(3 + (_rand(b) & 1)) * FP, tz=0x3e8 * FP))
+        p = fx(b, _particle_think, e.x, e.y, 0, None, atlas=WIND, frame=WIND_SEQS[0][0][2], wind=True, cur=-1,
+               **_motion(m=0x41, vz=(3 + (_rand(b) & 1)) * FP, tz=0x3e8 * FP))
+        _particle_think(p, eng)                                 # 实录: 风粒出生当 tick 就 think (首帧 z 已 +3/4)
     if age % 30 == 0 and age > 10:
         sp.on_hit(v)
         if first:
