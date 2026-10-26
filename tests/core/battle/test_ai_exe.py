@@ -161,6 +161,12 @@ def test_summon_requires_space_and_low_calf_count():
         b2._pending_enemy_move = None
         ai_exe.take_turn(b2, boss)
         assert b2._pending_enemy_move != SUMMON
+    b3 = _battle([p], [boss] + calves[:1])       # 场上还有 1 只就不召 (竞技场偏离 exe, 用户要求)
+    for seed in range(30):
+        b3.rng = random.Random(seed)
+        b3._pending_enemy_move = None
+        ai_exe.take_turn(b3, boss)
+        assert b3._pending_enemy_move != SUMMON
 
 
 def test_summon_spawns_calves_near_caster():

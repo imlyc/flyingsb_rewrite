@@ -543,6 +543,8 @@ class ExeAI:
     # ---------- 召唤判定 (FUN_004b1286 move==2) ----------
     def summon_ok(self) -> bool:
         n = sum(1 for e in self.b.enemies if e.alive and getattr(e, 'enemy_type', -1) == CALF_TYPE)
+        if n > 0:                                        # 刻意偏离 (用户 2026-10-26): 场上还有牛寶寶就不召 (exe: n < rand%7)
+            return False
         if not n < self.rand(7):
             return False
         self._flood((self.u.x, self.u.y), FLOOD_SUMMON)
