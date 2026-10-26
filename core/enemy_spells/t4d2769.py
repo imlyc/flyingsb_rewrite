@@ -16,7 +16,7 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标 FUN_004d2746 光爆发生�
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _set_z
-from core.enemy_spells.b_common import react, cur_pos, finish_on_count
+from core.enemy_spells.b_common import react, cur_pos, finish_on_count, hits_pending
 from core.anim_engine.bytecode import tuple_to_bytecode
 from core.jet_skills import HEAVY_SEQS, SHARD_SEQS
 
@@ -105,7 +105,7 @@ class Paralyze(Spell):
         self.casting = True
 
     def think(self) -> None:
-        if self.casting and self.live == 0:
+        if self.casting and self.live == 0 and not hits_pending(self):
             self.casting = False
             finish_on_count(self)
 

@@ -60,3 +60,13 @@ def finish_on_count(spell) -> None:
     实录校准: en52_t19 (符号 -200 @250 → 0x28 @251 → 渐亮 @252), en16_t6 同."""
     spell.finish()
     spell._quiet = 1
+
+
+HIT_FLAG_TICKS = 18     # 受击标记 +0x3c[i]: 挂受击 seq 的 tick 起, 第 18 tick dispatcher 才看到清零 (实录 en14_t5: 受击 @133 → 0x28 @151)
+
+
+def hits_pending(spell) -> bool:
+    """exe 0x1e 等的受击标记 (按 exe 受击 seq 时长, 不看我们按 ms 推进的 reaction_seq)."""
+    now = spell.battle.engine._tick_id
+    return any(getattr(v, '_b_hit_tick', None) is not None and now - v._b_hit_tick < HIT_FLAG_TICKS
+               for v in spell.targets)

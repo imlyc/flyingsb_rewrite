@@ -14,11 +14,14 @@ dispatcher: -1 (生成时, 渐暗前) 播 0xb4, 清 DAT_0086a760.  渐暗 → �
   0x1e: 半径 x +32 / y +24 每 t, > 400 → (末块) -0x104, 自毁.
 异常结算 (Spell.settle) 放在 -250 (炸开) 时刻 (exe 的 -200 是 "堆完" 的全局计数, 不针对目标).
 近似: 碎块出生 tick 即 think (发生器之后的池序).
+实录校准 (wine/captures/en14_t5_F4956.log, 14 使用可斯攻擊): 发生器 +20 / 33 块出生 tick / 寿命 125..61 / z 曲线 / 受击+刺爆 +133
+  逐 tick 吻合. 收尾: 0x1e 等受击标记按 exe 受击 seq 时长 (b_common.hits_pending, 受击后第 18 tick), 计数归零下一 tick 即渐亮
+  (finish_on_count) → 渐亮起点 +152、施法者回待机 +172 与原版相同.
 """
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _c3211, _motion, _getz, _set_z
-from core.enemy_spells.b_common import react
+from core.enemy_spells.b_common import react, finish_on_count, hits_pending
 from core.jet_skills import _sfx_stop
 
 E_CURSE = 222
@@ -120,9 +123,9 @@ class Curse(Spell):
         self.casting = True
 
     def think(self) -> None:
-        if self.casting and self.live == 0:
+        if self.casting and self.live == 0 and not hits_pending(self):
             self.casting = False
-            self.finish()
+            finish_on_count(self)
 
     def on_piled(self) -> None:
         """-200."""
