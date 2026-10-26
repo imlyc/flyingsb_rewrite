@@ -35,13 +35,20 @@ def _battle(*, players, enemies, w=10, h=10):
     )
 
 
-def test_turn_order_by_agile():
-    """回合顺序按 agile 降序排."""
+def test_turn_order_by_action_value():
+    """exe 行动值制: 每回合 行动值 += 速度, 反复挑 ≥20 且最高者 (同分后扫到的胜, 敌方后扫), 挑中 -20.
+    这里单位无速度数据 → 用敏捷当速度."""
     fast = _player("fast", 1, 1, agile=20)
     slow = _enemy("slow", 8, 8, agile=5)
     medium = _player("med", 2, 1, agile=10)
     b = _battle(players=[fast, medium], enemies=[slow])
-    assert [u.name for u in b.turn_order] == ["fast", "med", "slow"]
+    seq = [b.current.name]
+    for _ in range(7):
+        b.end_unit_turn()
+        seq.append(b.current.name)
+    # 回1: 20/10/5 → fast | 回2: 20/20/10 → med (同分后扫) → fast | 回3: 20/10/15 → fast |
+    # 回4: 20/20/20 → slow (敌方最后扫) → med → fast | 回5: 20/10/5 → fast
+    assert seq == ["fast", "med", "fast", "fast", "slow", "med", "fast", "fast"]
 
 
 def test_initial_phase_player_move_for_player_first():
@@ -250,7 +257,8 @@ def test_next_actor_skips_current():
     p2 = _player("p2", 2, 1, agile=15)
     e = _enemy("e", 9, 9, agile=5)
     b = _battle(players=[p1, p2], enemies=[e])
-    # current=p1, 下一行动 = p2
+    # 回1 行动值 20/15/5: p1 先动 (-20 → 0); 本回合没人够 20 → 预测下回合: 20/30/10 → p2
+    assert b.current is p1
     assert b.next_actor() is p2
 
 

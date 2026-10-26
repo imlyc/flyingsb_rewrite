@@ -41,6 +41,7 @@ def build_player_unit(name: str, weapon: int | None = None, accessories: tuple =
         color=(120, 200, 230),
         sprite_key=sprite_resource(name),
         known_skills=default_skills_for(name),
+        speed=24,                               # 原版主角速度 (角色表 +0x5c) 21..26
     )
     from core import normal_attack as NA
     u.attack_normal, u.attack_melee = NA.attack_ids(name, weapon, accessories)   # 无武器 = 本组第 0 项

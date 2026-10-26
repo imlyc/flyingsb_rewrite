@@ -78,6 +78,7 @@ def test_zihe_hit_trigger_and_revert():
     z.sprite_key = 'ps_CJAH000'
     e = _u('e', 15, 54, is_player=False, agile=1)
     e.type_flags = 0x2000000
+    z.speed, e.speed = 25, 20                      # 行动值制: 紫河 → 敌 → 紫河 → 敌 交替
     b = _battle([z], [e])
     from core.battle import combat
     combat.apply_damage(b, e, z, 10, "")
@@ -189,6 +190,7 @@ def test_zihe_flicker_blocks_next_unit():
     z.sprite_key = 'ps_CJAH000'
     e = _u('e', 15, 54, is_player=False, agile=1)
     e.type_flags = 0x2000000
+    z.speed, e.speed = 25, 20                      # 行动值制: 紫河 → 敌 → 紫河 → 敌 交替
     b = _battle([z], [e])
     from core.battle import combat
     combat.apply_damage(b, e, z, 10, "")

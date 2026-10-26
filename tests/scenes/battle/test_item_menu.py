@@ -28,6 +28,17 @@ def _step(sc, n=40):
         sc.draw()
 
 
+def _until_player_turn(sc, limit=3000):
+    """敌人初始行动值随机 (exe 摆阵 rand%20), 可能先手: 推进到玩家回合."""
+    from core.battle.data import Phase
+    for _ in range(limit):
+        if sc.battle.current.is_player and sc.battle.phase == Phase.PLAYER_MOVE:
+            break
+        sc.update(33)
+        sc.draw()
+    _step(sc)
+
+
 def _key(sc, k):
     sc.handle_event(pygame.event.Event(pygame.KEYDOWN, key=k, mod=0, unicode="", scancode=0))
     sc.handle_event(pygame.event.Event(pygame.KEYUP, key=k, mod=0, unicode="", scancode=0))
@@ -36,7 +47,7 @@ def _key(sc, k):
 
 def test_arena_item_menu_opens_and_uses_sandbox_item(arena_scene):
     sc = arena_scene
-    _step(sc)
+    _until_player_turn(sc)
     assert sc.battle.current.is_player
     _key(sc, pygame.K_ESCAPE)
     assert sc._menu_open
@@ -55,7 +66,7 @@ def test_arena_item_menu_opens_and_uses_sandbox_item(arena_scene):
 def test_item_menu_without_inventory_shows_empty(arena_scene):
     sc = arena_scene
     sc.inventory = None                     # 模拟没有道具栏的宿主
-    _step(sc)
+    _until_player_turn(sc)
     _key(sc, pygame.K_ESCAPE)
     _key(sc, pygame.K_LEFT)
     assert sc._item_submenu

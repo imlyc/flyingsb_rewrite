@@ -57,8 +57,9 @@ class TacticsBattle:
         # 本回合可达范围 (起点 BFS 缓存; 每回合开始更新)
         self.turn_move_range: set[tuple[int, int]] = set()
         self.phase = Phase.PLAYER_MOVE
-        self._turn_order: list[BattleUnit] = []
+        self._turn_order: list[BattleUnit] = []      # [当前行动者] (行动值制, 见 _pick_next)
         self._turn_idx = 0
+        self.round_no = 0
         # 给 UI 的浮动伤害事件队列; UI 自己消费 + 计时
         from core.battle.data import DamageEvent  # 仅为类型, 实例由 combat 模块创建
         self.damage_events: list[DamageEvent] = []
@@ -237,17 +238,46 @@ class TacticsBattle:
         return self._turn_idx
 
     def next_actor(self) -> BattleUnit | None:
-        """同一轮里下一个还没走的活单位; 没了就返回下一轮的头一个."""
-        for i in range(self._turn_idx + 1, len(self._turn_order)):
-            u = self._turn_order[i]
-            if u.alive and not u.has_acted:
-                return u
-        # 下一轮: 按 agile 重排活单位, 取第一个
-        nxt = sorted(self.alive_units, key=lambda u: -u.agile)
-        for u in nxt:
-            if u is not self.current and u.alive:
-                return u
-        return None
+        """预测下一个行动者 (同 _pick_next 规则, 不改行动值; 本回合没人够 20 → 按下回合加速度后再挑)."""
+        vals = {id(u): u.action_value for u in self.all_units}
+        u = self._pick_next(dry=True)
+        if u is None:
+            for x in self.all_units:
+                x.action_value += self._action_gain(x, dry=True)
+            u = self._pick_next(dry=True)
+            for x in self.all_units:
+                x.action_value = vals[id(x)]
+        return u
+
+    # ---- 行动值 (exe FUN_004a4108 加速度 / FUN_004a432c 挑人) ----
+    ACTION_COST = 20
+    NO_ACT = 0x200 | 0x800                    # 睡眠 / 痲痺 (+ 倒地) 不加行动值也不被挑
+
+    def _can_act(self, u: BattleUnit) -> bool:
+        from core.battle.status import has_status
+        return u.alive and not any(has_status(u, b) for b in (0x200, 0x800))
+
+    def _action_gain(self, u: BattleUnit, dry: bool = False) -> int:
+        """每回合加的行动值: 速度 (玩家装 坏的手表 0x146 → rand%(2×速度)); 中毒 ×3/4; 不能行动 0."""
+        from core.battle.status import has_status
+        if not self._can_act(u):
+            return 0
+        sp = u.speed if u.speed > 0 else max(1, u.agile)      # 无速度数据的单位 (测试/占位敌人) 用敏捷
+        if u.is_player and 0x146 in getattr(u, 'equipment', ()) and not dry:
+            sp = self.rng.randrange(max(1, sp * 2))
+        if has_status(u, 0x100):
+            sp = sp * 3 // 4
+        return sp
+
+    def _pick_next(self, dry: bool = False) -> BattleUnit | None:
+        """FUN_004a432c: 行动值最高且 ≥ 20 的单位 (先扫我方再扫敌方, 同分后扫到的胜), 被挑中 -20."""
+        best, thr = None, self.ACTION_COST
+        for u in list(self.players) + list(self.enemies):
+            if self._can_act(u) and u.action_value >= thr:
+                best, thr = u, u.action_value
+        if best is not None and not dry:
+            best.action_value -= self.ACTION_COST
+        return best
 
     # ---- 回合 ----
     def _start_round(self) -> None:
@@ -261,12 +291,15 @@ class TacticsBattle:
                 z_u.zihe['pending'] = False
         from core.battle import status_icons
         status_icons.sync(self, create=False)    # exe FUN_004a3c1f: 到期的状态摘图标
-        self.refresh_status_snapshot(working=False)   # exe 新回合 FUN_004a4e42(0)
-        self._turn_order = sorted(self.alive_units, key=lambda u: -u.agile)
-        for u in self._turn_order:
+        for u in self.all_units:                 # exe FUN_004a4108: 行动值 += 速度 (敌人不能行动时清 0)
+            if not u.is_player and not self._can_act(u):
+                u.action_value = 0
+            u.action_value += self._action_gain(u)
             u.has_acted = False
-        self._turn_idx = 0
-        self._log(f"--- 新回合 ({' > '.join(u.name for u in self._turn_order)}) ---")
+        self.refresh_status_snapshot(working=False)   # exe 新回合 FUN_004a4e42(0)
+        self.round_no += 1
+        self._log(f"--- 第 {self.round_no} 回合 (行动值 " +
+                  ", ".join(f"{u.name}{u.action_value}" for u in self.alive_units) + ") ---")
         self._enter_current()
 
     def refresh_status_snapshot(self, working: bool = True) -> None:
@@ -301,39 +334,36 @@ class TacticsBattle:
                 zihe_switch(z_u, to_beast=True)
 
     def _enter_current(self) -> None:
-        while self._turn_idx < len(self._turn_order):
-            u = self._turn_order[self._turn_idx]
-            if u.alive:
-                self.refresh_status_snapshot()       # exe case 3: 轮到单位行动 FUN_004a4e42(1)
-                if u.is_player:
-                    self.phase = Phase.PLAYER_MOVE
-                    self._pre_move_pos = (u.x, u.y)
-                    self.turn_move_range = self.q.movement_range(u)
-                    return
-                else:
-                    self.phase = Phase.ENEMY_TURN
-                    # 进入敌方回合前先算移动范围 (= AI 即将走的可达格集合).
-                    # AI take_turn 会立即把 unit.x/y 改到 dest, 所以必须现在算.
-                    self.turn_move_range = self.q.movement_range(u)
-                    # AI 延后执行: scene 显示移动范围一会儿后调 run_pending_enemy_ai.
-                    self._enemy_ai_pending = True
-                    return  # 等 UI 调 run_pending_enemy_ai → 再调 post_enemy_turn
-            self._turn_idx += 1
-        self._start_round()
+        u = self._pick_next()
+        if u is None:                             # 本回合没人行动值够 20 → 新回合
+            if not any(self._action_gain(x, dry=True) > 0 for x in self.all_units):
+                return                            # 谁都动不了 (全睡/痲痺): 防死循环
+            self._start_round()
+            return
+        self._turn_order = [u]
+        self._turn_idx = 0
+        self.refresh_status_snapshot()           # exe case 3: 轮到单位行动 FUN_004a4e42(1)
+        if u.is_player:
+            self.phase = Phase.PLAYER_MOVE
+            self._pre_move_pos = (u.x, u.y)
+            self.turn_move_range = self.q.movement_range(u)
+            return
+        self.phase = Phase.ENEMY_TURN
+        # 进入敌方回合前先算移动范围 (= AI 即将走的可达格集合).
+        # AI take_turn 会立即把 unit.x/y 改到 dest, 所以必须现在算.
+        self.turn_move_range = self.q.movement_range(u)
+        # AI 延后执行: scene 显示移动范围一会儿后调 run_pending_enemy_ai.
+        self._enemy_ai_pending = True            # 等 UI 调 run_pending_enemy_ai → 再调 post_enemy_turn
 
     def end_unit_turn(self) -> None:
         if self._turn_idx < len(self._turn_order):
             self._turn_order[self._turn_idx].has_acted = True
             self.refresh_status_snapshot()           # exe case 0xb: 行动结束 FUN_004a4e42(1), 在紫河判定之前
             self._zihe_turn_point(self._turn_order[self._turn_idx])
-        self._turn_idx += 1
         self._pre_move_pos = None
         if self._check_end():
             return
-        if self._turn_idx >= len(self._turn_order):
-            self._start_round()
-        else:
-            self._enter_current()
+        self._enter_current()
 
     def run_pending_enemy_ai(self) -> None:
         """scene 在 pre-move 暂停结束后调: 实际执行 AI 移动/攻击计划."""

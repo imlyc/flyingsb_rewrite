@@ -53,7 +53,7 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
         attack=base_atk + eb.get("atk", 0),
         defence=base_def + eb.get("def", 0),
         agile=ch.Agile,
-        move=max(2, ch.Agile // 25),     # 99/25 ≈ 3, 49/25 ≈ 1 → max(2, .)
+        move=max(1, ch.Agile // 10),     # exe FUN_004a4a32: 移动力 = 敏捷 / 10 (BFS 步数)
         is_player=True,
         color=(120, 200, 230),
         sprite_key=_try_sprite_key(name),
@@ -69,6 +69,7 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
     u.wisdom = ch.Wisdom
     u.luck = ch.Luck                       # 角色表 +0x58: 命中/闪避/暴击用的是幸运 (不是敏捷)
     u.speed = ch.Unknow_9                  # +0x5c: 每回合行动值增量 (exe FUN_004a4108)
+    u.action_value = max(0, int(ch.Unknow_1) if ch.Unknow_1 < 0x80000000 else 0)   # +0x1c 行动值, 跨战斗保留
     u.unit_class = PLAYER_UNIT_CLASS.get(name, 0)
     u.equipment = tuple(e for e in (ch.Head, ch.Body, ch.Hand, ch.Accessories1, ch.Accessories2)
                         if e not in (0xFFFFFFFF, -1))
@@ -109,7 +110,7 @@ def make_enemy(name: str) -> BattleUnit:
         level=t["level"],
         max_hp=t["max_hp"], hp=t["max_hp"],
         max_mp=0, mp=0, sg=0,
-        attack=t["attack"], defence=t["defence"], agile=t["agile"],
+        attack=t["attack"], defence=t["defence"], agile=t["agile"], speed=20,   # 占位模板: 每回合约一动
         move=t["move"],
         is_player=False,
         color=t["color"],

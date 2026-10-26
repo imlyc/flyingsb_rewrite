@@ -80,6 +80,8 @@ class ArenaBattleScene(BattleScene):
         ppos = allpos[:len(players)]
         epos = allpos[len(players):]
 
+        for e in enemies:                 # exe 摆阵 (普通阵型): 敌初始行动值 rand%20
+            e.action_value = rng.randrange(20)
         battle = TacticsBattle(
             players, enemies,
             battle_map=battle_map, rng=rng,

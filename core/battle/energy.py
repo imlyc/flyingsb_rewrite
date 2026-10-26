@@ -167,6 +167,8 @@ def write_back(battle) -> None:
         ch.CurrentMP = max(0, min(ch.MaxMP, mp - bonus))
         if uses_sg(u):
             ch.SG = u.sg
+        # 行动值跨战斗保留 (exe FUN_004a611c/4a62a2: 战斗结束 > 19 → 15)
+        ch.Unknow_1 = 15 if u.action_value > 19 else max(0, u.action_value)
 
 
 def status_snapshot(u: "BattleUnit") -> SimpleNamespace:

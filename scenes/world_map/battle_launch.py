@@ -215,6 +215,8 @@ def start_battle(scene: "WorldMapScene", enemies: list[BattleUnit]) -> None:
                 break
         break  # 防止死循环
 
+    for e in enemies:                     # exe 摆阵 FUN_0049ff07 (普通阵型): 敌初始行动值 rand%20
+        e.action_value = scene.rng.randrange(20)
     battle = TacticsBattle(
         party, enemies,
         battle_map=battle_map,
