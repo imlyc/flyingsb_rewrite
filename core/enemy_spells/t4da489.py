@@ -17,6 +17,8 @@ hook 招式 (FUN_004df363 = 130, FUN_004e11c1 = 150, FUN_004e1246 = 151): -100 �
 实录校准 (wine/captures/en7_t3_F10564.log, 逐 tick 吻合): 控制体在 -100 当 tick 出生、下一 tick 首次 think (age 0);
   风粒由控制体 think 生成, 出生当 tick 就 think (首帧 z 已 +3/4, 寿命 32/42 tick); -200 于 +47/77/107/137, -210 于 +137,
   渐亮起点/施法者回待机均与实录一致.
+  hook 实录 (en130_t91_F4716 / en150_t106_F3556 / en151_t219_F4474, 逐 tick 吻合): 循环 seq 第一圈跳过第 2 帧 (_first_pass);
+  150/151 在 -210 当 tick 仍显示当前帧 (置 0x10000), 下一 tick 换待机图, 收尾不再保持施法帧.
 """
 from __future__ import annotations
 
@@ -110,6 +112,13 @@ class Storm(Spell):
             self.finish()
 
 
+def _first_pass(loop: list) -> list:
+    """实录校准 (en130_t91 / en150_t106 / en151_t219): -100 里挂上的循环 seq 第一圈跳过第 2 帧 (帧0 → 帧2 → 帧3 → 帧4),
+    之后按 f0..f4 正常循环 (疑为 exe seq 解释器从 SIGNAL op 返回后按旧 op 长度前进). 'loop' 只能回到开头, 这里把后续圈展开."""
+    body = [t for t in loop if t[0] != 'loop']
+    return [body[0]] + body[2:] + body * 40 + [('loop',)]
+
+
 class StormHook(Storm):
     """FUN_004df363 (130) / FUN_004e11c1 (150) / FUN_004e1246 (151): 施法者循环 seq."""
     LOOP_TABLE: list = []
@@ -118,7 +127,7 @@ class StormHook(Storm):
     def on_cast_impact(self) -> None:
         c = self.caster
         if c.entity is not None:
-            self.battle.engine.attach_seq(c.entity, tuple_to_bytecode(self.LOOP_TABLE[_dir(c)]))
+            self.battle.engine.attach_seq(c.entity, tuple_to_bytecode(_first_pass(self.LOOP_TABLE[_dir(c)])))
             c.cast_hold = True
         super().on_cast_impact()
 
@@ -126,8 +135,10 @@ class StormHook(Storm):
         c = self.caster
         if c.entity is not None:
             c.entity.flags &= ~0x20000                          # 清 0x20000: seq 停
-        if self.IDLE_AFTER:
+        if self.IDLE_AFTER and c.cast_hold:
             c.cast_hold = False                                 # 置 0x10000: 回待机
+            if c.entity is not None:                            # 实录: 当 tick 仍显示当前帧, 下一 tick 才换待机图
+                c.entity.user_data['hold_until_tick'] = self.battle.engine._tick_id + 1
 
     def on_ctrl_done(self, v) -> None:
         self._stop_loop()
@@ -136,6 +147,12 @@ class StormHook(Storm):
     def finish(self) -> None:
         self._stop_loop()                                       # 保险: 没目标时也别让循环 seq 挂着
         super().finish()
+
+    def _end(self) -> None:
+        super()._end()
+        c = self.caster
+        if self.IDLE_AFTER and c.entity is not None:            # 150/151: -210 起已是待机姿, 收尾不再保持施法帧
+            c.entity.user_data.pop('hold_until_tick', None)
 
 
 class Storm130(StormHook):

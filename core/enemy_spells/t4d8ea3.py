@@ -15,6 +15,7 @@ hook 招式 189 (FUN_004e2d83): -100 时先播 0xcb 再进模板.
 实录校准 (wine/captures/en5_t2_F3566.log): 火球 -100 后 +16 出生, 8 tick 到达; 刺爆/火爆 +24, 火爆 31 tick, 飘字 +55,
   渐亮起点 +92 均吻合. 火爆位置以目标受击后退 4px 之后为准 (knocked_pos). 残差: 原版渐亮占 21 tick (我们 20, 帧率),
   施法者回待机晚 2 tick (框架); 飘字数字 spawner→数字 原版 2 tick 我们 1 tick (公共飘字系统).
+189 实录 (en189_t143_F4470.log): 施法 seq / 火球 (+18, 6 tick) / 刺爆+火爆 (+24) / 飘字 / 渐亮起点 +92 逐 tick 吻合, 无需改动.
 """
 from __future__ import annotations
 
