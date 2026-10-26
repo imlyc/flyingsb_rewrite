@@ -5,7 +5,9 @@ dispatcher: 0 渐暗 → 10 播 0xbc + 施法者挂 670264[朝向] (atlas 56: �
         FUN_004d074e(施法者, DAT_007da1ec) 施法者头上回复数字, 0x7a++ → 0x1e.
   -20: 0x7a--.  0x1e: 0x7a == 0 → 0x28 渐亮 → 自毁 (不等受击 seq).
 DAT_007da1ec (FUN_004a6efe 敌方分支, 招式 0x20 / 0x7f): 吸血量 = 造成的伤害, 但不超过施法者 MaxHP - 当前 HP;
-  施法者 HP += 吸血量. 数值层 (core.battle.formulas) 没实现这一项, 这里在演出结算里补上 (建议日后挪进 formulas).
+  施法者 HP += 吸血量.
+实录校准 (wine/captures/en32_t12_F4983.log): -100 (+11) 飘字/白字、渐亮 +69 吻合; 施法者 -100 之后的帧晚 1 t
+  (exe 在 -100 里挂目标受击 seq → 全局 break), 已按此处理. 数值层 (core.battle.formulas) 没实现这一项, 这里在演出结算里补上 (建议日后挪进 formulas).
 """
 from __future__ import annotations
 
@@ -35,6 +37,9 @@ class ShaDeXi(Spell):
     def on_cast_impact(self) -> None:
         from core.battle import combat
         b, c = self.battle, self.caster
+        # exe -100 给目标挂受击 seq (FUN_00438d40) 会置全局 break → 施法者 seq 本 tick 停在 -100 之后
+        # (实录 en32_t12: f3 晚 1 t 出现). 我们受击走 set_reaction 不挂 seq, 这里手动置 break.
+        b.engine._break = True
         if self.targets:
             v = self.targets[0]
             if v.alive:
