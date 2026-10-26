@@ -5,11 +5,11 @@ flags & 3 = 目标: 0 / 2 打我方, 1 对己方 (回复等, AI 优先). (flags 
   1 加异常: 对每种异常位 k (flags & 0x100<<k, 目标未中): 成功率 = 威力 + (敌智 - 我智)/2 + (威力 + 敌幸运 - 我幸运) + 相性,
     clamp 10..90 → FUN_004a6c6b (毒 4 / 睡 3 / 沉默 3 / 痲痺 2 / 咀咒 3 回合)
   2 回复己方: (威力 × 敌 MaxHP × (rand%20+90) / 10000 + 敌智 × 威力 / 100) × 衰减/8, 封顶 MaxHP
-  3 召唤 (未做)
+  3 召唤 (招 2 召喚牛寶寶, 演出 + 生成见 core.enemy_spells.m2)
   4 固定伤害自爆: 敌种 0xb7/0xb8/0xb9 → 44 / 444 / 666, 自己倒下
 演出: kind 'doit' = DOIT_melee (seq 表 + 命中特效, 同玩家普攻); 'tmpl' / 'custom' 演出另做 (现回落通用攻击动作).
-AI (FUN_004b1286 / 4af4bf): 候选 = 扣 MP ≤ 当前 MP 的招式; 先排第一个带 flags&1 的, 其余按权重无放回抽签定顺序,
-  依次找能用的站位/目标; 沉默只能用物理招. 站位打分 (FUN_004aece7) 现用"罩住最多目标"近似.
+AI (FUN_004b1286 / 4af4bf / 4aece7 / 4b0532 / 4b1084): 逐函数移植在 core.battle.ai_exe (选招顺序 move_order_exe,
+  站位/朝向/光标打分, 回复, 召唤, 移动 fallback).
 """
 from __future__ import annotations
 
@@ -70,41 +70,6 @@ def seq_for(idx: int, facing: tuple[int, int]) -> list[tuple] | None:
 def hit_style(idx: int) -> str | None:
     m = move(idx)
     return FX_STYLE.get(m.fx) if m and m.fx else None
-
-
-# ---------------- AI 选招顺序 (FUN_004af4bf + FUN_004b1286) ----------------
-def move_order(battle, unit: "BattleUnit") -> list[int]:
-    """返回本回合尝试的招式 id 顺序."""
-    from core.battle.status import has_status
-    weights = list(getattr(unit, 'move_weights', []) or [])
-    cands = []
-    for slot, mid in enumerate(unit.enemy_moves):
-        m = move(mid)
-        if m is None or m.mp_cost > unit.mp:
-            continue
-        cands.append((slot, mid, max(0, weights[slot]) if slot < len(weights) else 0))
-    if has_status(unit, 0x400):                          # 沉默: 只能物理招
-        cands = [c for c in cands if move(c[1]).physical]
-    order: list[int] = []
-    pri = next((c for c in cands if move(c[1]).flags & 1), None)
-    rest = list(cands)
-    if pri is not None:
-        order.append(pri[1])
-        rest.remove(pri)
-    while rest:
-        total = sum(w for _, _, w in rest)
-        if total <= 0:
-            order += [mid for _, mid, _ in rest]
-            break
-        r = battle.rng.randrange(total)
-        acc = 0
-        for c in rest:
-            acc += c[2]
-            if r < acc:
-                order.append(c[1])
-                rest.remove(c)
-                break
-    return order
 
 
 # ---------------- 非伤害类结算 ----------------

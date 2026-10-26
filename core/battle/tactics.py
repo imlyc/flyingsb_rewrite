@@ -418,7 +418,7 @@ class TacticsBattle:
             self._pending_enemy_skill = None
             self._pending_enemy_cursor = None
             u = self.current
-            # 敌招 (AI 选定, core.battle.ai.take_turn_moves): exe FUN_004a6efe 开头 敌 MP -= 招式表 +0xc
+            # 敌招 (AI 选定, core.battle.ai_exe.take_turn): exe FUN_004a6efe 开头 敌 MP -= 招式表 +0xc
             mv, self._pending_enemy_move = self._pending_enemy_move, None
             if sid is None and mv is None:
                 self._pending_damage_range = None
