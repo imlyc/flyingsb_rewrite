@@ -41,7 +41,12 @@ def spell_class(mid: int | None):
         return _MOVES[mid]
     from core.enemy_moves import move
     m = move(mid)
-    if m is None or not m.kind.startswith('tmpl') or not m.called:
+    if m is None:
+        return None
+    if m.kind == 'doit':                       # 普通 DOIT_melee: 同 hook 招的 DOIT 收尾 (命中特效按受击后退 4px + 13 tick 镜头等待)
+        from core.enemy_spells.m_doit_hook import DoitHook
+        return DoitHook
+    if not m.kind.startswith('tmpl') or not m.called:
         return None
     return _TEMPLATES.get(int(m.called[4:], 16))
 
