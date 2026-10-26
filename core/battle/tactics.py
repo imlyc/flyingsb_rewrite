@@ -348,8 +348,8 @@ class TacticsBattle:
             return
         self._turn_order = [u]
         self._turn_idx = 0
-        self._poison_tick(u)
-        self.refresh_status_snapshot()           # exe case 3: 轮到单位行动 FUN_004a4e42(1)
+        if not self._poison_tick(u):
+            self.refresh_status_snapshot()       # exe case 3: 轮到单位行动 FUN_004a4e42(1) (中毒: 演出完才刷新)
         if u.is_player:
             self.phase = Phase.PLAYER_MOVE
             self._pre_move_pos = (u.x, u.y)
@@ -362,18 +362,18 @@ class TacticsBattle:
         # AI 延后执行: scene 显示移动范围一会儿后调 run_pending_enemy_ai.
         self._enemy_ai_pending = True            # 等 UI 调 run_pending_enemy_ai → 再调 post_enemy_turn
 
-    def _poison_tick(self, u: BattleUnit) -> None:
+    def _poison_tick(self, u: BattleUnit) -> bool:
         """exe FUN_004a4f94 case 1: 中毒 (0x100) 的单位轮到行动时先扣 当前 HP / 4 (FUN_004a4018, 打不死),
-        播中毒演出 (BTLdoToxic FUN_004cb5da, 未做) 后照常行动."""
+        播中毒演出 (BTLdoToxic, core.battle.toxic: 10t 后受击 + 飘字, 演完才刷新状态栏) 后照常行动. 返回是否起了演出."""
         from core.battle.status import has_status
         if not u.alive or not has_status(u, 0x100):
-            return
+            return False
         dmg = u.hp // 4
-        if dmg <= 0:
-            return
         u.hp -= dmg
-        combat.push_damage_event(self, u, DamageEvent(dmg, u.hp, u.x, u.y))
+        from core.battle import toxic
+        toxic.start(self, u, dmg)
         self._log(f"{u.name} 中毒 -{dmg} ({u.hp}/{u.max_hp})")
+        return True
 
     def end_unit_turn(self) -> None:
         if self._turn_idx < len(self._turn_order):

@@ -270,7 +270,8 @@ def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:
     if scene.battle.phase == Phase.ENEMY_TURN:
         # (a) Pre-move 暂停: AI 还没跑, 给玩家看移动范围
         if scene.battle._enemy_ai_pending:
-            if any(u.flicker for u in scene.battle.all_units):    # 紫河变身闪烁中: 敌人等闪完再开始
+            if (any(u.flicker for u in scene.battle.all_units)    # 紫河变身闪烁中: 敌人等闪完再开始
+                    or getattr(scene.battle, 'toxic_active', False)):   # 中毒演出 (core.battle.toxic) 演完再开始
                 scene._enemy_pre_move_started_at = None
                 return
             if scene._enemy_pre_move_started_at is None:
