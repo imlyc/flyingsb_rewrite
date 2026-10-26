@@ -140,8 +140,10 @@ class ArenaBattleScene(BattleScene):
     def _make_terrain():
         if realm.maps_available() and realm.is_available(realm.DEFAULT_ARENA_MAP):
             try:
+                import copy
                 m = realm.load(realm.DEFAULT_ARENA_MAP)
                 if realm.DEFAULT_ARENA_LAYER == 1 and m._layer1:     # 只在擂台上打: 通行按第 1 层
+                    m = copy.copy(m)                     # 浅拷贝: 别改 realm 缓存的共享实例 (世界地图/其他测试也用)
                     m.layer = 1
                     m.cells_active = m.cells1
                 return m
