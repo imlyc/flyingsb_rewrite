@@ -8,6 +8,8 @@
          特效 think (FUN_004e57e8 / FUN_004e5d7f): seq 播完 → -200 自毁.
   -200   全部目标: FUN_004c4f20 + 受击 6557f0[目标朝向] + 两特效 (655c10[施法者朝向] + 655b18, 各轴 (rand&15)-8 抖动) + 飘字.
   0x1e   计数归零 → 0x28 渐亮 → 228 销毁施法者实体 (自爆者消失, 无死亡动画) → 自毁.
+实录校准 (wine/captures/en230_t217_F3728.log): 230 毒气位置/36 t 帧序、-200 受击特效与飘字 (+58)、渐亮起点逐 tick 吻合;
+  收尾 +1 t = 原版这次渐亮只 19 t (FUN_004d0cd8 按时间, 各实录 19-21 t 不等), 框架定 20 t. 228 自爆原版没录到 (cast timeout).
 结算: 228 类别 4 = 固定伤害 core.enemy_moves.SELF_DESTRUCT_DMG[敌种] (同 combat._apply_enemy_special), 施法者 HP 归零;
 230 走 Spell.settle (按招式类别).
 """
