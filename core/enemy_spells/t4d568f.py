@@ -9,13 +9,15 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标: (+4 & 0x100 才) 挂接�
   -200: 首目标 0xca; 目标回待机 (|= 0x10000) + 回血白字, +0x7a.  (无羽毛)
   -250: +0x78--.  0x1e: 计数归零 + 飘字完 → 0x28 渐亮.
 近似: 接受姿只给玩家方单位挂 (exe 看单位 +4 & 0x100).
+实录校准 (wine/captures/en17_t6_F6428.log, 施法者自疗): 光点 (+20, 寿命 133, state 0×97 10×25 20×11)、上升粒子
+  (出生当 tick 即 think, 寿命 48)、白字 (+142)、渐亮起点 (+199) 吻合. 残差: 施法者 -200 回待机原版晚 1 tick 显示 (+143).
 """
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _set_z, _c3211, _motion, _getz
 from core import jet_skills as J
 from core.jet_skills import MAG_SEQ
-from core.enemy_spells.t4d4ee0 import hold_pose, heal_settle
+from core.enemy_spells.t4d4ee0 import hold_pose, heal_settle, spawn_rise, HealFinish
 
 
 def _dot_think(e, eng) -> None:
@@ -32,9 +34,9 @@ def _dot_think(e, eng) -> None:
         ud['px'] = ud['py']
         _c3211(e)
         if ud['age'] % 2 == 0:
-            J._spawn_rise(sp.battle, e)
+            spawn_rise(sp.battle, e)
         if _getz(e) > 0x600000:
-            ud['state'] = 10
+            ud['state'] = e.state_code = 10
     elif st == 10:
         ud['py'] = (ud['py'] + ud['spd']) & 0xffff
         ud['px'] = ud['py']
@@ -47,13 +49,13 @@ def _dot_think(e, eng) -> None:
                     _sfx(sp.battle, 0xca)
                 heal_settle(sp, ud['target'], feathers=False)
             ud['rz'] = 0
-            ud['state'] = 20
+            ud['state'] = e.state_code = 20
     else:
         ud['rz'] += 10
         ud['ry'] += ud['rz']
         ud['rx'] = ud['ry']
         _c3211(e)
-        J._spawn_rise(sp.battle, e)
+        spawn_rise(sp.battle, e)
         if ud['rx'] > 599:
             if ud['lead']:
                 sp.on_lead_done()
@@ -62,7 +64,7 @@ def _dot_think(e, eng) -> None:
     ud['age'] += 1
 
 
-class BigHeal(Spell):
+class BigHeal(HealFinish, Spell):
     def on_cast_impact(self) -> None:
         b = self.battle
         for i, t in enumerate(self.targets):

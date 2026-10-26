@@ -8,12 +8,40 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标: (+4 & 0x100 才) 挂接�
   -200: 目标回待机 (|= 0x10000) + 回血白字 (FUN_004d074e) + 32 片羽毛 (FUN_004d498c), +0x7a.
   -250: +0x78--.  0x1e: 计数归零 + 飘字完 → 0x28 渐亮.
 近似: 接受姿只给玩家方单位挂 (exe 看单位 +4 & 0x100, 同 core.mina_skills 大恢復的处理).
+实录校准 (wine/captures/en95_t58_F5542.log, 施法者自疗): 光柱 (+20, 寿命 133, state 0×97 10×25 20×11)、上升粒子
+  (+23 起每 2 t, 出生当 tick 即 think — +21 那批出生即落地自毁, 实录看不到)、羽毛 (出生即 think)、白字 (+142)、
+  渐亮起点 (+199 = 末位白字 -20 的下一 tick) 吻合. 粒子/羽毛按实录出生即 think (exe 池序: 下标在光柱之后).
 """
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _set_z
 from core import jet_skills as J
 from core.jet_skills import MAG_SEQ, FEATHER_SEQS, HEAL_POSE_SEQS
+
+
+def spawn_rise(b, src) -> None:
+    """FUN_004d4819 (= jet_skills._spawn_rise), 实录 (en95/en17): 粒子出生当 tick 即 think."""
+    vx = 0x4000 // ((_rand(b) & 3) + 1)
+    vy = 0x4000 // ((_rand(b) & 3) + 1)
+    e = fx(b, J._rise_think, src.x, src.y, src.user_data['ez'], FEATHER_SEQS[_rand(b) & 3], rise=True,
+           vx=vx, vy=vy, vz=-2 * FP, az=0, age=0)
+    J._rise_think(e, b.engine)
+
+
+class HealFinish:
+    """回复类收尾 (混入 Spell 子类前): 实录 en17/en95/en36 末位白字 -20 的下一 tick 就渐亮 (白字与 exe 同 tick 落定,
+    不需要框架为红字多等的那 1 tick); 施法者自疗时 -200 已回待机, 收尾不再显示施法末帧."""
+
+    def _finish_tick(self) -> None:
+        if self._fade is None and not self.busy():
+            self._quiet = max(self._quiet, 1)
+        super()._finish_tick()
+
+    def _end(self) -> None:
+        super()._end()
+        c = self.caster
+        if c in self.targets and c.entity is not None:
+            c.entity.user_data.pop('hold_until_tick', None)
 
 
 def hold_pose(sp: Spell, t) -> None:
@@ -34,8 +62,9 @@ def heal_settle(sp: Spell, t, feathers: bool) -> None:
         vx = ((_rand(b) & 31) - 16) * FP >> 4
         vy = ((_rand(b) & 31) - 16) * FP >> 4
         vz = ((_rand(b) & 63) * FP) >> 4
-        fx(b, J._feather_think, x, y, 128 * FP, FEATHER_SEQS[_rand(b) & 3], feather=True, vx=vx, vy=vy,
-           vz=vz, az=0x8000, age=0)
+        e = fx(b, J._feather_think, x, y, 128 * FP, FEATHER_SEQS[_rand(b) & 3], feather=True, vx=vx, vy=vy,
+               vz=vz, az=0x8000, age=0)
+        J._feather_think(e, b.engine)            # 实录 en95: 羽毛出生当 tick 即 think (首帧 z≠128)
 
 
 def _pillar_think(e, eng) -> None:
@@ -51,9 +80,9 @@ def _pillar_think(e, eng) -> None:
         ud['phi'] = (ud['phi'] + ud['spd']) & 0xffff
         J._orbit(e)
         if ud['age'] % 2 == 0:
-            J._spawn_rise(sp.battle, e)
+            spawn_rise(sp.battle, e)
         if ud['ez'] > 0x600000:
-            ud['state'] = 10
+            ud['state'] = e.state_code = 10
     elif st == 10:
         ud['phi'] = (ud['phi'] + ud['spd']) & 0xffff
         ud['rx'] = ud['ry']
@@ -64,7 +93,7 @@ def _pillar_think(e, eng) -> None:
                 heal_settle(sp, ud['target'], feathers=True)
                 _sfx(sp.battle, 0xca)
             ud['grow'] = 0
-            ud['state'] = 20
+            ud['state'] = e.state_code = 20
     else:
         ud['grow'] += 10
         ud['ry'] += ud['grow']
@@ -78,7 +107,7 @@ def _pillar_think(e, eng) -> None:
     ud['age'] += 1
 
 
-class HealPillars(Spell):
+class HealPillars(HealFinish, Spell):
     def on_cast_impact(self) -> None:
         b = self.battle
         for t in self.targets:
