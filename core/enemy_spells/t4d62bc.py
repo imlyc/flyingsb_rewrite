@@ -6,13 +6,15 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标一个控制体 FUN_004d629
           az 0x1999, 首目标 0xc9 → case 0x14 5t 每 t 8 个 ds_mag03 光圈 (FUN_004d5cd5) → 0x19 (停一拍) → 0x1e 120t 弹簧浮动 →
           目标 z 0, vz -1px, az 0, DAT_0086a768=1 (光圈散) + -200 + -250 (首目标 0xca) → 0x28 落到 z<0 → 目标回待机, 自毁.
   -200: 回血白字 (+0x7a).  -250: +0x78--.  0x1e: 计数归零 + 飘字完 → 0x28 渐亮.
+实录校准 (wine/captures/en36_t13_F7132.log, 施法者自疗): 控制体 (+11, 寿命 226, state 0 10×48 20×5 25 30×119 40×52)、
+  40 个光圈出生/寿命、白字 (+185)、渐亮起点 (+242 = 末位白字 -20 下一 tick) 吻合. 残差: 光圈撒的上升粒子 1/4 原版寿命 50 (池序).
 近似: 接受姿只给玩家方单位挂 (exe 看单位 +4 & 0x100); 目标落地后 z 归 0 (exe 停在 -0.99px 到回合结束).
 """
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, FP, _sfx
 from core import jet_skills as J
-from core.enemy_spells.t4d4ee0 import hold_pose
+from core.enemy_spells.t4d4ee0 import hold_pose, HealFinish
 
 
 def _ctrl_think(e, eng) -> None:
@@ -64,10 +66,11 @@ def _ctrl_think(e, eng) -> None:
             return
     if ent is not None:
         ent.z = -ud['uz']
+    e.state_code = ud['state']
     ud['age'] += 1
 
 
-class Yuka(Spell):
+class Yuka(HealFinish, Spell):
     def on_cast_impact(self) -> None:
         for i, t in enumerate(self.targets):
             e = self.battle.engine.spawn(think_fn=_ctrl_think)
