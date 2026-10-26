@@ -23,7 +23,7 @@ from core.battle.queries import BattleQueries
 from core.battle.data import (
     BattleMap,
     BattleUnit,
-    EXP_PER_LEVEL,
+    DamageEvent,
     LevelUpReport,
     Phase,
     default_battle_map,
@@ -52,6 +52,7 @@ class TacticsBattle:
         self.messages: list[str] = []
         self.exp_gained = 0
         self.money_gained = 0
+        self.drops: list[tuple[int, int]] = []   # 掉落 [(道具, 个数)] (settlement.rewards)
         # 单位回合内的 "原位置" (取消移动用)
         self._pre_move_pos: tuple[int, int] | None = None
         # 本回合可达范围 (起点 BFS 缓存; 每回合开始更新)
@@ -342,6 +343,7 @@ class TacticsBattle:
             return
         self._turn_order = [u]
         self._turn_idx = 0
+        self._poison_tick(u)
         self.refresh_status_snapshot()           # exe case 3: 轮到单位行动 FUN_004a4e42(1)
         if u.is_player:
             self.phase = Phase.PLAYER_MOVE
@@ -354,6 +356,19 @@ class TacticsBattle:
         self.turn_move_range = self.q.movement_range(u)
         # AI 延后执行: scene 显示移动范围一会儿后调 run_pending_enemy_ai.
         self._enemy_ai_pending = True            # 等 UI 调 run_pending_enemy_ai → 再调 post_enemy_turn
+
+    def _poison_tick(self, u: BattleUnit) -> None:
+        """exe FUN_004a4f94 case 1: 中毒 (0x100) 的单位轮到行动时先扣 当前 HP / 4 (FUN_004a4018, 打不死),
+        播中毒演出 (BTLdoToxic FUN_004cb5da, 未做) 后照常行动."""
+        from core.battle.status import has_status
+        if not u.alive or not has_status(u, 0x100):
+            return
+        dmg = u.hp // 4
+        if dmg <= 0:
+            return
+        u.hp -= dmg
+        combat.push_damage_event(self, u, DamageEvent(dmg, u.hp, u.x, u.y))
+        self._log(f"{u.name} 中毒 -{dmg} ({u.hp}/{u.max_hp})")
 
     def end_unit_turn(self) -> None:
         if self._turn_idx < len(self._turn_order):
@@ -430,68 +445,13 @@ class TacticsBattle:
             if self.arena_mode:
                 self._log("敌人全灭! (竞技场模式: 无经验结算)")
             else:
-                self.exp_gained = sum(e.exp_reward for e in self.enemies)
-                self.money_gained = sum(e.money_reward for e in self.enemies)
-                self._log(f"敌人全灭! 经验+{self.exp_gained} 金钱+{self.money_gained}")
-                self._allocate_levelups()
+                from core.battle import settlement
+                settlement.rewards(self)                 # exe FUN_004a5c63: ×145%, 掉落
+                self._log(f"敌人全灭! 经验+{self.exp_gained} 金钱+{self.money_gained}"
+                          + (f" 掉落 {self.drops}" if self.drops else ""))
+                settlement.distribute_exp(self)          # exe FUN_004a5f60 / 4a5e0b
             return True
         return False
-
-    def _allocate_levelups(self) -> None:
-        """战斗胜利时分配经验, 触发升级 + 生成升级报告.
-
-        有原版数据 (assets/characters_table.json) 时用**真实经验表 + 成长表**:
-        逐级扣 exp_needed(level), 应用 growth_gains(level) 到 HP/MP/攻/防.
-        缺数据时回退旧的随机成长占位.
-        """
-        from core import character_data
-        survivors = [p for p in self.players if p.alive]
-        if not survivors or self.exp_gained <= 0:
-            return
-        per = self.exp_gained // len(survivors)
-        real = bool(character_data.records())
-        for p in survivors:
-            levels = 0
-            hp_inc = mp_inc = atk_inc = def_inc = 0
-            if real:
-                remaining = per
-                while p.level < character_data.MAX_LEVEL:
-                    need = character_data.exp_needed(p.level)
-                    if need <= 0 or remaining < need:
-                        break
-                    remaining -= need
-                    g = character_data.growth_gains(p.name, p.level + 1)
-                    p.level += 1
-                    levels += 1
-                    hp_inc += g.get("MaxHP", 0)
-                    mp_inc += g.get("MaxMP", 0)
-                    atk_inc += g.get("base_atk", 0)
-                    def_inc += g.get("base_def", 0)
-            else:
-                levels = per // EXP_PER_LEVEL
-                if levels <= 0:
-                    continue
-                hp_inc = sum(self.rng.randint(3, 8) for _ in range(levels))
-                mp_inc = sum(self.rng.randint(0, 3) for _ in range(levels))
-                atk_inc = sum(self.rng.randint(1, 3) for _ in range(levels))
-                def_inc = sum(self.rng.randint(1, 3) for _ in range(levels))
-                p.level += levels
-            if levels <= 0:
-                continue
-            p.max_hp += hp_inc
-            p.hp = min(p.max_hp, p.hp + hp_inc)  # 原版升级回满
-            p.max_mp += mp_inc
-            p.mp = min(p.max_mp, p.mp + mp_inc)
-            p.attack += atk_inc
-            p.defence += def_inc
-            if real:   # 升级后刷新已学技能 (按真实学习表)
-                learned = character_data.learned_skills(p.name, p.level)
-                if learned:
-                    p.known_skills = learned
-            self.level_ups.append(LevelUpReport(
-                name=p.name, new_level=p.level, gained_levels=levels,
-                hp_inc=hp_inc, mp_inc=mp_inc, atk_inc=atk_inc, def_inc=def_inc,
-            ))
 
     # ---- 玩家行动 ----
     def player_step(self, dx: int, dy: int) -> bool:

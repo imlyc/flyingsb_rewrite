@@ -227,8 +227,8 @@ def test_check_end_victory_when_all_enemies_dead():
     # 直接调内部 _check_end (= end_unit_turn 流程后会走到)
     assert b._check_end()
     assert b.phase == Phase.VICTORY
-    assert b.exp_gained == 100
-    assert b.money_gained == 50
+    assert b.exp_gained == 145                 # exe FUN_004a5c63: 敌人合计 × 145%
+    assert b.money_gained == 72                # 50 × 145 / 100
 
 
 def test_check_end_defeat_when_all_players_dead():
@@ -283,3 +283,19 @@ def test_counter_plays_after_attack_then_turn_ends():
     b._pending_turn_end = True
     b.advance_turn_when_ready()                         # 反击演完 → 恢复朝向 → 结束回合
     assert not e.is_countering and e.facing == (1, 0)
+
+
+def test_poison_ticks_quarter_hp_when_turn_starts():
+    """exe FUN_004a4018: 中毒单位轮到行动时先扣 当前 HP / 4 (打不死), 再照常行动."""
+    from core.battle.status import apply_status
+    p = _player("p", 1, 1, agile=20)
+    e = _enemy("e", 9, 9, agile=20)
+    b = _battle(players=[p], enemies=[e])
+    apply_status(p, 0x100, 4)
+    p.hp, p.max_hp = 100, 100
+    p.action_value, e.action_value = 20, 0
+    b._enter_current()                                 # 挑中 p → 先扣毒
+    assert b.current is p and p.hp == 75
+    p.hp, p.action_value = 3, 20
+    b._enter_current()
+    assert b.current is p and p.hp == 3                # 3 // 4 = 0: 中毒打不死

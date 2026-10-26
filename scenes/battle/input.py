@@ -196,8 +196,9 @@ def _advance_end_screen(scene: "BattleScene") -> None:
     ``_on_story_battle_end`` 钩子) —— 供剧情战斗在胜利后才入队/置进度。
     """
     won = scene.battle.phase == Phase.VICTORY
-    from core.battle import energy
-    energy.write_back(scene.battle)              # MP / SG 留在角色身上 (原版角色表), 跨战斗保留
+    from core.battle import settlement
+    rs_save = getattr(scene.return_scene, 'save', None)
+    settlement.write_back(scene.battle, rs_save)  # HP/MP/SG/行动值 回角色, 金钱/掉落进存档 (exe 角色表跨战斗保留)
     rs = scene.return_scene
     if hasattr(rs, "_on_story_battle_end"):
         try:

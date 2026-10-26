@@ -40,11 +40,16 @@ def test_level_up_growth():
 
 @pytest.mark.skipif(not _have_chars, reason="缺 assets/characters_table.json")
 def test_add_exp_levels():
-    """加大量经验应连升多级并消耗经验表."""
+    """exe FUN_004a5e0b: 经验累计, 达到阈值只升一级, 多出的截到下一级阈值 - 1."""
     ch = character_data.make_character("美娜")
-    gained = character_data.add_exp(ch, "美娜", 360)
-    assert ch.Level >= 3                  # 100+220 可到 Lv3
-    assert gained and gained[0] == 2
+    lv0 = ch.Level
+    t1, t2 = character_data.exp_needed(lv0), character_data.exp_needed(lv0 + 1)
+    ch.Exp = 0
+    gained = character_data.add_exp(ch, "美娜", t2 + 500)        # 够升两级也只升一级
+    assert gained == [lv0 + 1] and ch.Level == lv0 + 1
+    assert ch.Exp == t2 - 1 and ch.nextExp == 1
+    assert character_data.add_exp(ch, "美娜", 0) == []
+    assert t1 < t2
 
 
 @pytest.mark.skipif(not _have_data, reason="缺 assets/enemy_table.json")

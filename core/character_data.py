@@ -75,7 +75,7 @@ def exp_table() -> list[int]:
 
 
 def exp_needed(level: int) -> int:
-    """从 level 升到 level+1 所需经验 (0 = 满级)."""
+    """升到 level+1 的**累计**经验阈值 (exe 表 0x642670[level]; 0 = 满级). 注意不是"这一级要多少"."""
     t = exp_table()
     if level < 1 or level >= len(t) or level >= MAX_LEVEL:
         return 0
@@ -167,21 +167,27 @@ def level_up(ch: Character, name: str, new_level: int) -> None:
 
 
 def add_exp(ch: Character, name: str, amount: int) -> list[int]:
-    """加经验, 返回本次升到的等级列表 (可能连升)."""
-    if amount <= 0 or ch.Level >= MAX_LEVEL:
+    """exe FUN_004a5e0b: Exp 是累计值, 达到阈值表[等级] → **只升一级** (多出的截到 阈值[新等级] - 1),
+    nextExp = 阈值[等级] - Exp; 99 级封顶. 返回升到的等级列表 ([] 或 [新等级])."""
+    if amount <= 0:
         return []
-    gained: list[int] = []
     total = ch.Exp + amount
-    while ch.Level < MAX_LEVEL:
-        need = exp_needed(ch.Level)
-        if need <= 0 or total < need:
-            break
-        total -= need
-        level_up(ch, name, ch.Level + 1)
-        gained.append(ch.Level)
-    ch.Exp = total if ch.Level < MAX_LEVEL else 0
-    ch.nextExp = exp_needed(ch.Level) if ch.Level < MAX_LEVEL else 0
-    return gained
+    if ch.Level >= MAX_LEVEL:
+        ch.Exp, ch.nextExp = total, 0
+        return []
+    need = exp_needed(ch.Level)
+    if need <= 0 or total < need:
+        ch.Exp, ch.nextExp = total, max(0, need - total)
+        return []
+    new = ch.Level + 1
+    cap = exp_needed(new)
+    if cap > 0 and total >= cap:
+        total = cap - 1
+    level_up(ch, name, new)
+    ch.Level = new
+    ch.Exp = total
+    ch.nextExp = 0 if new >= MAX_LEVEL else max(0, exp_needed(new) - total)
+    return [new]
 
 
 # ---------------- 技能学习 (VA 0x64216C; 见 tools/extract_skill_learn.py) ----------------

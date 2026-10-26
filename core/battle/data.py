@@ -40,8 +40,6 @@ class LevelUpReport:
     def_inc: int
 
 
-# 简易升级规则: 单位本场获得的经验 ÷ EXP_PER_LEVEL = 升级数
-EXP_PER_LEVEL = 25
 
 # 闪避判定参数 (重击/轻击区分已废弃: 原版只有一种受击反应, 见 reaction_seq.py)
 BASE_MISS_RATE = 0.05            # 同等敏捷时的基础闪避率
@@ -80,6 +78,8 @@ class BattleUnit:
     action_value: int = 0            # 行动值 (玩家角色表 +0x1c = 存档 Unknow_1, 跨战斗保留; 敌实例 +0x20) — exe ATB
     is_countering: bool = False      # 正在演反击 (不再触发反击; tactics._start_counter)
     pending_enemy_move: int | None = None   # 敌人本次行动用的招式 (敌招表下标; formulas.enemy_attack)
+    drop_item: int = -1              # 敌掉落物 (敌人表 +0x68) / 千分比 (+0x6c)
+    drop_rate: int = 0
     enemy_type: int = -1             # 敌人表下标 (那印 9/10 等特判); 玩家 -1
     unit_class: int = 0              # 反击概率表行: 玩家 exe 0x641820[角色] / 敌 +0x08
     move_weights: list = field(default_factory=list)   # 敌出招权重 (+0x50..), 与 enemy_moves 对应

@@ -140,3 +140,30 @@ def test_status_snapshot_refresh_points():
     assert (snap().hp, snap().mp) == (600, 20)                  # 行动中: 不变
     bt.end_unit_turn()                                          # 行动结束 → 刷新
     assert (snap().hp, snap().mp) == (550, 15)
+
+
+def test_settlement_rewards_exp_split_and_write_back():
+    """exe 战后: 经验/金钱 ×145%, 活人平分, 黄金苹果 ×2, 一场最多升一级; 倒下的 → 1 HP; 金钱/掉落进存档."""
+    from core import character_data
+    from core.battle import settlement
+    from core.battle.data import Phase
+    from core.inventory import Inventory
+    a, b2 = _u('美娜', 10, 10, max_mp=30, mp=30), _u('孙悟空', 11, 10, max_mp=20, mp=20)
+    ca, cb = character_data.make_character('美娜'), character_data.make_character('孙悟空')
+    for u, ch in ((a, ca), (b2, cb)):
+        u.save_ref, u.level = ch, ch.Level
+        ch.Exp = 0
+    e = _u('e', 20, 20, is_player=False)
+    e.exp_reward, e.money_reward, e.drop_item, e.drop_rate = 100, 1000, 299, 1000
+    bt = _battle([a, b2], [e])
+    b2.hp = 0                                                  # 孙悟空倒下: 没有经验份
+    a.equipment = (settlement.GOLDEN_APPLE,)
+    e.hp = 0
+    assert bt._check_end() and bt.phase == Phase.VICTORY
+    assert bt.exp_gained == 145 and bt.money_gained == 1450 and bt.drops == [(299, 1)]
+    assert (ca.Level, ca.Exp) == (2, 219)                      # 290 ≥ 阈值 100 → 只升到 2, 截到 220 - 1
+    assert [r.name for r in bt.level_ups] == ['美娜'] and a.level == 2
+    assert cb.Exp == 0
+    save = SimpleNamespace(money=5, inventory=Inventory())
+    settlement.write_back(bt, save)
+    assert cb.CurrentHP == 1 and save.money == 1455 and save.inventory.count(299) == 1
