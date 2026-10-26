@@ -26,12 +26,19 @@
           seq 66f954 (atlas 305 帧 0-11 各 1t) 播完自毁.
      -250: 全部目标 受击 (转向施法者) + 刺爆 + et00 星爆 + 碎屑. -200: 全部飘字.
 控制实体 / 发射器的 age 都按 "首次 think = 0" 计.
+实录校准 (wine/captures/en26_t9_F4474.log / en27_t10_F4234.log / en28_t10_F4464.log), 改后三招逐 tick 吻合:
+  26: 控制实体出生 (枪口闪光播完那 tick) 即 think → 首段光束 + -250 同 tick (+75); 光束出屏按 exe 窗口坐标
+      (+0x120 ∈ [-100, 740], +0x124 ∈ [-100, 580], = 世界坐标 - 屏中心 + 400/300, 屏幕 y 含 z), 寿命 8 t.
+      屏中心 = battle.view_center_world; headless 无 → 施法者上方 48px (**近似**, 由寿命反推).
+  27: 发射器按 dispatcher age%16 节拍 (+29, 不是 -100 那 tick), 出生当 tick 即 think; 导弹出生当 tick 已走第 1 步.
+  28: 火团出生当 tick 即 think.
+  三招渐亮起点吻合 (差 1 t 时为飘字位数不同).
 """
 from __future__ import annotations
 
 import math
 
-from core.enemy_spells.base import Spell, fx, FP, _pos, _sfx, _dir, _c3211, _motion, _i32
+from core.enemy_spells.base import Spell, fx, FP, _pos, _sfx, _dir, _c3211, _motion, _i32, _getz
 from core.enemy_spells._ecommon import hit_unit, static_fx, stop_sfx, angle_to, OPP
 
 CAST = [[('fm', 54, d * 6 + k, 3) for k in range(6)] + [('jump', -100), ('exit',)] for d in range(4)]   # 66f828
@@ -67,7 +74,10 @@ def _beam_think(e, eng) -> None:
         return
     _c3211(e)
     e.frame_idx = tick % 4 + (0x10 if ud['d'] < 2 else 0x14)
-    if abs(e.x - ud['x0']) > 800 * FP or abs(e.y - ud['y0']) > 600 * FP:
+    cx, cy = ud['spell'].view_center()
+    sx = (e.x >> 16) - cx + 400                       # exe +0x120 / +0x124 = 800×600 窗口坐标 (同 t4d194c)
+    sy = (e.y >> 16) - (_getz(e) >> 16) - cy + 300
+    if sx < -100 or sx > 0x2e4 or sy < -100 or sy > 0x244:
         eng.destroy(e)
 
 
@@ -94,6 +104,16 @@ class LaserShot(Spell):
         self.live -= 1
         self.ctrl = 0
         _sfx(self.battle, SFX_BEAM)
+        self._ctrl_step()           # 实录 en26_t9: 控制实体出生当 tick 即 think (第 1 段光束 + 首次 -250 与它同 tick)
+
+    def view_center(self) -> tuple[int, int]:
+        """屏中心 (世界像素) = battle.view_center_world; headless 无 → 施法者格中心上移 48px (**近似**:
+        实录 en26_t9 光束寿命 8 t 反推原版镜头中心在施法者上方 24..72px)."""
+        view = getattr(self.battle, 'view_center_world', None)
+        if view is not None:
+            return view
+        x, y = _pos(self.caster)
+        return x >> 16, (y >> 16) - 48
 
     def spawn_beam(self) -> None:
         """FUN_004e981e."""
@@ -105,22 +125,26 @@ class LaserShot(Spell):
         x, y = x + ox * FP, y + 600 * FP + oy * FP
         tick = b.engine._tick_id
         static_fx(b, _beam_think, x, y, 656 * FP, LASER_ATLAS, tick % 4 + (0x10 if d < 2 else 0x14), beam=True, d=d,
-                  born=tick, x0=x, y0=y, **_motion(m=0x31, vx=vx * FP, vy=vy * FP))
+                  born=tick, spell=self, **_motion(m=0x31, vx=vx * FP, vy=vy * FP))
+
+    def _ctrl_step(self) -> None:
+        """控制实体 FUN_004e9a67 一 tick."""
+        age = self.ctrl
+        self.ctrl += 1
+        self.spawn_beam()
+        if age % 20 == 0:
+            _sfx(self.battle, SFX_BEAM_HIT)
+            for v in self.targets:
+                hit_unit(self, v, face_caster=True, chiri=True)
+        if age == BEAM_LIFE:
+            stop_sfx(self.battle, SFX_BEAM)
+            self.ctrl = None
+            for v in self.targets:
+                self.settle(v)
 
     def think(self) -> None:
         if self.ctrl is not None:
-            age = self.ctrl
-            self.ctrl += 1
-            self.spawn_beam()
-            if age % 20 == 0:
-                _sfx(self.battle, SFX_BEAM_HIT)
-                for v in self.targets:
-                    hit_unit(self, v, face_caster=True, chiri=True)
-            if age == BEAM_LIFE:
-                stop_sfx(self.battle, SFX_BEAM)
-                self.ctrl = None
-                for v in self.targets:
-                    self.settle(v)
+            self._ctrl_step()
         if self.launched and self.ctrl is None and self.live == 0 and not self._finishing:
             self.finish()
 
@@ -211,9 +235,11 @@ class HomingLaser(Spell):
         b = self.battle
         x, y = _pos(self.caster)
         tx, ty = _pos(v)
-        static_fx(b, _missile_think, x, y, 56 * FP, MISSILE_ATLAS, MISSILE_FRAMES[(((ang + 0x10000) & 0xffff) * 0x18) >> 16],
-                  missile=True, spell=self, victim=v, tx=tx, ty=ty, a=(ang + 0x10000) & 0xffff, r=0x100000, st=0)
+        e = static_fx(b, _missile_think, x, y, 56 * FP, MISSILE_ATLAS,
+                      MISSILE_FRAMES[(((ang + 0x10000) & 0xffff) * 0x18) >> 16],
+                      missile=True, spell=self, victim=v, tx=tx, ty=ty, a=(ang + 0x10000) & 0xffff, r=0x100000, st=0)
         _sfx(b, SFX_LAUNCH)
+        _missile_think(e, b.engine)             # 实录 en27_t10: 导弹出生当 tick 已走第 1 步
 
     def on_missile_hit(self, v) -> None:
         """-250."""
@@ -228,7 +254,7 @@ class HomingLaser(Spell):
         if not self.casting:
             return
         if self.spawned < len(self.targets):
-            if (self.age - self.t0) % 16 == 0:
+            if self.age % 16 == 0:              # 实录 en27_t10: 按 dispatcher age (+0x144) 节拍, 不是 -100 起算
                 v = self.targets[self.spawned]
                 self.spawned += 1
                 self.live += 1
@@ -236,6 +262,7 @@ class HomingLaser(Spell):
                 e = self.battle.engine.spawn(think_fn=_launcher_think)       # 不可见控制实体
                 e.user_data.update(kind='enemy_spell_ctrl', launcher=True, spell=self, victim=v, base=base, spread=0,
                                    n=0, age=0)
+                _launcher_think(e, self.battle.engine)      # 实录: 发射器出生当 tick 即 think (首 2 枚与它同 tick)
             return
         if self.live == 0 and not self._finishing:
             self.casting = False
@@ -287,8 +314,9 @@ class FlameJet(Spell):
                 x, y = _pos(c)
                 dx, dy = DIR_OFF[_dir(c)]
                 x, y = x + dx * 8 * FP, y + dy * 8 * FP
-                fx(b, _flame_think, x, y, 56 * FP, FLAME_SEQ, flame=True, age=0,
-                   **_motion(m=0x32, tx=x, ty=y, px=self.phase, py=self.phase))
+                f = fx(b, _flame_think, x, y, 56 * FP, FLAME_SEQ, flame=True, age=0,
+                       **_motion(m=0x32, tx=x, ty=y, px=self.phase, py=self.phase))
+                _flame_think(f, b.engine)           # 实录 en28_t10: 火团出生当 tick 即 think (外推节拍 age/3 从 0 起)
             self.phase += self.omega
             if abs(self.phase - self.base) > 0x1555:
                 self.omega = -self.omega
