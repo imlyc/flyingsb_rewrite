@@ -37,6 +37,10 @@ __all__ = ['Spell', 'FP', 'fx', '_set_z', '_rand', '_sin', '_cos', '_pos', '_sfx
            '_motion', '_getz', '_unit_z', 'seq_of']
 
 SIG_CAST_IMPACT = -100
+# 原版实录 (2026-10-26 蛇魔法 巨雷壓頂, wine/captures/en15_thunder_*): dispatcher state 0 (渐暗) 18 tick + state 10 (挂施法 seq) 1 tick
+# → 挂 seq 那一刻 dispatcher age = 19. 各模板 "age % N" 的节拍以此为准 (我们渐暗时长按 ms 换算, tick 数不同, 挂 seq 时对齐 age).
+EXE_ATTACH_AGE = 19
+EXE_DIM_TICKS = (20, 20)        # 同一实录: 渐暗 state 0 18 tick + 挂 seq 1 tick (我们 on_done 在第 n-1 tick → 20), 收尾渐亮 state 0x32 20 tick (Wine 帧率下 FUN_004d0cd8 的 30 步)
 
 
 def fx(battle, think_fn, x: int, y: int, z: int, seq=None, /, atlas: int | None = None, frame: int = 0, **ud) -> "Entity":
@@ -102,11 +106,13 @@ class Spell:
     def start(self) -> None:
         if self.DIM:
             from core.battle.skill_dim import start_skill_dim
-            start_skill_dim(self.battle, self._attach)
+            start_skill_dim(self.battle, self._attach, ticks=EXE_DIM_TICKS[0])
         else:
             self._attach()
 
     def _attach(self) -> None:
+        if self.DIM:
+            self.age = EXE_ATTACH_AGE + 1     # 渐暗实体的 on_done 在协调实体本 tick think 之后 → 下一 tick think 时 age = 20 (同 exe)
         c = self.caster
         seq = self.cast_seq(_dir(c))
         c.pending_caster_coord = self.coord
@@ -214,7 +220,7 @@ class Spell:
                 return
             if self.FADE_IN:
                 from core.battle.skill_dim import end_skill_dim
-                self._fade = end_skill_dim(self.battle, on_done=self._end) or False
+                self._fade = end_skill_dim(self.battle, on_done=self._end, ticks=EXE_DIM_TICKS[1]) or False
                 if self._fade is False:
                     self._end()
             else:

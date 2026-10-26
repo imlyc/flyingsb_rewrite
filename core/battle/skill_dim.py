@@ -45,13 +45,15 @@ def _spawn(battle, direction: int, on_done: Callable | None, ticks: int) -> "Ent
     return e
 
 
-def start_skill_dim(battle, on_done: Callable, skill_id: int | None = None) -> "Entity":
-    """渐暗 (默认 DIM_TICKS, 自定义调色板技能见 SKILL_DIM_TICKS) 后调 on_done (= 挂 cast seq). projectile=True 让回合/输入门控等它."""
-    return _spawn(battle, +1, on_done, SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[0])
+def start_skill_dim(battle, on_done: Callable, skill_id: int | None = None, ticks: int | None = None) -> "Entity":
+    """渐暗 (默认 DIM_TICKS, 自定义调色板技能见 SKILL_DIM_TICKS; ticks 给定则用它) 后调 on_done (= 挂 cast seq).
+    projectile=True 让回合/输入门控等它."""
+    return _spawn(battle, +1, on_done, ticks or SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[0])
 
 
-def end_skill_dim(battle, on_done: Callable | None = None, skill_id: int | None = None) -> "Entity | None":
+def end_skill_dim(battle, on_done: Callable | None = None, skill_id: int | None = None,
+                  ticks: int | None = None) -> "Entity | None":
     """技能收尾: 渐亮后调 on_done. 没暗过就不做 (返回 None)."""
     if getattr(battle, 'dim_level', 0.0) <= 0.0:
         return None
-    return _spawn(battle, -1, on_done, SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[1])
+    return _spawn(battle, -1, on_done, ticks or SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[1])
