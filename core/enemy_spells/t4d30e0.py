@@ -12,12 +12,15 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标 FUN_004d30b0 毒泡发生�
   z > 48 → a = 0.1 (绕目标高度上下浮动) → 0x14: 等 DAT_0086a75c → (末泡) 0xc4 + -200 + -250; 6 滴毒滴, 自毁.
 毒滴 FUN_004d2c99: 静帧 e_toxic 16+rand&7, flags 0x51 (x/z 弹簧, x 加速度 0, z 目标 0 加速度 0.25),
   vx = rand%3000/1000 - 1.5, vz = rand%3000/1000 - 1; think FUN_004d2c1c: age > 8 起每 t 闪烁, age > 24 自毁.
+实录校准 (wine/captures/en154_t211_F10350.log, 154 使用毒藥): 发生器 +11 寿命 193 / 10 泡出生 +16..+160 每 16t / 帧序列 /
+  寿命 / 破裂 + 受击 +204 均吻合. 修正: 毒滴出生当 tick 即 think (寿命 25); 收尾等受击标记 (b_common.hits_pending) +
+  计数归零下一 tick 渐亮 → 渐亮起点 +223 吻合. 残差: 施法者回待机 +243 (原版 +244, 框架渐亮 20 vs 21 tick).
 """
 from __future__ import annotations
 
 from core.anim_engine.bytecode import tuple_to_bytecode
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _c3211, _motion, _getz
-from core.enemy_spells.b_common import react
+from core.enemy_spells.b_common import react, finish_on_count, hits_pending
 
 E_TOXIC = 218
 FORM_SEQ = [('fm', E_TOXIC, f, 1) for f in range(8, 16)] + [('exit',)]          # 656a14
@@ -53,6 +56,7 @@ def _splash(b, e) -> None:
         d = fx(b, _drop_think, e.x, e.y, _getz(e), None, atlas=E_TOXIC, frame=0, drop=True, state=0, age=0,
                **_motion(m=0x51, tx=e.x, tz=0, vx=vx, vz=vz, az=0x4000))
         d.frame_idx = 0x10 + (_rand(b) & 7)
+        _drop_think(d, b.engine)                                      # 实录: 出生当 tick 即 think (寿命 25)
 
 
 def _bubble_think(e, eng) -> None:
@@ -129,9 +133,9 @@ class Poison(Spell):
         self.casting = True
 
     def think(self) -> None:
-        if self.casting and self.live == 0:
+        if self.casting and self.live == 0 and not hits_pending(self):
             self.casting = False
-            self.finish()
+            finish_on_count(self)
 
     def on_pop(self, v) -> None:
         self.live -= 1
