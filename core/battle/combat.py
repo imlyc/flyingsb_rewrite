@@ -221,6 +221,8 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         battle.engine.swing_sound = swing
         attacker.pending_draw_sound = draw if draw is not None else -1
         attacker.pending_draw_signal = -1000 if (cid is not None and cid < 8) else -1001
+    elif skill_id is None and _enemy_spell(attacker) is not None:
+        battle.engine.swing_sound = -1           # 敌招演出 (core.enemy_spells): 音效由演出自己播
     elif skill_id is None and _enemy_doit(attacker) is not None:
         # 敌招 DOIT_melee (core.enemy_moves): 挥击/命中音都在 exe seq 里 (op 0x13 设命中音, IMPACT 播)
         battle.engine.swing_sound = -1
@@ -258,6 +260,12 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
             from core.normal_attack import seq_for as _na_seq
             seq_tuples = _na_seq(na_entry.idx, attacker.facing)
     enemy_doit = _enemy_doit(attacker) if skill_id is None else None
+    spell_cls = _enemy_spell(attacker) if skill_id is None else None
+    spell = None
+    if spell_cls is not None:
+        spell = spell_cls(battle, attacker, attacker.pending_enemy_move)
+        from core.jet_skills import _dir as _udir
+        seq_tuples = spell.cast_seq(_udir(attacker)) or [('exit',)]
     if seq_tuples is None and enemy_doit is not None:
         from core.enemy_moves import seq_for as _em_seq
         seq_tuples = _em_seq(enemy_doit, attacker.facing)
@@ -274,7 +282,7 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # 清掉上一次攻击残留的 render snapshot (_move_start_*, _fm_total_ticks 等),
     # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
     attacker.entity.user_data = {'unit': attacker}
-    if na_entry is not None or enemy_doit is not None:
+    if na_entry is not None or enemy_doit is not None or spell is not None:
         attacker.entity.user_data['global_atlas'] = True     # exe 原 seq: fm 槽号是全局图集号 (渲染不走 ATK_A/B/C 抽象槽)
         # seq 以 move 开头 (如孙悟空拳 0x670a20 先 move 1t): 第一个帧 op 之前 exe 仍显示待机姿 (实录 na0_00)
         pre = 0
@@ -290,7 +298,9 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # tuple seq → bytecode 后挂载. attach_seq 自动跑到第一个阻塞 op.
     seq_bc = tuple_to_bytecode(seq_tuples)
     from core.skill_seq import MELEE_TEMPLATE_SKILLS
-    if skill_id is not None and skill_id not in MELEE_TEMPLATE_SKILLS:
+    if spell is not None:
+        spell.start()                            # 渐暗 → 挂施法 seq → -100 各招 (core.enemy_spells.base.Spell)
+    elif skill_id is not None and skill_id not in MELEE_TEMPLATE_SKILLS:
         # 技能: 先战场暗化 (exe dispatcher state 0 的调色板渐变, ≈480ms) 再挂 cast seq (case 10); DOIT_melee 模板技能无渐变
         from core.battle.skill_dim import start_skill_dim
         ent = attacker.entity
@@ -309,6 +319,14 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         if ra:
             from core.ranged_attack import on_attach as _ra_attach
             _ra_attach(battle, attacker)          # 远程普攻 / 紫河第三形态: 协调实体 (core.ranged_attack)
+
+
+def _enemy_spell(attacker: BattleUnit):
+    """敌人本次出招若有专门演出 (core.enemy_spells) → 演出类, 否则 None."""
+    if attacker.is_player or getattr(attacker, 'is_countering', False):
+        return None
+    from core.enemy_spells import spell_class
+    return spell_class(getattr(attacker, 'pending_enemy_move', None))
 
 
 def _enemy_doit(attacker: BattleUnit) -> int | None:

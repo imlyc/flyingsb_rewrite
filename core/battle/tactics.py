@@ -165,6 +165,10 @@ class TacticsBattle:
         # 常规结算流程, 而是转发给 coord (coord 控制何时真正 SIG_IMPACT_2 + damage + END).
         coord = unit.pending_caster_coord
         if coord is not None:
+            cs = coord.user_data.get('on_caster_signal')     # 敌招演出 (core.enemy_spells): 施法者 seq 的信号全给它
+            if cs is not None:
+                cs(sig)
+                return
             if sig == self._SIG_IMPACT:
                 cb = coord.user_data.get('on_caster_impact')
                 if cb is not None:

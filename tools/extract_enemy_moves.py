@@ -61,7 +61,7 @@ def main() -> None:
         fva = int(a["func"])
         body = funcs.get(f"fun_{fva:08x}", "")
         kind, fn, arg, fx = classify(body) if body else ("custom", None, None, None)
-        if kind.startswith("doit") and arg not in tables:
+        if (kind.startswith("doit") or kind.startswith("tmpl")) and arg is not None and arg not in tables:
             try:
                 tables[arg] = [e.seq(e.u32(arg + 4 * d)) for d in range(4)]
             except ValueError as ex:
@@ -76,7 +76,7 @@ def main() -> None:
     for r in rows:
         lines.append(f"    ({r[1]!r}, {r[2]}, {r[3]:#x}, {r[4]}, {r[5]}, {r[6]}, {r[7]:#x}, {r[8]!r}, {r[9]!r}, "
                      f"{hex(r[10]) if r[10] is not None else None}, {r[11]!r}),   # {r[0]}")
-    lines += ["]", "", "# DOIT seq 表地址 → [上, 下, 左, 右] (exe 原字节解码)", "SEQ_TABLES: dict[int, list[list[tuple]]] = {"]
+    lines += ["]", "", "# DOIT / 模板施法者 seq 表地址 → [上, 下, 左, 右] (exe 原字节解码)", "SEQ_TABLES: dict[int, list[list[tuple]]] = {"]
     for t, dirs in tables.items():
         lines.append(f"    {t:#x}: [")
         lines += [f"        {s!r}," for s in dirs]
