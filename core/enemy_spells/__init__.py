@@ -23,7 +23,11 @@ def _load() -> None:
     for info in pkgutil.iter_modules(__path__):
         if info.name == 'base':
             continue
-        mod = importlib.import_module(f'{__name__}.{info.name}')
+        try:
+            mod = importlib.import_module(f'{__name__}.{info.name}')
+        except Exception as ex:                      # 单个模块坏了不拖累其他招式 (回落通用动作)
+            print(f"[enemy_spells] 模块 {info.name} 导入失败: {ex!r}")
+            continue
         _TEMPLATES.update(getattr(mod, 'TEMPLATES', {}))
         _MOVES.update(getattr(mod, 'MOVES', {}))
 
