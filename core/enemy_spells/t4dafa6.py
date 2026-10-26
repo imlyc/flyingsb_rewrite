@@ -16,7 +16,9 @@ dispatcher: 渐暗 → 施法 seq (招式参数表[朝向]) → -100: 每目标�
 实录校准 (wine/captures/en8_t4_F10892.log, 8 吹出旋風): 风锚出生 +16 / 每 4 tick 一对旋涡环 / 环位置 / 腾空 z 曲线 (vz0=0 时逐 tick
   相同, 落地 tick 只取决于 rand) / 落地当 tick 出 et00+ef010 + 飘字 spawner, 下一 tick 首位数字 均吻合.
   旋涡环帧序列改为按 exe 挂 seq (son_transform.whirlwind_ring_think 的帧序列与实录不符, 本模块用自己的 _ring_think).
-  0x1e 不等受击 seq (busy 只看风锚 + 飘字). 残差: 渐亮起点 落地+37 (原版 +36, 飘字池序 ±1).
+  0x1e 不等受击 seq (busy 只看风锚 + 飘字).
+  131 用快攻 实录校准 (wine/captures/en131_t92_F5712.log): 施法 seq / -100 挂 6604b0 (第一圈缺第 2 帧) / 风锚 +9 / 旋涡环 /
+  -200 定格 / 渐亮起点 +242 吻合 (落地 tick 随 rand). 残差: 渐亮起点 落地+37 (原版 +36, 飘字池序 ±1).
 """
 from __future__ import annotations
 
@@ -29,6 +31,9 @@ from core.son_transform import (WIND_ATLAS, WIND_BANDS, WIND_TOP, BH_RING_RX, BH
 
 CFAN_G1 = 119
 QUICK_LOOP_SEQS = [[('fm', CFAN_G1, b + k, 1) for k in range(1, 6)] + [('loop',)] for b in (0, 6, 12, 18)]   # 6604b0
+# 实录 (en131_t92): -100 挂上 6604b0 的第一圈少了第 2 帧 (1×2 3×2 4×2 5×2, 之后 1..5 正常循环) — 挂 seq 发生在施法 seq
+# 解释途中, 新 seq 当 tick 多走了一步. 第一圈手工去掉第 2 帧, 后面展开足够多圈 (施法最长 ~250 tick) 再 loop.
+QUICK_ATTACH_SEQS = [[t for i, t in enumerate(sq[:5]) if i != 1] + sq[:5] * 40 + [('loop',)] for sq in QUICK_LOOP_SEQS]
 
 
 def _ring_think(e, eng) -> None:
@@ -162,7 +167,7 @@ class QuickAttack(Tornado):
     def on_cast_impact(self) -> None:
         c = self.caster
         if c.entity is not None:                                      # -100: 挂 6604b0[朝向] 循环
-            self.battle.engine.attach_seq(c.entity, tuple_to_bytecode(QUICK_LOOP_SEQS[_dir(c)]))
+            self.battle.engine.attach_seq(c.entity, tuple_to_bytecode(QUICK_ATTACH_SEQS[_dir(c)]))
             c.cast_hold = True
         super().on_cast_impact()
 
