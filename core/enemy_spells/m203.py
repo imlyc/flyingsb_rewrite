@@ -17,10 +17,14 @@ dispatcher (共同骨架):
            飘字 FUN_004d05d8 (153/204: 第 2 发才飘字, +0x7c 计数到 2 才收尾) + 命中音.
   0x14     弹/飘字计数归零 → 自毁 (**不走渐亮**).
 各招参数 (速度 px/t 上下/左右, Z px, 音效 生成/到达/-200) 见 Shot 子类.
-近似: 弹出生当 tick 是否 think 按我们引擎的生成顺序 (exe 未知); 结算时机 = exe -200 (受击+特效+飘字同 tick).
+结算时机 = exe -200 (受击+特效+飘字同 tick).
+实录校准 (wine/captures/en138_t96 / en142_t99 / en153_t109 / en159_t115 / en188_t142 / en203_t159, 及 139 en139_t97):
+  弹出生当 tick 不 think (首帧在出生点), 弹寿命/-200/特效/飘字出生 tick 均吻合; 收尾 = 末位飘字 -20 后第 2 tick 施法者回待机, 吻合
+  (原版多为 MISS 4 字形, 与我们位数不同 → 收尾差 2 t/位). 153 第 2 箭的目标点含目标受击后退 (b_common.cur_pos), 改后第 2 箭寿命 13 t 吻合.
 """
 from __future__ import annotations
 
+from core.enemy_spells.b_common import cur_pos
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _cdbc2, _motion, _dir, _unit_z
 
 # ---------------- 公共特效 ----------------
@@ -50,11 +54,13 @@ def impact_fx(battle, victim, d: int, second=STAR, jitter: bool = True) -> None:
         fx(battle, None, x + jx, y + 400 * FP + jy, 448 * FP + jz, seq)
 
 
-def reset_hit(victim) -> None:
+def reset_hit(victim, battle=None) -> None:
     """FUN_004c4f20 + 受击 seq 6557f0[目标朝向] (不转向)."""
     from core.battle import combat
     if victim.alive:
         combat.set_reaction(victim, "hit", None)
+        if battle is not None:
+            victim._b_hit_tick = battle.engine._tick_id     # 受击 seq 起点 (b_common.cur_pos 用)
 
 
 def n_casts(seq) -> int:
@@ -114,7 +120,7 @@ class Shot(Spell):
         b, c = self.battle, self.caster
         d = _dir(c)
         x, y = _pos(c)
-        tx, ty = _pos(v)
+        tx, ty = cur_pos(b, v)          # exe 目标 +8/+0xc 含受击 seq 后退 (实录 en153_t109: 第 2 箭晚 1 t 到)
         vud, vlr = self.SPEED
         vx, vy = ((0, -vud), (0, vud), (-vlr, 0), (vlr, 0))[d]
         yo, zo = self.Y * FP, self.Z * FP
@@ -133,7 +139,7 @@ class Shot(Spell):
         """-200."""
         self.live -= 1
         self.arrived += 1
-        reset_hit(v)
+        reset_hit(v, self.battle)
         impact_fx(self.battle, v, _dir(self.caster), self.SECOND)
         if self.arrived == self.HITS:
             self.settle(v)

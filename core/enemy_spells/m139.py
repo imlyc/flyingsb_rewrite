@@ -6,6 +6,8 @@ dispatcher 同 core.enemy_spells.m203.Shot (无渐暗; 施法 seq 661114[朝向]
        mode 0x51 (x, z 两轴 FUN_004c3211 弹簧, 目标 0x27100000 = 永远够不到): vx = ±(1 + rand%1000/2000) px/t
        (rand&1 偶 → 负), vz = -(4 + rand%2000/1000) px/t, az = 0x5999 (≈0.35 px/t² 向上减速).
   think FUN_004e0538: 积分; vz ≥ 0 (摆到底) → vx 反向重掷, vz 重掷 (像落叶左右飘); z ≤ 64 px → 停 0xf9, -200, 自毁.
+实录校准 (wine/captures/en139_t97_F3534.log): 泪滴出生当 tick 不 think, 摆动轨迹 (加速度/反向/重掷时机) 与原版逐 tick 同形,
+  寿命随 rand 不同 (原版 59 t, 我们 57 t); 收尾 (末位飘字 -20 后第 2 tick 回待机) 吻合.
 """
 from __future__ import annotations
 
