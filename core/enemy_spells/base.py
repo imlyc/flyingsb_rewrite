@@ -185,9 +185,7 @@ class Spell:
             if victim.alive:
                 got = EM.resolve_status(b, c, victim, m)
                 b._log(f"{c.name} → {victim.name}: " + (f"中了 {[hex(x) for x in got]}" if got else "异常未中"))
-                if not got:
-                    combat.push_damage_event(b, victim, combat.DamageEvent(0, victim.hp, victim.x, victim.y, miss=True))
-            return
+            return                                       # exe 异常类模板的 -200 不出飘字 (中没中都一样)
         if not victim.alive:
             return
         c.suppress_hit_fx = True
