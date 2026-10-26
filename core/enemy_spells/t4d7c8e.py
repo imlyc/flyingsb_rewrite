@@ -11,6 +11,8 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标一个发射器 FUN_004d7c4
   -200: 飘字, +0x78--.  0x1e: 计数归零 + 飘字/受击完 → 0x28 渐亮.
 114 發射冰塊 (FUN_004ddebb): 只换掉 -100 → 每目标发射器 FUN_004dde72/4ddd98 (同时序), 冰钻 FUN_004dda82:
   从施法者原位 z+48 出发 (无随机), 按朝向偏移: 上 y-9 / 下 y+12 / 左 x-20,y+1 / 右 x+20,y+1; 其余同上.
+实录校准 (wine/captures/en42_t199_F9654.log, 1 目标): 发射器 (+20, 117 t)、8 颗冰钻出生 tick (+25/53/77/97/113/125/133/137)、
+  seq 帧序/寿命、state 0→10 时刻 (seq 播完那 tick)、三轴匀速轨迹 (逐 px)、刺爆 tick、渐亮起点 (+197, 同位数伤害) 逐 tick 吻合.
 近似: 冰钻起始高 LAB_004fffff_1 按 0x500000 (80px) 取 (同玩家版).
 """
 from __future__ import annotations
@@ -62,7 +64,7 @@ def _drill_think(e, eng) -> None:
     sp = ud['spell']
     if ud['st'] == 0:
         if not e.is_playing():
-            ud['st'] = 10
+            ud['st'] = e.state_code = 10
         return
     if _cdbc2(e):
         sp.on_drill_hit(ud['victim'], ud['last'])
