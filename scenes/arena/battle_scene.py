@@ -19,6 +19,35 @@ from scenes.arena.roster import ENEMY_ROSTER, build_enemy_unit, build_player_uni
 from scenes.arena.terrain import ArenaTerrain
 
 
+def _main_region(terrain) -> set[tuple[int, int]]:
+    """最大的四连通可走区域 (地图上与主场地不连通的小块不放人, 否则走不出来/打不到). 结果缓存在 terrain 上."""
+    reg = getattr(terrain, '_arena_main_region', None)
+    if reg is not None:
+        return reg
+    from collections import deque
+    seen: set[tuple[int, int]] = set()
+    best: set[tuple[int, int]] = set()
+    for x0 in range(terrain.w):
+        for y0 in range(terrain.h):
+            if (x0, y0) in seen or not terrain.passable(x0, y0):
+                continue
+            comp = {(x0, y0)}
+            seen.add((x0, y0))
+            q = deque([(x0, y0)])
+            while q:
+                x, y = q.popleft()
+                for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if (nx, ny) not in seen and 0 <= nx < terrain.w and 0 <= ny < terrain.h \
+                            and terrain.passable(nx, ny):
+                        seen.add((nx, ny))
+                        comp.add((nx, ny))
+                        q.append((nx, ny))
+            if len(comp) > len(best):
+                best = comp
+    terrain._arena_main_region = best
+    return best
+
+
 def _random_positions(
     terrain: ArenaTerrain, rng: random.Random, count: int,
     x_lo: int, x_hi: int, used: set[tuple[int, int]],
@@ -28,11 +57,12 @@ def _random_positions(
     y 范围默认整张内部 (1..h-2)."""
     y0 = 1 if y_lo is None else y_lo
     y1 = (terrain.h - 2) if y_hi is None else y_hi
+    region = _main_region(terrain)
     cands = [
         (x, y)
         for x in range(x_lo, x_hi + 1)
         for y in range(y0, y1 + 1)
-        if terrain.passable(x, y) and (x, y) not in used
+        if (x, y) in region and (x, y) not in used
     ]
     rng.shuffle(cands)
     out: list[tuple[int, int]] = []
@@ -219,7 +249,7 @@ class ArenaBattleScene(BattleScene):
             (x, y)
             for x in range(1, t.w - 1)
             for y in range(1, t.h - 1)
-            if t.passable(x, y) and self.battle.q.occupant(x, y) is None
+            if (x, y) in _main_region(t) and self.battle.q.occupant(x, y) is None
         ]
         if not cands:
             return None

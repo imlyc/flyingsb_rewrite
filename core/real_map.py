@@ -51,7 +51,7 @@ HEADER_BYTES = 0x1E0
 LAYER_HDR_U32 = 12
 
 # 竞技场默认用的地图 (TARA = 竞技场 hall)
-DEFAULT_ARENA_MAP = "TARA_00P"
+DEFAULT_ARENA_MAP = "TJP0_00P"     # 开阔大厅, 全图连通 (原 TARA_00P 有几块不连通的小区域)
 # 世界地图默认用的地图 (T_LOC0 = 东海之滨)
 DEFAULT_WORLD_MAP = "T_LOC0_P"
 
