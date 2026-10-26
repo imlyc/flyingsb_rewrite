@@ -10,6 +10,9 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标一个发射器 FUN_004d856
        匀速下落, z<1 → FUN_004d6dc3 4 片碎冰 + -250; 末块再 -200 + 0xae; 自毁.
   -250: 受击 6557f0[目标朝向] + 655c10[6418dc[目标朝向]] 刺爆 + 655b18 红刺 (= Spell.hit fx='both').
   -200: 飘字, +0x78--.  0x1e: 计数归零 + 飘字/受击完 → 0x28 渐亮.
+实录校准 (wine/captures/en66_t32_F5456.log, 2 目标): 发射器 (+24, 寿命 165, state 0×125 10×40)、冰块出生 (+29 起每 8 t)、
+  seq 16 t → state 10 → 落下 state 20 5~6 t、刺爆 tick、飘字出生 (+194)、渐亮起点 (+231) 逐 tick 吻合 (无需改动).
+  碎冰 (son_transform 17 tick 版) 此实录 3/4 出生即 think (寿命 17) — 与 en21 相反, 池序效应, 不模拟.
 """
 from __future__ import annotations
 
@@ -36,14 +39,14 @@ def _chunk_think(e, eng) -> None:
             e.flags &= ~0x20000
             e.atlas_slot, e.frame_idx = EICE, CHUNK_FRAMES[_rand(b) & 7]
             ud['az'] = 0x2000
-            ud['st'] = 10
+            ud['st'] = e.state_code = 10
     elif st == 10:
         _c3211(e)
         if sp.drop:
             ud['tz'] = 0
             ud['vz'] = -((_rand(b) & 7) * FP + 0x180000)
             ud['az'] = 0
-            ud['st'] = 20
+            ud['st'] = e.state_code = 20
     else:
         _c3211(e)
         if _getz(e) < 1:
@@ -75,7 +78,7 @@ def _launcher_think(e, eng) -> None:
             ud['next'] += INTERVAL
             if last:
                 ud['next'] += DROP_DELAY
-                ud['st'] = 10
+                ud['st'] = e.state_code = 10
         else:
             sp.drop = True                  # DAT_0086a76c = 1
             eng.destroy(e)
