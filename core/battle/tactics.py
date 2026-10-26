@@ -752,13 +752,50 @@ class TacticsBattle:
         self._pending_turn_end = True
 
     def advance_turn_when_ready(self) -> None:
-        """scene 在 _units_animating() 全部清空后调; 处理 pending turn 切换."""
+        """scene 在 _units_animating() 全部清空后调; 处理 pending turn 切换.
+        exe FUN_004a4f94 case 7 → 8: 本次攻击演完若有反击者, 先演反击 (FUN_004cbc9d(2) 交换攻守), 再结束回合."""
         if not self._pending_turn_end:
             return
         self._pending_turn_end = False
         if self._check_end():
             return
+        cu = getattr(self, '_counter_unit', None)
+        if cu is not None:                       # 反击演完: 恢复反击者朝向 (exe +0x114 存的原朝向)
+            cu.is_countering = False
+            cu.facing = getattr(cu, 'saved_facing', cu.facing)
+            self._counter_unit = None
+        elif self._start_counter():
+            return
         self.end_unit_turn()
+
+    def _start_counter(self) -> bool:
+        """演反击: 反击者转向原攻击者, 用自己的普攻 (玩家 = 贴身项 +0x78, 敌人 = 第 0 招 +0x40) 打一下,
+        伤害用结算时算定的值 (core.battle.combat._maybe_counter), 不判命中、不再触发反击."""
+        c = getattr(self, '_pending_counter', None)
+        self._pending_counter = None
+        if not c:
+            return False
+        u, t = c['unit'], c['target']
+        if not (u.alive and t.alive):
+            return False
+        from core.battle.formulas import Outcome
+        u.saved_facing = u.facing
+        dx, dy = t.x - u.x, t.y - u.y
+        u.facing = (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dy) and dx else (0, 1 if dy > 0 else -1)
+        out = Outcome(hit=True, dmg=c['dmg'])
+        out.reflect = c['dmg']                    # 返荷杖反弹的是反击伤害本身 (exe DAT_007da1ec)
+        self.__dict__.setdefault('_prerolled', {})[id(t)] = out
+        u.is_countering = True
+        if u.is_player:
+            u.attack_cur = u.attack_melee if u.attack_melee is not None else u.attack_normal
+        else:
+            u.pending_enemy_move = u.enemy_moves[0] if u.enemy_moves else None
+        self._counter_unit = u
+        self._pending_damage_range = None
+        self._pending_damage_falloff = None
+        self._log(f"{u.name} 反击 {t.name}")
+        combat.begin_attack(self, u, t)
+        return True
 
     def cancel_to_move(self) -> bool:
         """把单位拉回本回合起点位置 (X 键)."""

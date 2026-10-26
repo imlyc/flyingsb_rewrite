@@ -262,3 +262,24 @@ def test_next_actor_skips_current():
     assert b.next_actor() is p2
 
 
+
+
+def test_counter_plays_after_attack_then_turn_ends():
+    """exe case 7 → 8: 攻击演完 → 反击者转向原攻击者演反击 (伤害算定) → 恢复朝向 → 才结束回合."""
+    p = _player("p", 5, 4, agile=99)
+    e = _enemy("e", 5, 5, agile=1)
+    b = _battle(players=[p], enemies=[e])
+    assert b.current is p
+    e.facing = (1, 0)
+    b._pending_counter = dict(unit=e, target=p, dmg=7, crit=False)
+    b._pending_turn_end = True
+    hp0 = p.hp
+    b.advance_turn_when_ready()                         # 开始反击, 回合没结束
+    assert b.current is p and e.is_countering and e.facing == (0, -1)
+    from core.battle import combat
+    e.pending_impact_count, e.pending_impact_total = 0, 1
+    combat.apply_pending_attack(b, e)                   # 反击命中: 扣算定伤害, 不判命中
+    assert p.hp == hp0 - 7 and not getattr(b, '_pending_counter', None)
+    b._pending_turn_end = True
+    b.advance_turn_when_ready()                         # 反击演完 → 恢复朝向 → 结束回合
+    assert not e.is_countering and e.facing == (1, 0)

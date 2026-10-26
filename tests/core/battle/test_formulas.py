@@ -132,3 +132,24 @@ def test_mp_drain():
     assert F.mp_drain(None, c, e, 0x3d) == min(200 * k // 100, 400 // 4, 80)
     e.type_flags = 0x20
     assert F.mp_drain(None, c, e, 0x3b) == 25 and F.mp_drain(None, c, e, 0x3d) == 5
+
+
+def test_counter_check_and_damage():
+    p, e = _p(attack=300, defence=200), _e(attack=400, defence=100)
+    p.x, p.y, p.facing = 5, 4, (0, 1)                  # 面朝下, 敌人在正前方
+    e.x, e.y, e.facing = 5, 5, (0, -1)
+    e.unit_class = 0                                   # 反击率 [30, 28, 25, 22, 20]
+    out = F.Outcome(hit=True, roll=75, dir=0)          # 100 - 75 = 25 < 30 → 反击
+    assert F.counter_check(p, e, out, 0x4011)
+    out.roll = 70                                      # 30 不 < 30
+    assert not F.counter_check(p, e, out, 0x4011)
+    out.roll = 90
+    assert not F.counter_check(p, e, out, 0x4001)      # 无 0x10 不可反击
+    out.crit = True
+    assert not F.counter_check(p, e, out, 0x4011)      # 暴击不反击
+    # 敌反击我方: 会心骰 rand%10=3 (非会心 → 40..79%), 伤害骰 20 → 60%; 攻 - 我防 (全额)
+    dmg, crit = F.counter_damage(_b(3, 20), e, p)
+    assert not crit and dmg == (400 - 200) * 60 // 100
+    p.status_bits = F.ST_GUARD                         # 強力防禦 ×70%
+    dmg, crit = F.counter_damage(_b(0, 20), e, p)      # rand%10=0 → 会心 70..109%
+    assert crit and dmg == (400 - 200) * 90 // 100 * 70 // 100

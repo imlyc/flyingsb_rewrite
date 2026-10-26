@@ -78,6 +78,7 @@ class BattleUnit:
     evade: int = 0                   # 闪避: 敌 +0x28 (玩家命中率 - 此值; 玩家无)
     speed: int = 0                   # 行动值增量: 玩家 +0x5c (存档 Unknow_9) / 敌 +0x38
     action_value: int = 0            # 行动值 (玩家角色表 +0x1c = 存档 Unknow_1, 跨战斗保留; 敌实例 +0x20) — exe ATB
+    is_countering: bool = False      # 正在演反击 (不再触发反击; tactics._start_counter)
     pending_enemy_move: int | None = None   # 敌人本次行动用的招式 (敌招表下标; formulas.enemy_attack)
     enemy_type: int = -1             # 敌人表下标 (那印 9/10 等特判); 玩家 -1
     unit_class: int = 0              # 反击概率表行: 玩家 exe 0x641820[角色] / 敌 +0x08

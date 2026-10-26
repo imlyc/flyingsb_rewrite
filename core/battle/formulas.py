@@ -36,6 +36,7 @@ _ELEM_IDX = {0x1000000: 1, 0x2000000: 2, 0x4000000: 3, 0x8000000: 4}
 SLEEP, PARALYSIS = 0x200, 0x800
 F_PHYSICAL, F_DIR, F_ELEM, F_COUNTERABLE = 0x800000, 0x4000, 0x8000, 0x10
 ST_SAMBA, ST_GUARD = 0x10000, 0x20000            # 強力森巴 (伤害 ×1.5) / 強力防禦 (受物理伤害 ×65%)
+F_DEFAULT_ENEMY = F_PHYSICAL | F_DIR | F_COUNTERABLE   # 没有招式数据的敌人 (占位模板) 当普通物理近战
 NAYIN_TYPES = (9, 10)                            # 那印: 不装备 0x15c 打不中
 NAYIN_ITEM = 0x15C
 
@@ -192,8 +193,7 @@ def enemy_move(move_id: int) -> dict:
 def enemy_attack(battle, e: "BattleUnit", p: "BattleUnit", move_id: int | None, falloff: int = 8) -> Outcome:
     """敌招 (类别 0 = 伤害) → 玩家 (FUN_004a6efe 敌方分支 case 0)."""
     from core.battle.status import ST_FANHE
-    mv = enemy_move(move_id) if move_id is not None else dict(power=100, flags=F_PHYSICAL | F_DIR | F_COUNTERABLE,
-                                                              mp_cost=0)
+    mv = enemy_move(move_id) if move_id is not None else dict(power=100, flags=F_DEFAULT_ENEMY, mp_cost=0)
     flags, power = mv['flags'], mv['power']
     physical = bool(flags & F_PHYSICAL)
     d = dir_index(e, p) if flags & F_DIR else 0
@@ -258,3 +258,61 @@ def seal_chance(caster: "BattleUnit", e: "BattleUnit", sid: int) -> int:
     power = SKILL_TABLE[sid][1]
     c = power + _div(caster.wisdom - e.wisdom, 2) + (power + caster.luck - e.luck) + affinity(caster, e)
     return max(10, min(90, c))
+
+
+# ---------------- 反击 (FUN_004a6efe: 普攻/可反击招式命中后, 正前方的目标按概率反打) ----------------
+# FUN_004a65b6: [反击类别 0..2][方位 0..4] → 反击率 (%); 判定 "100 - 命中骰 < 反击率" (复用同一个命中骰)
+COUNTER_TABLE = ((30, 28, 25, 22, 20), (20, 18, 15, 12, 10), (10, 8, 5, 3, 1))
+WEAPON_0x27_BONUS = (0, 150, 900, 3900)          # 普攻 id 0x27 (+0x74) 的反击攻击加成, 依次循环 (exe DAT_007e2de4)
+
+
+def front_of(att: "BattleUnit") -> tuple[int, int]:
+    """FUN_004a67ed: 攻击者正前方一格."""
+    fx, fy = att.facing
+    return att.x + fx, att.y + fy
+
+
+def counter_check(att: "BattleUnit", dfn: "BattleUnit", out: Outcome, flags: int) -> bool:
+    """是否反击: 招式带 0x10 (可反击) / 未暴击 / 目标没睡眠痲痺 / 目标在攻击者正前方 / 目标活着 /
+    100 - 命中骰 < COUNTER_TABLE[目标反击类别][方位] (方位只在招式带 0x4000 时计).
+    命中与落空都判 (exe 在两支汇合处判; 落空时命中骰大 → 更易反击). 原版实录: 敌打孙悟空落空 → 会心反击 1077."""
+    if not (flags & F_COUNTERABLE) or out.crit or not dfn.alive:
+        return False
+    if flags_of(dfn) & (SLEEP | PARALYSIS):
+        return False
+    if (dfn.x, dfn.y) != front_of(att):
+        return False
+    d = out.dir if flags & F_DIR else 0
+    cls = max(0, min(2, int(getattr(dfn, 'unit_class', 0))))
+    return 100 - out.roll < COUNTER_TABLE[cls][d]
+
+
+def counter_damage(battle, counterer: "BattleUnit", target: "BattleUnit") -> tuple[int, bool]:
+    """反击伤害 (无命中判定): 10% 会心 → 浮动 70..109%, 否则 40..79%; 敌反击用 攻 - 我防 (全额防御),
+    強力防禦 ×70%; 我方反击用 攻 - 敌防, 強力森巴 ×1.5; ×属性; 上限 9999. 返回 (伤害, 会心)."""
+    crit = _rand(battle, 10) == 0
+    lo = 70 if crit else 40
+    if counterer.is_player:
+        atk = counterer.attack
+        if getattr(counterer, 'attack_normal', None) == 0x27:
+            i = battle.__dict__.get('_weapon27_idx', 0)
+            atk += WEAPON_0x27_BONUS[i]
+            battle._weapon27_idx = (i + 1) & 3
+        base = atk - target.defence
+        if base < 5:
+            base = _rand(battle, 5) + 1
+        elem = element_mult(elem_flags(counterer), elem_flags(target))
+        dmg = _div(base * (_rand(battle, 40) + lo), 100)
+        if flags_of(counterer) & ST_SAMBA:
+            dmg = _div(dmg * 150, 100)
+        dmg = _div(dmg * elem, 100)
+    else:
+        base = counterer.attack - target.defence
+        if base < 5:
+            base = _rand(battle, 5) + 1
+        elem = element_mult(elem_flags(counterer), elem_flags(target))
+        dmg = _div(base * (_rand(battle, 40) + lo), 100)
+        if flags_of(target) & ST_GUARD:
+            dmg = _div(dmg * 70, 100)
+        dmg = _div(dmg * elem, 100)
+    return max(0, min(DMG_CAP, dmg)), crit

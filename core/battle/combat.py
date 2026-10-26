@@ -535,6 +535,7 @@ def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: Batt
         return
     if not out.hit:
         _miss(battle, attacker, target, face_attacker)
+        _maybe_counter(battle, attacker, target, out)     # exe: 反击判定在命中/落空汇合后 → 闪开也能反击 (原版实录)
         return
     dmg = out.dmg
     label = "暴击 " if out.crit else ""
@@ -565,6 +566,38 @@ def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: Batt
     if out.status_chance and target.alive:
         from core.normal_attack import roll_status
         roll_status(battle, attacker, target, out.status_chance)
+    _maybe_counter(battle, attacker, target, out)
+
+
+def _attack_flags(attacker: BattleUnit) -> int | None:
+    """本次攻击的招式 flags (普攻条目 / 敌招); 技能 → None (技能不触发反击)."""
+    if attacker.pending_skill_id is not None:
+        return None
+    if attacker.is_player:
+        from core.normal_attack import entry
+        idx = getattr(attacker, 'attack_cur', None)
+        return entry(idx).flags if idx is not None else None
+    from core.battle.formulas import enemy_move, F_DEFAULT_ENEMY
+    move = getattr(attacker, 'pending_enemy_move', None)
+    if move is None and attacker.enemy_moves:
+        move = attacker.enemy_moves[0]
+    return enemy_move(move)['flags'] if move is not None else F_DEFAULT_ENEMY
+
+
+def _maybe_counter(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit, out) -> None:
+    """exe 反击: 普攻 / 可反击敌招 (0x10) 命中后, 正前方的目标按概率反打 (伤害此刻算定, 动画在本次攻击演完后,
+    tactics.advance_turn_when_ready). 反击本身不再触发反击; 一次行动最多一个反击者."""
+    from core.battle import formulas as F
+    if getattr(attacker, 'is_countering', False) or getattr(battle, '_pending_counter', None):
+        return
+    if attacker.is_player == target.is_player:
+        return
+    flags = _attack_flags(attacker)
+    if flags is None or not F.counter_check(attacker, target, out, flags):
+        return
+    dmg, crit = F.counter_damage(battle, target, attacker)
+    battle._pending_counter = dict(unit=target, target=attacker, dmg=dmg, crit=crit)
+    battle._log(f"{target.name} 反击! ({dmg}{' 会心' if crit else ''})")
 
 
 def _miss(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit, face_attacker: bool) -> None:
