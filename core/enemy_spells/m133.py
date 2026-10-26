@@ -14,7 +14,9 @@ dispatcher:
   -250    目标 FUN_004c4f20 + 受击 6557f0 + 655c10[反(目标朝向)] 刺爆 + 655b18 星爆 (无抖动) + 0xbd.
   -200    该目标飘字; 施法者停 seq (清 0x20000, 停在当前帧); 第 N 个 (= 目标数) -200 → 停 0xc2 音 + 解散旗 = 1.
   0x1e    计数归零 + 受击播完 → 0x28 渐亮 → 自毁.
-近似: 计时实体 age 从 0 起 (exe +0x144 递增与 think 先后未核); state 10 复位后同一 t 不再判 (下一 t 从 age 1 起).
+实录校准 (wine/captures/en133_t93_F3540.log): 计时实体出生当 tick 不 think; state 10 首次 think 时 age = 1 (exe 置 0 后引擎 +1),
+  首次 -250 在第 16 团后 20 t, 共 6 次, -200 在 age 128; 烟团出生当 tick 已走第 1 步; 摇扇首遍少第 2 帧 (见 fan_seq).
+  改后受击/飘字/施法者帧逐 tick 吻合; 渐亮原版 19 t (我们 20 t, 框架定值) → 收尾 +1 t.
 """
 from __future__ import annotations
 
@@ -41,6 +43,15 @@ SMOKE = [  # @0x660a88 (3 项)
     [('fm', 248, 0, 8), ('fm', 248, 1, 8), ('loop',)],
 ]
 SFX_SMOKE, SFX_HIT = 0xc2, 0xbd
+
+
+def fan_seq(d: int) -> list[tuple]:
+    """-100 改挂的摇扇 seq. 实录 (en133_t93): 第一遍跳过第 2 帧 (帧 0 停 4 t 后直接帧 2, 共 9 帧 36 t), 之后每遍完整 10 帧
+    (exe 在信号处理里换 seq 后解释器又前进一条指令, 近似). 展开: 首遍 + 完整体 ×8 + 循环 (-200 停帧前最多跑约 4 遍)."""
+    body = FAN[d][:-1]
+    fms = [i for i, t in enumerate(body) if t[0] == 'fm']
+    first = body[:fms[1]] + body[fms[1] + 1:]
+    return first + body * 8 + [('loop',)]
 
 
 def _smoke_think(e, eng) -> None:
@@ -72,7 +83,9 @@ def _smoke(sp, victim) -> None:
     ty = vy + FP
     tz = _unit_z(victim) + (_rand(b) & 63) * FP
     mot = aim_motion(b, x, y, z, tx, ty, tz)
-    fx(b, _smoke_think, x, y, z, SMOKE[_rand(b) % 3], smoke=True, spell=sp, st=0, **mot)
+    e = fx(b, _smoke_think, x, y, z, SMOKE[_rand(b) % 3], smoke=True, spell=sp, st=0, **mot)
+    if _cdbc2(e):                 # 实录 en133_t93: 烟团出生当 tick 已走第 1 步
+        e.user_data['st'] = 10
 
 
 def _timer_think(e, eng) -> None:
@@ -91,7 +104,7 @@ def _timer_think(e, eng) -> None:
             ud['n'] += 1
             ud['next'] += 2
             if ud['n'] > 15:
-                ud['age'] = 0
+                ud['age'] = 1             # exe 置 0 后引擎再 +1 → state 10 首次 think 时 age 1 (实录: 首次 -250 在第 16 团后 20 t)
                 ud['st'] = 10
                 return
     else:
@@ -126,7 +139,7 @@ class Smoke(Spell):
                                age=0, st=0, n=0, next=1)
             self.live += 1
         if c.entity is not None:
-            b.engine.attach_seq(c.entity, tuple_to_bytecode(FAN[_dir(c)]))
+            b.engine.attach_seq(c.entity, tuple_to_bytecode(fan_seq(_dir(c))))
         if not self.targets:
             self.finish()
 
