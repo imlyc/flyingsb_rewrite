@@ -213,10 +213,15 @@ class Spell:
         """进入收尾: 等 busy() 清空 → 渐亮 → SIG_END."""
         self._finishing = True
         self._fade = None
+        self._quiet = 0
 
     def _finish_tick(self) -> None:
         if self._fade is None:
             if self.busy():
+                self._quiet = 0
+                return
+            self._quiet += 1
+            if self._quiet < 2:                  # 实录: exe 收到最后一个 -20 后下一 tick 才进渐亮 (两段实录都晚 1 tick)
                 return
             if self.FADE_IN:
                 from core.battle.skill_dim import end_skill_dim
@@ -235,6 +240,8 @@ class Spell:
         if c.pending_caster_coord is self.coord:
             c.pending_caster_coord = None
         c.cast_hold = False
+        if c.entity is not None:                 # 实录: dispatcher 最后一 tick 之后再过 2 tick 施法者才回待机
+            c.entity.user_data['hold_until_tick'] = self.battle.engine._tick_id + 1
         e = self.coord
         e.user_data['unit'] = c
         eng = self.battle.engine
