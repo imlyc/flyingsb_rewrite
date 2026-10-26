@@ -9,7 +9,9 @@ dispatcher:
   -250     每个目标: FUN_004c4f20 + 受击 6557f0[目标朝向] + 刺爆 655c10[施法者朝向] (x, y+400, z+448)
            + 小爆炸 FUN_004d0d7b(x + rand%12-6, y+24, z 72 + (rand&15)-8, seq 655e58 (图 291 帧 0-7), 完发 -0x104).
   -0xd2    (大爆炸播完) 全部目标飘字.     -0x104 小爆炸计数 --.
-  0x1e     箭/爆炸/飘字计数归零 + 全部受击播完 → 0x28 自毁 (不渐亮).
+  0x1e     箭/爆炸/飘字计数归零 + 全部受击播完 → 0x28 (下一 tick) 自毁 (不渐亮).
+实录校准 (wine/captures/en205_t161_F3538.log): 箭 (出生当 tick 不 think, 10 t)、大/小爆炸 (+44, 49/35 t)、刺爆、-0xd2 飘字 (+93)
+  逐 tick 吻合; 0x28 多停的一拍已补 (_finish_tick), 收尾 = 末位 -20 后第 3 tick 施法者回待机, 吻合.
 """
 from __future__ import annotations
 
@@ -117,6 +119,14 @@ class FireArrow(Spell):
     def _check_end(self) -> None:
         if self.live <= 0 and not self._finishing:
             self.finish()
+            self._held = False
+
+    def _finish_tick(self) -> None:
+        """exe 0x1e 计数归零 → 0x28 (停一拍) 才自毁: 比框架多 1 tick (实录 en205_t161: 末位 -20 后第 3 tick 回待机)."""
+        if self._fade is None and not self._held and not self.busy():
+            self._held = True
+            return
+        super()._finish_tick()
 
 
 MOVES = {205: FireArrow}
