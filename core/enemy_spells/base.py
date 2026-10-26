@@ -159,6 +159,9 @@ class Spell:
         if not victim.alive:
             return
         combat.set_reaction(victim, "hit", None)
+        # exe 受击 = 给目标挂 seq (FUN_00438d40), 会置全局 break: 若此刻在跑施法者 seq 的信号, 施法者 seq 本 tick 停在信号之后
+        # (E 组实录). 我们的受击不走 attach_seq, 这里手动置位 (不在 seq 派发中时无影响, 下一实体循环前会复位).
+        self.battle.engine._break = True
         if fx == 'both':
             combat._emit_hit_effect(self.battle, self.caster, victim)
         elif fx == 'dir':
