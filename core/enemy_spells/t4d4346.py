@@ -7,9 +7,12 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标一个控制体 FUN_004d432
   -250: 受击 6557f4 (固定朝下, 不看朝向) + ef010 刺爆 655c10[DAT_006418e0] (=方向 0).
   -200: 只 +0x78-- (exe 无飘字; 我们这里 Spell.settle 做异常结算, 未中才飘 MISS).
   0x1e: 计数归零 + 目标受击完 → 0x28 渐亮 → 自毁.
+实录校准 (wine/captures/en10_t4_F4514.log): 控制体出生 +16 / 寿命 143, 16+1 次刺爆与图标出生 tick、图标帧/寿命/位置
+  逐 tick 吻合; 控制体 -200 后下一 tick 即渐亮 (state 0x28 @+160, 无飘字不多等), 施法者 +181 回待机.
 """
 from __future__ import annotations
 
+from core.enemy_spells.b_common import finish_on_count
 from core.enemy_spells.base import Spell
 from core.mina_skills import _seal_hit, _seal_icon
 
@@ -60,7 +63,7 @@ class Seal(Spell):
         self.live -= 1
         self.settle(t)
         if self.live <= 0:
-            self.finish()
+            finish_on_count(self)            # 无飘字: 计数归零下一 tick 即渐亮 (不多等 -20)
 
 
 TEMPLATES = {0x4d4346: Seal}
