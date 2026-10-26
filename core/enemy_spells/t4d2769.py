@@ -8,12 +8,15 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标 FUN_004d2746 光爆发生�
 发生器 FUN_004d26b0: age 0,4,8,12 各 FUN_004d2632: 目标位置光爆 (e_para seq 6568f8[rand%5], 2 帧各 1t) + 0xc1; 第 4 个打 0x40000.
 光爆 FUN_004d2418: seq 播完 → -250, 化为碎片: 目标 ±(24+rand&7) / +8±(6+rand%6), flags 0x31 弹簧回 (目标, 目标+8)
   a=0.5/0.375, seq 656a08[rand%3] (8 帧各 3t 循环), 每 t 1/4 概率隐身; age > 0x3b → (打标记的) -200, 自毁.
+实录校准 (wine/captures/en16_t6_F4556.log, 16 施展超級波拉姿): 发生器 +20 / 光爆 +21,25,29,33 / 刺爆 +25.. / 碎片寿命 60 /
+  渐亮起点 +96 均吻合. 光爆出生位置 = 目标**当前**位置 (含上一击受击 seq 的后退: 第 3/4 个比前两个高 7px), 碎片弹簧中心
+  = -250 后 (后退 4px) 的位置 → b_common.cur_pos. 残差: 施法者回待机 +116 (原版 +117, 框架渐亮 20 vs 21 tick).
 近似: 出生 think 时机同杰特实现 (发生器由 -100 生成, 不在出生 tick think).
 """
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _set_z
-from core.enemy_spells.b_common import react
+from core.enemy_spells.b_common import react, cur_pos
 from core.anim_engine.bytecode import tuple_to_bytecode
 from core.jet_skills import HEAVY_SEQS, SHARD_SEQS
 
@@ -35,7 +38,7 @@ def _shard_think(e, eng) -> None:
         if e.is_playing():
             return
         react(sp, v)                                                  # -250
-        vx, vy = _pos(v)
+        vx, vy = cur_pos(b, v)                                        # -250 已挂受击 seq → 后退 4px 后的位置
         ox = (_rand(b) & 7) * FP + 24 * FP if _rand(b) & 1 else None
         if ox is None:
             ox = -((_rand(b) & 7) * FP + 24 * FP)
@@ -69,7 +72,7 @@ def _spawner_think(e, eng) -> None:
     sp: Paralyze = ud['spell']
     b, v = sp.battle, ud['victim']
     if ud['age'] == ud['next']:
-        x, y = _pos(v)
+        x, y = cur_pos(b, v)                                          # 目标当前位置 (含前一击的受击后退)
         s = fx(b, _shard_think, x, y, 0, HEAVY_SEQS[_rand(b) % 5], shard=True, spell=sp, victim=v, state=0, age=0)
         _sfx(b, SFX_BURST)
         ud['n'] += 1
