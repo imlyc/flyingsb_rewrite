@@ -71,6 +71,7 @@ class TacticsBattle:
         # 敌方 AI 计算的待执行攻击 (在移动动画结束后才打出)
         self._pending_enemy_attack: BattleUnit | None = None
         self._pending_enemy_skill: int | None = None      # 敌人待放技能 (exe 敌人表的技能)
+        self._pending_enemy_move: int | None = None       # 敌人待出的敌招 (core.enemy_moves, AI 选定)
         self._pending_enemy_cursor: tuple[int, int] | None = None
         # 敌方 AI 延迟执行标志: ENEMY_TURN 进入时为 True (= 先显示移动范围),
         # scene pre-move 暂停结束后 UI 调 run_pending_enemy_ai 触发实际移动.
@@ -399,6 +400,7 @@ class TacticsBattle:
             # exe FUN_004a4f94 case 4: 敌人移动完站在地雷上 → 本回合改为引爆地雷 (招式 247), 不再攻击
             self._pending_enemy_attack = None
             self._pending_enemy_skill = None
+            self._pending_enemy_move = None
             self._pending_enemy_cursor = None
             self._pending_damage_range = None
             self._pending_damage_falloff = None
@@ -412,11 +414,14 @@ class TacticsBattle:
             self._pending_enemy_skill = None
             self._pending_enemy_cursor = None
             u = self.current
-            if sid is None:
+            # 敌招 (AI 选定, core.battle.ai.take_turn_moves): exe FUN_004a6efe 开头 敌 MP -= 招式表 +0xc
+            mv, self._pending_enemy_move = self._pending_enemy_move, None
+            if sid is None and mv is None:
                 self._pending_damage_range = None
                 self._pending_damage_falloff = None
-            # 敌招 (现只用第 0 招当普攻): exe FUN_004a6efe 开头 敌 MP -= 招式表 +0xc
-            u.pending_enemy_move = u.enemy_moves[0] if (sid is None and u.enemy_moves) else None
+            if mv is None and sid is None and u.enemy_moves:
+                mv = u.enemy_moves[0]
+            u.pending_enemy_move = mv if sid is None else None
             if u.pending_enemy_move is not None:
                 from core.battle.formulas import enemy_move
                 u.mp = max(0, u.mp - enemy_move(u.pending_enemy_move)['mp_cost'])
@@ -431,6 +436,7 @@ class TacticsBattle:
                     combat.begin_attack(self, self.current, target)
             return  # UI 跑 attack_seq, 命中点回调 apply_pending_attack, 'end' 回调 post_attack_anim
         self._pending_enemy_attack = None
+        self._pending_enemy_move = None
         if self._check_end():
             return
         self.end_unit_turn()

@@ -200,6 +200,8 @@ _STYLE_PRESETS: dict[str, tuple[str, dict[str, list[int]], int]] = {
     "OVAL":      (ATK_C_OVAL_ATLAS, ATK_C_OVAL_BY_DIR, ATK_C_OVAL_FRAME_TICKS),
     "CLAW":      (CLAW_ATLAS, CLAW_BY_DIR, CLAW_FRAME_TICKS),
     "LANCE":     (LANCE_ATLAS, LANCE_BY_DIR, LANCE_FRAME_TICKS),
+    # 敌招 DOIT 的 &DAT_00655b60 (core.enemy_moves): et00 帧 20, 21 各 4 tick, 不分方向
+    "STARBURST2": (UNIVERSAL_STARBURST_ATLAS, {d: [20, 21] for d in _DIRS}, UNIVERSAL_STARBURST_FRAME_TICKS),
 }
 
 

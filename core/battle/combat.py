@@ -110,6 +110,9 @@ def _emit_hit_effect(battle: "TacticsBattle", attacker: BattleUnit, defender: Ba
         from core.normal_attack import entry as _na_entry
         fx = _na_entry(attacker.attack_cur).fx
         style = fx.upper() if fx else None
+    elif attacker.pending_skill_id is None and not attacker.is_player:
+        from core.enemy_moves import hit_style
+        style = hit_style(getattr(attacker, 'pending_enemy_move', None))
     specs = hit_effect_specs(defender, attacker.name, style)
     cx = defender.x * TILE_W + TILE_W // 2
     cy = defender.y * TILE_H + TILE_H // 2
@@ -218,6 +221,9 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         battle.engine.swing_sound = swing
         attacker.pending_draw_sound = draw if draw is not None else -1
         attacker.pending_draw_signal = -1000 if (cid is not None and cid < 8) else -1001
+    elif skill_id is None and _enemy_doit(attacker) is not None:
+        # 敌招 DOIT_melee (core.enemy_moves): 挥击/命中音都在 exe seq 里 (op 0x13 设命中音, IMPACT 播)
+        battle.engine.swing_sound = -1
     elif skill_id is None and attacker.enemy_moves:
         # 敌人普攻 = 招式表第 0 项: exe 处理函数里 play 的挥击音 + 登记的命中音 (core.battle.exe_sounds)
         from core.battle.exe_sounds import enemy_move_attack_sounds
@@ -251,6 +257,10 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         else:
             from core.normal_attack import seq_for as _na_seq
             seq_tuples = _na_seq(na_entry.idx, attacker.facing)
+    enemy_doit = _enemy_doit(attacker) if skill_id is None else None
+    if seq_tuples is None and enemy_doit is not None:
+        from core.enemy_moves import seq_for as _em_seq
+        seq_tuples = _em_seq(enemy_doit, attacker.facing)
     if seq_tuples is None:
         seq_tuples = attack_seq_for(attacker.name, attacker.facing, skill_id)
     attacker.pending_impact_total = max(1, sum(1 for t in seq_tuples
@@ -264,7 +274,7 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
     # 清掉上一次攻击残留的 render snapshot (_move_start_*, _fm_total_ticks 等),
     # 否则新攻击第 1 帧会按旧 snapshot 算 MOVE lerp, 出现瞬移+退回的鬼畜.
     attacker.entity.user_data = {'unit': attacker}
-    if na_entry is not None:
+    if na_entry is not None or enemy_doit is not None:
         attacker.entity.user_data['global_atlas'] = True     # exe 原 seq: fm 槽号是全局图集号 (渲染不走 ATK_A/B/C 抽象槽)
         # seq 以 move 开头 (如孙悟空拳 0x670a20 先 move 1t): 第一个帧 op 之前 exe 仍显示待机姿 (实录 na0_00)
         pre = 0
@@ -299,6 +309,18 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         if ra:
             from core.ranged_attack import on_attach as _ra_attach
             _ra_attach(battle, attacker)          # 远程普攻 / 紫河第三形态: 协调实体 (core.ranged_attack)
+
+
+def _enemy_doit(attacker: BattleUnit) -> int | None:
+    """敌人本次出招若是 DOIT_melee 类 (有 exe seq 表) → 招式 id, 否则 None."""
+    if attacker.is_player:
+        return None
+    mid = getattr(attacker, 'pending_enemy_move', None)
+    if mid is None:
+        return None
+    from core.enemy_moves import move
+    m = move(mid)
+    return mid if m is not None and m.kind.startswith('doit') else None
 
 
 def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
@@ -340,6 +362,8 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
             if tile is not None:
                 skill_impact_spawn(sid)(battle, attacker, tile)
             return    # 不走默认伤害结算
+    if sid is None and not attacker.is_player and _apply_enemy_special(battle, attacker):
+        return
     dmg_tiles = getattr(battle, '_pending_damage_range', None)
     if dmg_tiles:
         for (x, y) in dmg_tiles:
@@ -352,6 +376,53 @@ def apply_pending_attack(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     if target is None or not target.alive:
         return
     _roll_damage_one(battle, attacker, target)
+
+
+def _range_units(battle: "TacticsBattle", attacker: BattleUnit, same_side: bool) -> list[BattleUnit]:
+    dmg_tiles = getattr(battle, '_pending_damage_range', None)
+    cells = dmg_tiles or ([] if attacker.pending_attack_target is None
+                          else [(attacker.pending_attack_target.x, attacker.pending_attack_target.y)])
+    out = []
+    for (x, y) in cells:
+        t = battle.q.occupant(x, y)
+        if t is not None and t.alive and (t.is_player == attacker.is_player) == same_side:
+            out.append(t)
+    return out
+
+
+def _apply_enemy_special(battle: "TacticsBattle", attacker: BattleUnit) -> bool:
+    """敌招类别 1 加异常 / 2 回复己方 / 4 自爆 (core.enemy_moves); 类别 0 伤害 → False 走默认."""
+    from core import enemy_moves as EM
+    m = EM.move(getattr(attacker, 'pending_enemy_move', None))
+    if m is None or m.category == EM.CAT_DAMAGE:
+        return False
+    if m.category == EM.CAT_HEAL:
+        for t in _range_units(battle, attacker, same_side=True):
+            amt = EM.heal_amount(battle, attacker, m, _falloff(battle, t))
+            before = t.hp
+            t.hp = min(t.max_hp, t.hp + amt)
+            push_damage_event(battle, t, DamageEvent(t.hp - before, t.hp, t.x, t.y, heal=True))
+            _emit_life_fire_effect(battle, t)
+            battle.engine._emit('sound_play', None, 301)
+            battle._log(f"{attacker.name} → {t.name}: 回复 {t.hp - before} HP")
+        return True
+    if m.category == EM.CAT_STATUS:
+        for t in _range_units(battle, attacker, same_side=False):
+            got = EM.resolve_status(battle, attacker, t, m)
+            if got:
+                set_reaction(t, "hit", None)
+                battle._log(f"{attacker.name} → {t.name}: 中了 {[hex(b) for b in got]}")
+            else:
+                _miss(battle, attacker, t, False)
+        return True
+    if m.category == EM.CAT_FIXED:
+        dmg = EM.SELF_DESTRUCT_DMG.get(attacker.enemy_type, 44)
+        for t in _range_units(battle, attacker, same_side=False):
+            apply_damage(battle, attacker, t, dmg, "", face_attacker=False)
+        attacker.hp = 0
+        battle._log(f"{attacker.name} 自爆")
+        return True
+    return False
 
 
 def _replay_impact_visuals(battle: "TacticsBattle", attacker: BattleUnit) -> None:
