@@ -271,6 +271,9 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
         seq_tuples = _em_seq(enemy_doit, attacker.facing)
     if seq_tuples is None:
         seq_tuples = attack_seq_for(attacker.name, attacker.facing, skill_id)
+    # DOIT_melee 收尾 (FUN_004d0e18 state 0x1e→0x28): 飘字/受击演完后镜头拉远 13 tick 才结束本次攻击 (原版实录: 我方普攻
+    # na0_* 与敌 用雙拳連擊 都是 state 40×13). 镜头动画不做, 只等时长 (tactics.advance_turn_when_ready). 技能/远程/敌招演出自管.
+    battle._doit_zoom = skill_id is None and spell is None and not ra
     attacker.pending_impact_total = max(1, sum(1 for t in seq_tuples
                                                if t[0] == 'impact' or (t[0] == 'jump' and t[1] == -100)))
     # 创建/复用 entity, 关联回 BattleUnit (signal handler 用)

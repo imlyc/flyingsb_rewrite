@@ -281,7 +281,11 @@ def test_counter_plays_after_attack_then_turn_ends():
     combat.apply_pending_attack(b, e)                   # 反击命中: 扣算定伤害, 不判命中
     assert p.hp == hp0 - 7 and not getattr(b, '_pending_counter', None)
     b._pending_turn_end = True
-    b.advance_turn_when_ready()                         # 反击演完 → 恢复朝向 → 结束回合
+    b.advance_turn_when_ready()                         # 反击 (DOIT) 演完 → 先等收尾 13 tick (镜头拉远时长)
+    assert e.is_countering
+    for _ in range(13):
+        b.engine.tick()
+    b.advance_turn_when_ready()                         # → 恢复朝向 → 结束回合
     assert not e.is_countering and e.facing == (1, 0)
 
 

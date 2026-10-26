@@ -30,6 +30,9 @@ from core.battle.data import (
 )
 
 
+DOIT_ZOOM_TICKS = 13                 # DOIT 收尾镜头拉远 (exe 300ms, Wine 实录 13 tick)
+
+
 class TacticsBattle:
     def __init__(
         self,
@@ -721,10 +724,27 @@ class TacticsBattle:
             status_icons.sync(self)              # 没有渐亮: 行动结束当刻挂图标
         self._pending_turn_end = True
 
+    def _spawn_wait(self, ticks: int) -> None:
+        """纯计时实体 (projectile 门控: 场景等它走完才再调 advance_turn_when_ready)."""
+        def _think(e, eng):
+            ud = e.user_data
+            if 'wait' not in ud:
+                return
+            ud['wait'] -= 1
+            if ud['wait'] <= 0:
+                eng.destroy(e)
+        e = self.engine.spawn(think_fn=_think)
+        e.flags = 0x800 | 0x10000
+        e.user_data.update(kind='turn_wait', projectile=True, wait=ticks)
+
     def advance_turn_when_ready(self) -> None:
         """scene 在 _units_animating() 全部清空后调; 处理 pending turn 切换.
         exe FUN_004a4f94 case 7 → 8: 本次攻击演完若有反击者, 先演反击 (FUN_004cbc9d(2) 交换攻守), 再结束回合."""
         if not self._pending_turn_end:
+            return
+        if getattr(self, '_doit_zoom', False):    # DOIT 收尾的 13 tick (core.battle.combat.begin_attack 记的)
+            self._doit_zoom = False
+            self._spawn_wait(DOIT_ZOOM_TICKS)
             return
         self._pending_turn_end = False
         if self._check_end():
