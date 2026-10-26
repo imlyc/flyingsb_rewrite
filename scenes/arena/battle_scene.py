@@ -116,6 +116,10 @@ class ArenaBattleScene(BattleScene):
 
         for e in enemies:                 # exe 摆阵 (普通阵型): 敌初始行动值 rand%20
             e.action_value = rng.randrange(20)
+        # 竞技场的我方是新建角色 (行动值 0), 正常游戏里我方带着上一场留下的行动值 (存档 +0x1c, 0..19) 进场;
+        # 这里模拟成随机 0..19, 否则第一回合几乎总是敌人先手. 只在竞技场, 剧情战仍读存档值.
+        for p in players:
+            p.action_value = rng.randrange(20)
         battle = TacticsBattle(
             players, enemies,
             battle_map=battle_map, rng=rng,
