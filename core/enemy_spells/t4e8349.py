@@ -10,6 +10,8 @@ dispatcher: 渐暗 → 施法 seq 表[朝向] → -100: 每个目标一个隐形
       + ef010 刺爆 655c10[施法者朝向] (每 tick 一个);
       第 0x20 次再发 -250: 飘字 (+0x7a), 控制实体自毁 (+0x78 --).
   0x1e: 控制实体全完 + 飘字全完 → 0x28 渐亮 → 自毁 (不等目标受击 seq).
+实录校准 (wine/captures/en23_t8_F4224.log, 23 使用新音功): 控制实体 +16 出生寿命 93, 首批音符 +78 (age>0x3c 用 think 前的 age),
+  音符出生当 tick 即 think; 音符帧序列/寿命 20/z 79..132、刺爆 +78 起、飘字 +109/+110、渐亮 +146 (19t) 逐 tick 吻合.
 """
 from __future__ import annotations
 
@@ -38,8 +40,9 @@ def _ctl_think(e, eng) -> None:
     ud = e.user_data
     if 'sing' not in ud:
         return
+    a = ud['age']                                 # exe +0x144: think 之后才 ++ (出生当 tick 不 think → 首次 think a=0)
     ud['age'] += 1
-    if ud['age'] <= DELAY:
+    if a <= DELAY:
         return
     sp: NewSound = ud['spell']
     v = ud['victim']
@@ -69,8 +72,9 @@ class NewSound(Spell):
         x, y = _pos(v)
         z = _unit_z(v) + 72 * FP
         for i in range(2):
-            fx(self.battle, _note_think, x, y, z, NOTE_SEQ, note=True,
-               **_motion(m=0x51, vx=(FP if i else -FP), vz=8 * FP, az=0x8000, tz=0))
+            e = fx(self.battle, _note_think, x, y, z, NOTE_SEQ, note=True,
+                   **_motion(m=0x51, vx=(FP if i else -FP), vz=8 * FP, az=0x8000, tz=0))
+            _note_think(e, self.battle.engine)        # 实录: 出生当 tick 即 think (首帧 x±1, z 72→79)
 
     def on_tick(self, v) -> None:
         if not v.alive:
