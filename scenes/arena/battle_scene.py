@@ -136,7 +136,11 @@ class ArenaBattleScene(BattleScene):
     def _make_terrain():
         if realm.maps_available() and realm.is_available(realm.DEFAULT_ARENA_MAP):
             try:
-                return realm.load(realm.DEFAULT_ARENA_MAP)
+                m = realm.load(realm.DEFAULT_ARENA_MAP)
+                if realm.DEFAULT_ARENA_LAYER == 1 and m._layer1:     # 只在擂台上打: 通行按第 1 层
+                    m.layer = 1
+                    m.cells_active = m.cells1
+                return m
             except Exception as e:
                 print("arena real map failed:", e)
         return ArenaTerrain()

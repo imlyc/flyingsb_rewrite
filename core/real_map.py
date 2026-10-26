@@ -51,7 +51,8 @@ HEADER_BYTES = 0x1E0
 LAYER_HDR_U32 = 12
 
 # 竞技场默认用的地图 (TARA = 竞技场 hall)
-DEFAULT_ARENA_MAP = "TARA_01P"     # 西州格鬥場 擂台 (地图表 #249), 全图连通; TARA_00P 只是入口
+DEFAULT_ARENA_MAP = "TARA_01P"     # 西州格鬥場 (地图表 #249); TARA_00P 只是入口
+DEFAULT_ARENA_LAYER = 1           # 擂台台面在第 1 层 (16×16, x 6..21 y 9..24); 第 0 层是台下走道
 # 世界地图默认用的地图 (T_LOC0 = 东海之滨)
 DEFAULT_WORLD_MAP = "T_LOC0_P"
 
