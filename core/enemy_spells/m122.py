@@ -12,7 +12,9 @@ dispatcher:
   -250    目标 FUN_004c4f20 + 受击 6557f0 + 655c10[反(目标朝向)] 刺爆 + 655b18 星爆 (无抖动) + 0xbd.
   -200    该目标飘字.
   0x1e    计数归零 + 受击播完 → 0x28 渐亮 → 自毁.
-近似: 喷口首次 think 的 age 取 0 (exe +0x144 递增与 think 的先后未核), 即出生即第一次 -250.
+实录校准 (wine/captures/en122_t83_F5730.log): 喷口出生当 tick 不 think, 下一 tick age 0 (第 1 团热气 + 首次 -250, 共 5 次受击
+  +1/+21/+41/+61/+81); 热气出生当 tick 已积分一步 (z 25, 喷口前 35px); 热气寿命 12 t、受击特效位置、飘字出生均逐 tick 吻合.
+  收尾残差 2 t = 飘字位数 (原版 4 位, 我们 3 位).
 """
 from __future__ import annotations
 
@@ -73,7 +75,8 @@ def _puff(battle, nozzle, d: int) -> None:
     else:
         vx = _frac(battle) + 0x30000
         x += 40 * FP
-    fx(battle, _puff_think, x, y, z, PUFF, puff=True, **_motion(m=0x71, vx=vx, vy=vy, vz=vz))
+    e = fx(battle, _puff_think, x, y, z, PUFF, puff=True, **_motion(m=0x71, vx=vx, vy=vy, vz=vz))
+    _c3211(e)                     # 实录 en122_t83: 热气出生当 tick 已积分一步 (z 25 / y 喷口-35)
 
 
 def _nozzle_think(e, eng) -> None:

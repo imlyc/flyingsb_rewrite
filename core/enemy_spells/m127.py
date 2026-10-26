@@ -13,7 +13,9 @@ dispatcher:
   -200    目标 FUN_004c4f20 + 受击 6557f0 + 655c10[反(目标朝向)] 刺爆 (无星爆) + 目标飘字
           + FUN_004d074e(施法者, DAT_007da1ec) 施法者白字 (= 吸到的 HP) + 0x143.
 数值: exe FUN_004a6efe 对招式 0x20 / 0x7f (= 127): DAT_007da1ec = 伤害 (≤ 施法者缺的 HP), 施法者 HP += 它.
-近似: 落空 (DAT_007da1ec = -1) 时 exe 施法者飘特殊字形, 我们不飘.
+落空 (DAT_007da1ec = -1) → 施法者白字 MISS 字形 (FUN_004d074e param<0).
+实录校准 (wine/captures/en127_t88_F5694.log): 计时实体 (+1)、每轮粒子出生 tick、-200/刺爆/飘字 (+114)、施法者白字 "0"
+  (满血吸 0 仍飘, 80 t, 它的 -20 决定收尾)、dispatcher 寿命 211 t 逐 tick 吻合; 粒子出生当 tick 已走第 1 步 (已改).
 """
 from __future__ import annotations
 
@@ -70,7 +72,9 @@ def _dust(battle, victim, caster) -> None:
     cx, cy = _pos(caster)
     ox, oy = SUCK_OFF[_dir(caster)]
     tx, ty, tz = cx + ox * FP, cy + FP + oy * FP, _unit_z(caster) + 36 * FP
-    fx(battle, _dust_think, x, y, z, DUST, dust=True, **aim_motion(battle, x, y, z, tx, ty, tz))
+    e = fx(battle, _dust_think, x, y, z, DUST, dust=True, **aim_motion(battle, x, y, z, tx, ty, tz))
+    if _cdbc2(e):                 # 实录 en127_t88: 粒子出生当 tick 已走第 1 步
+        battle.engine.destroy(e)
 
 
 def _timer_think(e, eng) -> None:
@@ -121,13 +125,15 @@ class Suck(Spell):
         reset_hit(v)
         impact_fx(b, v, OPP[_dir(v)], None, jitter=False)
         before = v.hp
+        n_ev = len(b.damage_events)
         self.settle(v)
         dealt = max(0, before - v.hp)
+        miss = any(ev.miss for ev in b.damage_events[n_ev:])
         gain = min(dealt, max(0, c.max_hp - c.hp))
-        if dealt > 0:
-            c.hp += gain
-            combat.push_damage_event(b, c, combat.DamageEvent(gain, c.hp, c.x, c.y, heal=True))
-            b._log(f"{c.name}: 吸取 HP +{gain} ({c.hp}/{c.max_hp})")
+        c.hp += gain
+        # exe 总是 FUN_004d074e(施法者, DAT_007da1ec): 落空 (-1) = 白字 MISS 字形, 否则吸到的量 (满血时 "0", 实录 en127_t88)
+        combat.push_damage_event(b, c, combat.DamageEvent(gain, c.hp, c.x, c.y, miss=miss, heal=True))
+        b._log(f"{c.name}: 吸取 HP +{gain} ({c.hp}/{c.max_hp})")
         _sfx(b, SFX_HIT)
         if self.live <= 0:
             self.finish()
