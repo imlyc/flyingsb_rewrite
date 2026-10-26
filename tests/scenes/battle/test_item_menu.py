@@ -19,6 +19,8 @@ def arena_scene():
                           enemy_names=[R.ENEMY_ROSTER[0]], return_scene=None)
     if hasattr(sc, "on_enter"):
         sc.on_enter()
+    for e in sc.battle.enemies:                 # 我方是 40 级真值: 别让最弱的敌人在轮到玩家前就被反击打死
+        e.hp = e.max_hp = 99999
     return sc
 
 
