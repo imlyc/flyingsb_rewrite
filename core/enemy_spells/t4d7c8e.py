@@ -13,6 +13,9 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标一个发射器 FUN_004d7c4
   从施法者原位 z+48 出发 (无随机), 按朝向偏移: 上 y-9 / 下 y+12 / 左 x-20,y+1 / 右 x+20,y+1; 其余同上.
 实录校准 (wine/captures/en42_t199_F9654.log, 1 目标): 发射器 (+20, 117 t)、8 颗冰钻出生 tick (+25/53/77/97/113/125/133/137)、
   seq 帧序/寿命、state 0→10 时刻 (seq 播完那 tick)、三轴匀速轨迹 (逐 px)、刺爆 tick、渐亮起点 (+197, 同位数伤害) 逐 tick 吻合.
+114 实录校准 (wine/captures/en114_t76_F5462.log): 发射器 (+15, 117 t)、8 颗冰钻出生 (+20/48/72/92/108/120/128/132) 与
+  寿命 (受击后退中出生的 +108/128/132 三颗 25 t, 其余 24 t)、刺爆 tick (+44/72/96/116/133/144/153/157, 位置固定于
+  复位后退 4px 处)、飘字 (+157)、渐亮 (+193) 吻合.
 近似: 冰钻起始高 LAB_004fffff_1 按 0x500000 (80px) 取 (同玩家版).
 """
 from __future__ import annotations
@@ -35,8 +38,10 @@ def _cdiv(a: int, b: int) -> int:
 
 
 def spawn_drill(sp: Spell, victim, x: int, y: int, z: int, d: int, last: bool):
-    """FUN_004d788d / 4dda82 后半: 主轴定速, 其他轴按步数均分."""
-    tx, ty = _pos(victim)
+    """FUN_004d788d / 4dda82 后半: 主轴定速, 其他轴按步数均分. 目标 = 目标单位当前 +8/+0xc (含受击后退位移,
+    实录 en114/en42: 前一颗命中后 ≤17 t 内出生的冰钻要多飞 1 t)."""
+    from core.enemy_spells.b_common import cur_pos
+    tx, ty = cur_pos(sp.battle, victim)
     tz = 0x300000
     mv = _motion(m=0x71, tx=tx, ty=ty, tz=tz)
     if d < 2:
@@ -108,7 +113,9 @@ class IceDrill(Spell):
     def on_drill_hit(self, v, last: bool) -> None:
         self.live -= 1
         _sfx(self.battle, SFX_HIT)
-        self.hit(v, fx='both')                          # -250
+        self.hit(v, fx=None)                            # -250: 受击 seq + 引擎 break
+        from core.enemy_spells.b_common import react
+        react(self, v, starburst=True)                  # 刺爆 655c10[6418dc[目标朝向]] + 星爆, 位置 = 复位后退 4px (无抖动)
         if last:
             self.live -= 1
             self.settle(v)                              # -200
