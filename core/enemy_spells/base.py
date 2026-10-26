@@ -241,7 +241,7 @@ class Spell:
             c.pending_caster_coord = None
         c.cast_hold = False
         if c.entity is not None:                 # 实录: dispatcher 最后一 tick 之后再过 2 tick 施法者才回待机
-            c.entity.user_data['hold_until_tick'] = self.battle.engine._tick_id + 1
+            c.entity.user_data['hold_until_tick'] = self.battle.engine._tick_id + 2
         e = self.coord
         e.user_data['unit'] = c
         eng = self.battle.engine
