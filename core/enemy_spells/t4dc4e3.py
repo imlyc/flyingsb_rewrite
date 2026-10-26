@@ -12,12 +12,15 @@ dispatcher: 渐暗 → 施法 seq 表[朝向] → -100: 记 +0x16c = age + 0x50,
   -200: 计数 +0x7c; 满目标数 → 全体飘字 + FUN_004d8ce1 停地震 (停 0xe3, 相机复位).
   0x28: 全部落完 + 飘字完 + 受击完 → 0x32 渐亮 → 自毁.
 石头出生当 tick 先走一步 (同 玄武 实录首帧 z=536).
+实录校准 (wine/captures/en69_t35_F4716.log, 69 快速攻擊): 石头 dispatcher age 128 出生 (z 536, 320 帧 0×9 1×2 2×3 3×4 寿命 18)、
+  -250 刺爆/星爆 +9、-200 → 飘字 逐 tick 吻合 (相对 dispatcher age; 该实录原版渐暗 19t 比常见 18t 多 1, 绝对 tick 整体差 1).
+  修正: 刺爆/星爆以目标受击后退 4px 后的位置为准 (b_common.react). 残差: 渐亮起点相对末位飘字数字 ±1 (公共飘字系统).
 """
 from __future__ import annotations
 
 from core.anim_engine.bytecode import tuple_to_bytecode
-from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _c3211, _motion, _getz, _set_z, _unit_z
-from core.enemy_spells._d_fx import starburst
+from core.enemy_spells.base import Spell, _dir, fx, FP, _pos, _rand, _sfx, _c3211, _motion, _getz, _set_z, _unit_z
+from core.enemy_spells.b_common import react
 
 ROCK = (320, 321)
 ROCK_FALL = [[('fm', a, 0, 2), ('exit',)] for a in ROCK]                                     # 6599c8
@@ -117,9 +120,7 @@ class Quake(Spell):
 
     def on_rock_hit(self, v) -> None:
         """-250."""
-        self.hit(v)
-        if v.alive:
-            starburst(self.battle, v)
+        react(self, v, d=_dir(self.caster), starburst=True)   # 实录: 刺爆/星爆以目标受击后退 4px 后的位置为准
 
     def on_rock_done(self, v) -> None:
         """-200: 落满 → 全体飘字 + 停地震."""

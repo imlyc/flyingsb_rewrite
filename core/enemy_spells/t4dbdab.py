@@ -9,13 +9,13 @@ dispatcher: 渐暗 → 施法 seq 表[朝向] → -100: +0x78 清零 → 0x1e: d
   -200: 飘字 (+0x7a), +0x78 --.
   0x28: 拳全收 + 飘字完 + 受击完 → 0x32 渐亮 → 自毁.
 实录校准 (wine/captures/en68_t34_F4458.log, 68 用重拳攻擊): 拳 +29 出生寿命 63, 帧序列 (0 1×2 .. 6×39 5×2 .. 0×3)、
-  -250 刺爆/星爆 +35、-200 +91、飘字 +93/+95/+97 逐 tick 吻合, 无需改动. 残差: 渐亮起点晚 1 tick (原版 +128, 我们 +129) —
+  -250 刺爆/星爆 +35、-200 +91、飘字 +93/+95/+97 逐 tick 吻合; 刺爆/星爆位置改为目标受击后退 4px 后 (b_common.react). 残差: 渐亮起点晚 1 tick (原版 +128, 我们 +129) —
   原版渐亮 = 首个飘字数字 +35, 我们公共飘字系统 +36 (en5 实录里原版飘字发生器多活 1 tick 被抵消了), 属框架问题.
 """
 from __future__ import annotations
 
-from core.enemy_spells.base import Spell, fx, FP, _pos, _sfx, _unit_z
-from core.enemy_spells._d_fx import starburst
+from core.enemy_spells.base import Spell, _dir, fx, FP, _pos, _sfx, _unit_z
+from core.enemy_spells.b_common import react
 
 FIST = 315
 FIST_SEQ = [('sound', 221, 0x0411)] + [('fm', FIST, f, 1) for f in range(7)] + [('exit',)]       # 65991c
@@ -80,9 +80,7 @@ class Fist(Spell):
 
     def on_fist_hit(self, v) -> None:
         """-250."""
-        self.hit(v)                               # 受击 + ef010 刺爆
-        if v.alive:
-            starburst(self.battle, v)
+        react(self, v, d=_dir(self.caster), starburst=True)   # 实录: 刺爆/星爆以目标受击后退 4px 后的位置为准
         self.hits += 1
         if self.hits == len(self.targets):
             self.all_hit = True
