@@ -14,6 +14,8 @@ dispatcher: 0 渐暗 → 10 施法者挂 66f264[朝向] (同 20 爱心的施法 
         0x14: 半径每 t -1.0 / -0.75; r ≤ 24 → 10.
         0x1e: 半径收缩 + z -= 24 px/t; 落地 → FUN_004e888e 4 粒火花 (atlas 304 帧 12-14 随机, 匀速 vx ±3 / vy ±2 /
               vz 0..3 px, 8t 后闪烁, 16t 自毁); 有标记 → (目标0: 停 0xfa, 播 0xec) 发 -200 + -250 (源 = 目标); 自毁.
+实录校准 (wine/captures/en24_t8_F4784.log): 上升光点出生当 tick 即 think (首帧 z=24, 寿命 20 t); 改后光点/光球 (+58)/
+  落地火花与飘字 (+144)/渐亮 (+181, 同位数 seed) 逐 tick 吻合.
   -250: 受击 6557f0[目标自身朝向] + 刺爆 655c10[6418dc[目标朝向]] + et00 星爆.  -200: 飘字, 0x78--.
 """
 from __future__ import annotations
@@ -140,8 +142,9 @@ class SuperAbalan(Spell):
                     rx = (_rand(b) & 31) - 16
                     ry = (_rand(b) & 15) - 8
                     marked = self.count > 14
-                    static_fx(b, _rise_think, x + rx * FP, y + ry * FP, 0, ATLAS, 16, rise=True, spell=self, victim=v,
-                              marked=marked, **_motion(m=0x41, vz=0x180000, tz=0))
+                    e = static_fx(b, _rise_think, x + rx * FP, y + ry * FP, 0, ATLAS, 16, rise=True, spell=self,
+                                  victim=v, marked=marked, **_motion(m=0x41, vz=0x180000, tz=0))
+                    _rise_think(e, b.engine)       # 实录 en24_t8: 出生当 tick 即 think (首帧 z=24, 寿命 20 t)
                     _sfx(b, SFX_RISE)
                     if marked:
                         self.live += 1
