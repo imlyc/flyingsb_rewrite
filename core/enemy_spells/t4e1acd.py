@@ -10,6 +10,9 @@ dispatcher (无渐暗): case 0 挂施法 seq 表[朝向] → -100: FUN_004e19ae 
   -200: 首目标复位 + 受击 6557f0[目标朝向] + ef010 刺爆 655c10[施法者朝向] + et00 星爆 655b18 (两个都三轴抖动 rand&15-8)
         + 飘字 (+0x7a), +0x78 --.
   0x14: +0x78 == 0 且 飘字完 → 自毁 (不等受击 seq, 无渐亮).
+实录校准 (wine/captures/en165_t121_F5924.log, 165 使用聲波攻擊): 声波 +11 出生 (出生当 tick 不 think) 寿命 16, 残影 +12..+27
+  每 tick 一个 (帧 2 1×2 0×3), -200 +27、飘字 +28 起逐 tick 吻合; 修正: 刺爆/星爆基准 = 目标受击后退 4px 后的位置,
+  施法者在 dispatcher 自毁后第 2 tick 才回待机. dispatcher 结束 = 末位飘字数字 +31 (原版 4 位数字所以晚 2 tick, 数值差异).
 """
 from __future__ import annotations
 
@@ -68,8 +71,8 @@ class SoundWave(Spell):
         v = self.targets[0]
         self.hit(v, fx=None)
         if v.alive:
-            spark(self.battle, self.caster, v, jitter=True)
-            starburst(self.battle, v, jitter=True)
+            spark(self.battle, self.caster, v, jitter=True, knock=True)      # 实录: 以受击后退 4px 后为基准
+            starburst(self.battle, v, jitter=True, knock=True)
         self.live -= 1
         self.settle(v)
         self.finish()
@@ -77,6 +80,13 @@ class SoundWave(Spell):
     def busy(self) -> bool:
         """exe 0x14 只等声波 + 飘字."""
         return self.live > 0 or getattr(self.battle, 'float_pending', 0) > 0
+
+    def _end(self) -> None:
+        """实录: dispatcher 自毁后第 2 tick 施法者才回待机 (框架无渐亮路径只留 1 tick)."""
+        super()._end()
+        c = self.caster
+        if c.entity is not None:
+            c.entity.user_data['hold_until_tick'] = self.battle.engine._tick_id + 2
 
 
 TEMPLATES = {0x4e1acd: SoundWave}

@@ -7,12 +7,18 @@ from __future__ import annotations
 from core.enemy_spells.base import _rand
 
 
-def _effect(battle, victim, spec, jitter: bool) -> None:
+def _effect(battle, victim, spec, jitter: bool, knock: bool = False) -> None:
+    """knock: 刚挂了受击 seq 6557f0 (首个位移 4px 立即生效) → 以后退后的位置为准 (pao_skills.hit_pos, 实录 en165)."""
     from core.battle import combat
     from core.hit_effect_seq import HIT_EFFECT_Y_BASELINE_PX
     from core.sprites.base import TILE_W, TILE_H
-    cx = victim.x * TILE_W + TILE_W // 2
-    cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX
+    if knock:
+        from core.pao_skills import hit_pos
+        hx, hy = hit_pos(victim)
+        cx, cy = hx >> 16, (hy >> 16) - HIT_EFFECT_Y_BASELINE_PX
+    else:
+        cx = victim.x * TILE_W + TILE_W // 2
+        cy = victim.y * TILE_H + TILE_H // 2 - HIT_EFFECT_Y_BASELINE_PX
     if jitter:                                   # exe: 三轴各 (rand & 15) - 8
         cx += (_rand(battle) & 15) - 8
         cy += (_rand(battle) & 15) - 8
@@ -20,23 +26,23 @@ def _effect(battle, victim, spec, jitter: bool) -> None:
     combat._spawn_effect_entity(battle, cx, cy, spec)
 
 
-def starburst(battle, victim, jitter: bool = False) -> None:
+def starburst(battle, victim, jitter: bool = False, knock: bool = False) -> None:
     """FUN_004d0c90(..., &DAT_00655b18) = et00 紫色星爆 (帧 14,15 各 4t)."""
     from core.hit_effect_seq import (HitEffectSpec, UNIVERSAL_STARBURST_ATLAS, UNIVERSAL_STARBURST_FRAMES,
                                      UNIVERSAL_STARBURST_FRAME_TICKS)
     spec = HitEffectSpec(UNIVERSAL_STARBURST_ATLAS, list(UNIVERSAL_STARBURST_FRAMES), UNIVERSAL_STARBURST_FRAME_TICKS,
                          jittered=False)
-    _effect(battle, victim, spec, jitter)
+    _effect(battle, victim, spec, jitter, knock)
 
 
-def spark(battle, caster, victim, jitter: bool = False) -> None:
+def spark(battle, caster, victim, jitter: bool = False, knock: bool = False) -> None:
     """FUN_004d0c90(..., 655c10[施法者朝向]) = ef010 方向红刺爆."""
     from core.hit_effect_seq import (HitEffectSpec, facing_to_dir, UNIVERSAL_SPARK_ATLAS, UNIVERSAL_SPARK_BY_DIR,
                                      UNIVERSAL_SPARK_FRAME_TICKS)
     d = facing_to_dir(caster.facing)
     spec = HitEffectSpec(UNIVERSAL_SPARK_ATLAS, list(UNIVERSAL_SPARK_BY_DIR[d]), UNIVERSAL_SPARK_FRAME_TICKS,
                          jittered=False)
-    _effect(battle, victim, spec, jitter)
+    _effect(battle, victim, spec, jitter, knock)
 
 
 def custom_reaction(unit, steps: list[tuple]) -> None:
