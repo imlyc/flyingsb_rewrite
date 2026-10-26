@@ -6,6 +6,8 @@ dispatcher: 0 渐暗 → 10 施法者挂单条 seq 6704c4 (不分朝向: fm_mode
         think FUN_004ebf02: age%20 == 0 播 0xbd; seq 播完 → -200 (源 = 目标) 自毁.
   -200: 受击 6557f0[目标自身朝向] + 刺爆 655c10[施法者朝向] + 飘字; 0x78--.
   0x1e: 0x78 / 0x7a / 受击 全清 → 0x28 渐亮 → 自毁.
+实录校准 (wine/captures/en35_t13_F4720.log, 4 目标): 特效 +11 (48 t) / 位置 / -200 +59 吻合, 无需改动;
+  渐亮差 2 t 来自飘字位数 (原版 3 位, 我们 4 位).
 """
 from __future__ import annotations
 
