@@ -33,6 +33,7 @@ def hit_unit(sp, v, *, face_caster: bool = False, spark: bool = True, spark_dir:
         return
     combat.set_reaction(v, "hit", sp.caster if face_caster else None)
     b = sp.battle
+    v._b_hit_tick = b.engine._tick_id            # exe 受击标记起点 (b_common.hits_pending / cur_pos 用)
     d = _dir(sp.caster) if spark_dir is None else spark_dir
     if spark:
         _spark(b, d, v, jitter)

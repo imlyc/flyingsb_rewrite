@@ -17,6 +17,11 @@
    0x14: (不动) 等 DAT_0086a780 = 所有拳都悬停 → vz = -64 → 0x1e.
    0x1e: z<1 → 播 0xf6, -200 (源 = 目标): 受击 + 飘字 + 刺爆 + 星爆; 挂 seq 670694 (atlas 314 帧 3-15 各 1t), z = 0 → 0x28.
    0x28: seq 完 → -250 (0x78--) 自毁.
+实录校准 (wine/captures/en37_t14_F4728.log / en38_t14_F4224.log / en39_t14_F3556.log), 改后三招逐 tick 吻合
+  (验证时按各实录的渐暗时长设挂 seq 时 dispatcher age = 21 / 20 / 20):
+  - 施法者全程显示待机 (exe 不清 0x10000), 收尾不保持施法帧; 脚/拳出生当 tick 即 think;
+  - 0x28 看到 子实体/受击标记 (按 exe 受击 seq 18 t, b_common.hits_pending) 清零的那 tick 直接渐亮, 最后清的是飘字则晚 1 t.
+  残差: 子实体出生节拍 age%8 的相位取决于渐暗时长 (原版 Wine 下 17..20 t 不定, 框架固定 EXE_ATTACH_AGE=19), 可差 0..7 t.
 近似: 37 的 DAT_0086a77c 用 "已落地 ≥1 且 battle.float_pending == 0" 判定 (exe = 飘字计数回 0 的那一刻).
 """
 from __future__ import annotations
@@ -121,11 +126,31 @@ class _GodBase(Spell):
     def cast_seq(self, d):
         return CAST
 
+    def _attach(self) -> None:
+        """施法 seq 670624 只是 "等 12t → -100", exe 不清 0x10000 → 施法者一直显示待机
+        (实录 en37/38/39: 施法者全程 20006 待机帧). seq 照挂 (计时), 渲染强制走待机."""
+        super()._attach()
+        e = self.caster.entity
+        if e is not None:
+            e.user_data['idle_until_tick'] = 1 << 30
+
+    def _end(self) -> None:
+        super()._end()
+        e = self.caster.entity
+        if e is not None:
+            e.user_data.pop('idle_until_tick', None)
+            e.user_data.pop('hold_until_tick', None)
+
     def on_cast_impact(self) -> None:
         self.casting = True
 
     def spawn(self, v) -> None:
         raise NotImplementedError
+
+    def busy(self) -> bool:
+        """exe 0x28: 子实体计数 + 飘字计数 + 受击标记 (按 exe 受击 seq 18 t, 实录 en38_t14: 受击 +30 → 渐亮 +48)."""
+        from core.enemy_spells.b_common import hits_pending
+        return self.live > 0 or getattr(self.battle, 'float_pending', 0) > 0 or hits_pending(self)
 
     def think(self) -> None:
         if not self.casting:
@@ -137,9 +162,16 @@ class _GodBase(Spell):
                 self.live += 1
                 self.spawn(v)
             return
-        if self.live == 0 and not self._finishing:
+        if self.busy():
+            self._float_was = getattr(self.battle, 'float_pending', 0) > 0
+            return
+        if not self._finishing:
             self.casting = False
+            # exe 0x28 看到计数/受击全清的那 tick 直接进 0x32 渐亮 (实录 en37_t14: 脚 +76 自毁 → +77 渐亮;
+            # en38_t14: 受击 +30 → +48); 若最后清的是飘字 (-20), exe 下一 tick 才看到 (en39_t14: +104).
             self.finish()
+            self._quiet = 0 if getattr(self, '_float_was', False) else 1
+            self._finish_tick()
 
 
 class GodKick(_GodBase):
@@ -150,8 +182,9 @@ class GodKick(_GodBase):
 
     def spawn(self, v) -> None:
         x, y = _pos(v)
-        static_fx(self.battle, _foot_think, x, y + FP, Z_TOP * FP, 313, 0, foot=True, spell=self, victim=v, st=0,
-                  **_motion(m=0x41, vz=-64 * FP, tz=0))
+        e = static_fx(self.battle, _foot_think, x, y + FP, Z_TOP * FP, 313, 0, foot=True, spell=self, victim=v, st=0,
+                      **_motion(m=0x41, vz=-64 * FP, tz=0))
+        _foot_think(e, self.battle.engine)          # 实录 en37_t14: 出生当 tick 即 think (首帧 z=536)
 
     def on_land(self, v) -> None:
         """-200."""
@@ -188,8 +221,9 @@ class GodFist(_GodBase):
 
     def spawn(self, v) -> None:
         x, y = _pos(v)
-        fx(self.battle, _fist_think, x, y + FP, Z_TOP * FP, FIST_SEQ, fist=True, spell=self, victim=v, st=0,
-           **_motion(m=0x41, vz=-32 * FP, tz=0))
+        e = fx(self.battle, _fist_think, x, y + FP, Z_TOP * FP, FIST_SEQ, fist=True, spell=self, victim=v, st=0,
+               **_motion(m=0x41, vz=-32 * FP, tz=0))
+        _fist_think(e, self.battle.engine)          # 实录 en39_t14: 出生当 tick 即 think
 
     def on_land(self, v) -> None:
         """-200."""
