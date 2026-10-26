@@ -11,11 +11,14 @@ dispatcher: 渐暗 → 施法 seq → -100: FUN_004d9343 发一颗大火球 (+0x
         + 小火爆 655e58 (slot 291 帧 0..7, 27t) 于 (目标 x + rand%12-6, y + 0x18, z 0x48 + rand%16-8) 播完发 -260; 各 +0x7a ++.
   -210: 全部目标飘字, 各 +0x7c ++; +0x7a --.   -260: +0x7a --.   -20: +0x7c --.
   0x1e: 计数都 0 且所有目标受击 seq 完 → 0x28 渐亮 → 自毁.
+实录校准 (wine/captures/en3_t1_F3626.log, 3 目标): 大火球 +25 出生 6 tick 到达; 光标格火爆 (49t) 与 3 个小火爆 (35t)、
+  刺爆同在 +31; 飘字 +80; 渐亮起点 +117; 施法者回待机 +137 均吻合. 小火爆以目标受击后退 4px 后的位置为基准 (knocked_pos).
+  残差: 原版本次渐亮 19 tick (我们 20, 帧率抖动).
 """
 from __future__ import annotations
 
-from core.enemy_spells.base import Spell, FP, _pos, _rand
-from core.enemy_spells.t4d8ea3 import burst, projectile
+from core.enemy_spells.base import Spell, FP, _rand
+from core.enemy_spells.t4d8ea3 import burst, projectile, knocked_pos
 
 BALL_FRAME = (67, 60, 55, 56)                                   # 6560f0[dir] → (294, 帧)
 CENTER_BURST_SEQ = [('fm', 292, 0, 1), ('fm', 292, 1, 1), ('fm', 292, 2, 2), ('fm', 292, 3, 2), ('fm', 292, 4, 2),
@@ -52,7 +55,7 @@ class BigFireBall(Spell):
         # -250: 全目标受击 + 小火爆 (播完 -260)
         for v in self.targets:
             self.hit(v)
-            vx, vy = _pos(v)
+            vx, vy = knocked_pos(v)
             z = (0x48 + (_rand(b) & 0xf) - 8) * FP
             x = vx + ((_rand(b) % 12 - 6) << 16)
             self.live += 1

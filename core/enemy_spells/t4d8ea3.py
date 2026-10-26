@@ -12,6 +12,9 @@ dispatcher: 渐暗 → 施法 seq → -100: FUN_004d8d5c 发一颗火球 (+0x78 
   0x1e: 0x78/0x7a/0x7c 都 0 且目标 0 受击 seq 完 → 0x28 渐亮 → 自毁.
 注: exe 只给目标表第 0 个受击/飘字 (单体模板); 我们也只结算 targets[0].
 hook 招式 189 (FUN_004e2d83): -100 时先播 0xcb 再进模板.
+实录校准 (wine/captures/en5_t2_F3566.log): 火球 -100 后 +16 出生, 8 tick 到达; 刺爆/火爆 +24, 火爆 31 tick, 飘字 +55,
+  渐亮起点 +92 均吻合. 火爆位置以目标受击后退 4px 之后为准 (knocked_pos). 残差: 原版渐亮占 21 tick (我们 20, 帧率),
+  施法者回待机晚 2 tick (框架); 飘字数字 spawner→数字 原版 2 tick 我们 1 tick (公共飘字系统).
 """
 from __future__ import annotations
 
@@ -24,6 +27,15 @@ BURST_SEQ = [('fm', 290, 0, 1), ('fm', 290, 1, 2), ('fm', 290, 2, 3), ('fm', 290
 SFX_ARRIVE = 0xd6
 PROJ_Z = 0x30
 SPEED = {0: (0, -24), 1: (0, 24), 2: (-32, 0), 3: (32, 0)}      # FUN_004d8d5c / 4d9343 +0x16c/+0x170
+KNOCK = {0: (0, 4), 1: (0, -4), 2: (4, 0), 3: (-4, 0)}          # 受击 seq 6557f0[目标朝向] 第一步 move (挂 seq 当场执行)
+
+
+def knocked_pos(v) -> tuple[int, int]:
+    """受击后的目标位置 (16.16). 实录 (en5_t2 / en3_t1): -200/-250 先挂受击 seq, 它第一步后退 4px 当场生效,
+    随后生成的火爆以后退后的 x/y 为基准. 我们的受击位移不改单位坐标, 这里补上."""
+    x, y = _pos(v)
+    dx, dy = KNOCK[_dir(v)]
+    return x + dx * FP, y + dy * FP
 
 
 # ---------------- 公共子实体 (其它 A 组模块也用) ----------------
@@ -88,7 +100,7 @@ class FireBall(Spell):
         """-200: 受击 + 刺爆 + 火爆 655e10 (播完 -210 飘字)."""
         if v is not None:
             self.hit(v)
-            tx, ty = _pos(v)
+            tx, ty = knocked_pos(v)
         z = (_unit_z(v) if v is not None else 0) + 0xac * FP
         x = tx + ((_rand(self.battle) % 12 - 6) << 16)
         burst(self.battle, x, ty + 0x7c * FP, z, BURST_SEQ, lambda: self.on_burst_done(v))
