@@ -5,6 +5,8 @@ dispatcher: 0 渐暗 → 10 施法者挂 66fde0[朝向] (atlas 57, 前冲 + 播 
         受击标记; 播 0xe9 (电流声), 0x78 = 1 → 0x1e.
   -200 (源 = 目标): 飘字; 施法者复位 + 回待机; 目标挂受击 6557f0[目标自身朝向] (无刺爆); 停 0xe9; 0x78 = 0.
   0x1e: 0x78 / 0x7a / 受击 全清 → 0x28 渐亮 → 自毁.
+实录校准 (wine/captures/en30_t11_F5724.log): -200 在 -100 后 108 t (每帧 9 t), 飘字/渐亮随之吻合;
+  施法者在 -200 已回待机, 收尾不再保持施法帧 (覆盖 _end 去掉 hold_until_tick).
 实现: 触电 seq 去掉末尾两个信号 op 挂到目标 entity (cast_hold 让渲染走 entity 帧), dispatcher 自己数 96t 当 -200.
 """
 from __future__ import annotations
@@ -28,7 +30,7 @@ def _cast(d: int) -> list[tuple]:
 
 CAST = [_cast(d) for d in range(4)]
 SHOCK_SEQ = [('fm', 236, 1 + (k & 1), 8) for k in range(12)] + [('exit',)]     # 66fdf0 (去掉 -200 / -10)
-SHOCK_TICKS = 12 * 8
+SHOCK_TICKS = 12 * 9            # 实录 en30_t11: 单位 seq 的 fm n 每帧占 n+1 t → 12 帧 108 t (-100 @+15 → -200 @+123)
 SFX_SHOCK = 0xe9
 
 
@@ -54,10 +56,10 @@ class ElectroShock(Spell):
             v.cast_hold = True
             eng.attach_seq(v.entity, tuple_to_bytecode(SHOCK_SEQ))
         _sfx(self.battle, SFX_SHOCK)
-        self.until = self.age + SHOCK_TICKS
+        self.until = self.battle.engine._tick_id + SHOCK_TICKS     # 按引擎 tick (-100 在协调实体 think 之前/后都对)
 
     def think(self) -> None:
-        if self.until is None or self.age < self.until:
+        if self.until is None or self.battle.engine._tick_id < self.until:
             return
         self.until = None
         from core.battle import combat
@@ -70,6 +72,12 @@ class ElectroShock(Spell):
                 combat.set_reaction(v, "hit", None)
         stop_sfx(self.battle, SFX_SHOCK)
         self.finish()
+
+    def _end(self) -> None:
+        super()._end()
+        e = self.caster.entity
+        if e is not None:                # 施法者 -200 时已复位回待机 (exe), 不再显示施法帧
+            e.user_data.pop('hold_until_tick', None)
 
 
 MOVES = {30: ElectroShock}
