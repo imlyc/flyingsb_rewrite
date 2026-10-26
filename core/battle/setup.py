@@ -27,6 +27,11 @@ def _equip_bonus(ch: Character) -> dict[str, int]:
     return tot
 
 
+# exe 0x641820[角色槽]: 反击概率表 (FUN_004a65b6) 的行
+PLAYER_UNIT_CLASS = {'孙悟空': 1, '美娜': 0, '三藏法师': 0, '猪八戒': 2, '沙悟净': 1, '蒙面人': 0, '乐神杰特': 1,
+                     '破无': 2, '捕山': 2, '紫河': 1}
+
+
 def unit_from_character(name: str, ch: Character) -> BattleUnit:
     """把存档里的角色转换成战场单位.
 
@@ -62,6 +67,9 @@ def unit_from_character(name: str, ch: Character) -> BattleUnit:
     u.attack_normal, u.attack_melee = NA.attack_ids(name, weapon, acc)
     NA.zihe_setup(u, acc)
     u.wisdom = ch.Wisdom
+    u.luck = ch.Luck                       # 角色表 +0x58: 命中/闪避/暴击用的是幸运 (不是敏捷)
+    u.speed = ch.Unknow_9                  # +0x5c: 每回合行动值增量 (exe FUN_004a4108)
+    u.unit_class = PLAYER_UNIT_CLASS.get(name, 0)
     u.equipment = tuple(e for e in (ch.Head, ch.Body, ch.Hand, ch.Accessories1, ch.Accessories2)
                         if e not in (0xFFFFFFFF, -1))
     u.save_ref = ch
@@ -112,40 +120,35 @@ def make_enemy(name: str) -> BattleUnit:
 
 
 def make_enemy_by_type(etype: int) -> BattleUnit | None:
-    """用原版敌人表 (assets/enemy_table.json) 的真实数值构造敌人.
-
-    字段语义见 tools/extract_enemies.py: hp(已证) / attack(已证) / exp / money /
-    ai / 技能 / 掉落; defence 与 agile 为推断值 (仍标注在 enemy_table.json 里).
-    缺数据返回 None.
-    """
+    """用原版敌人表 (assets/enemy_table.json, tools/extract_enemies.py) 的真实数值构造敌人.
+    字段 2026-10-25 按 exe 消费者确认 (旧版标签错位: 把法攻当 HP 等). 缺数据返回 None."""
     from core.character_data import enemy as _enemy
     e = _enemy(etype)
     if e is None:
         return None
-    hp = max(1, int(e.get("hp", 1)))
-    attack = max(1, int(e.get("attack", 1)))
-    defence = max(0, int(e.get("magic_def", 0)))     # 推断: 防御
-    agile = max(1, int(e.get("unk13", 10)))          # 推断: 敏捷
-    move = min(6, max(2, int(e.get("unk10", 3)) or 3))
-    variant = int(e.get("variant", 1))
+
+    def g(k: str, lo: int = 0) -> int:
+        return max(lo, int(e.get(k, 0) or 0))
+    hp, mp = g("hp", 1), g("mp")
+    moves = [int(m) for m in e.get("moves", []) if 0 <= int(m) < 248]
+    weights = [max(0, int(w)) for w in e.get("weights", [])][:len(moves)]
     return BattleUnit(
         name=e.get("name") or f"敌人#{etype}",
-        level=max(1, variant),
+        level=g("level", 1),
         max_hp=hp, hp=hp,
-        max_mp=0, mp=0, sg=0,
-        attack=attack, defence=defence, agile=agile,
-        move=move,
+        max_mp=mp, mp=mp, sg=0,
+        attack=g("attack"), defence=g("defence"), agile=g("speed"),
+        move=max(1, g("move10") // 10),           # exe FUN_004b1286: 移动力 = +0x24 / 10
         is_player=False,
         color=(210, 120, 120),
-        exp_reward=max(0, int(e.get("exp", 0))),
-        money_reward=max(0, int(e.get("money", 0))),
+        exp_reward=g("exp"),
+        money_reward=g("money"),
         sprite_key=None,
-        # enemy_table 的 skill0..3 是敌方招式表 (248 项) 下标, 以前被当成玩家技能 id 塞进 known_skills (牛魔王的
-        # 招式 0..3 变成了大金刚/青龙/白虎/酷酷猫) —— 2026-10-20 改掉: 招式进 enemy_moves, known_skills 留空
-        # (248 项敌方招式演出另做; 现在只用它配普攻音效).
+        # 招式 = 敌方招式表 (248 项) 下标 (不是玩家技能 id); 演出另做, 现在只用它配普攻音效.
         known_skills=[],
-        enemy_moves=[int(e[k]) for k in ("skill0", "skill1", "skill2", "skill3")
-                     if 0 <= int(e.get(k, -1)) < 248],
-        ai_group=max(0, int(e.get("ai_group", 0))),
+        enemy_moves=moves,
+        move_weights=weights,
         type_flags=int(e.get("flags", 0)) & 0xffffffff,
+        wisdom=g("wisdom"), luck=g("luck"), magic_atk=g("magic_atk"), evade=g("evade"),
+        speed=g("speed"), unit_class=g("class"),
     )

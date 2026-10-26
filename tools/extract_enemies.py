@@ -1,26 +1,30 @@
 """从 FlyingSB.exe 提取"敌人表" (静态逆向, ImageBase 0x400000).
 
-逆向出的结构:
-  · 敌人记录表 VA **0x68BFF0**, 步长 **0x7C (124)** 字节, 约 216 条 (索引 = .mfo 的 enemytype id).
-    (证据: 战斗摆阵函数 0x49ff07 用 `imul idx,0x7c; [reg+0x68bff8]`;
-     伤害函数 0x4a7be2 用 `eax=[rec+0x68c01c]; sub eax,[角色 Defence]` → 攻击.)
-  · 字段 (见 FIELDS; 已证实的标注 confirmed, 其余为推断):
-      +0x04  名称指针 (Big5)                              confirmed
-      +0x0C  **HP**                                        confirmed (0x4aaa62)
-      +0x10  **经验奖励**                                   (高值, 与战斗结算一致)
-      +0x14  **金钱奖励**
-      +0x18  **AI 行动组 id** (×0x24 索引行动表)             confirmed
-      +0x2C  **攻击**                                      confirmed (攻击 - 角色防御)
-      +0x20  魔/防御相关 (从角色 Wisdom 里减去)              推断
-      +0x08  阵型位 (0/1/2)                                confirmed
-      +0x3C  变体/等级序号
-      +0x40..+0x5C  技能表 (0..0x41 有效, -1 空)
-      +0x68  掉落物 id
-      +0x78  精灵帧基址
-      其余为原始保留 (raw).
+敌人记录表 VA **0x68BFF0**, 步长 **0x7C** (31 个 int32), **230 条** (0..225 有效, 226+ 为"身份不詳"空档).
+字段语义 2026-10-25 按 exe 消费者逐个确认 (reverse_engineering/xref_enemy_fields.txt, fn_4a6efe.txt, fn_49ff07.txt,
+enemy_field_users.txt). 旧版标签整体错位 (把法攻当 HP、HP 当经验…), 已更正:
+  +0x00 flags      属性 0xf000000 (相克 FUN_004a663b) / 相性 0x3000 (命中 ±10, FUN_004a6e0d) / 0x20 boss /
+                   0x1f00 异常免疫 / 0x2000000 = 属性 2 (打中紫河会触发变身) / 0x10000000 不踩雷
+  +0x04 名称指针 (Big5)
+  +0x08 class      摆阵前后排 + 反击概率表行 (FUN_004a65b6)
+  +0x0c magic_atk  法攻 (法术伤害 = (法攻 + 智力 - 玩家智力) × 威力)
+  +0x10 hp         实例 HP (摆阵 FUN_0049ff07 拷到 0x86adb4); 也是回复上限
+  +0x14 mp         实例 MP (0x86adb8; 出招扣 招式表 +8)
+  +0x18 level      实例等级 (0x86adbc; 高预算遇敌 +3); 进玩家暴击/命中式
+  +0x1c ai_mode    传给 AI 寻路 (FUN_004b1084/4b0532)
+  +0x20 wisdom     智力 (法伤 / 回复 / MP 吸取)
+  +0x24 move10     移动力 × 10 (FUN_004b1286: /10 → FUN_004adf85 可达范围)
+  +0x28 evade      闪避 (玩家命中率 - 此值)
+  +0x2c attack     攻击
+  +0x30 defence    防御 (玩家物理伤害 = 攻击 - 此值)
+  +0x34 luck       幸运 (敌命中/暴击 +, 玩家命中/暴击 -)
+  +0x38 speed      每回合行动值增量 (FUN_004a4108)
+  +0x3c move_count 招式数; +0x40..+0x4c move0..3 招式 id (敌方招式表 0x692f58, 248 项); +0x50..+0x5c weight0..3 出招权重
+  +0x60 exp  +0x64 money  +0x68 drop_item  +0x6c drop_rate (千分比, FUN_004a5c63)
+  +0x70 unk28  +0x74 record_id  +0x78 sprite_frame
 
 产物: assets/enemy_table.json  {"enemies": {id: {...}}}
-跑法: cd rewrite && venv/Scripts/python -m tools.extract_enemies
+跑法: cd rewrite && venv/bin/python -m tools.extract_enemies
 """
 
 from __future__ import annotations
@@ -37,16 +41,16 @@ EXE = Path(os.environ.get(
 OUT = ROOT / "assets" / "enemy_table.json"
 
 IMG = 0x400000
-BASE, STRIDE, COUNT = 0x68BFF0, 0x7C, 216
+BASE, STRIDE, COUNT = 0x68BFF0, 0x7C, 230
 UNSET = 0xFFFFFFFF
 # 索引 -> (字段名, 是否 confirmed)
 LABELS = {
-    0: "flags", 1: "name_ptr", 2: "formation", 3: "hp", 4: "exp", 5: "money",
-    6: "ai_group", 7: "unk7", 8: "magic_def", 9: "unk9", 10: "unk10",
-    11: "attack", 12: "unk12", 13: "unk13", 14: "unk14", 15: "variant",
-    16: "skill0", 17: "skill1", 18: "skill2", 19: "skill3", 20: "unk20",
-    21: "unk21", 22: "unk22", 23: "unk23", 24: "unk24", 25: "unk25",
-    26: "drop_item", 27: "unk27", 28: "unk28", 29: "record_id", 30: "sprite_frame",
+    0: "flags", 1: "name_ptr", 2: "class", 3: "magic_atk", 4: "hp", 5: "mp",
+    6: "level", 7: "ai_mode", 8: "wisdom", 9: "move10", 10: "evade",
+    11: "attack", 12: "defence", 13: "luck", 14: "speed", 15: "move_count",
+    16: "move0", 17: "move1", 18: "move2", 19: "move3", 20: "weight0",
+    21: "weight1", 22: "weight2", 23: "weight3", 24: "exp", 25: "money",
+    26: "drop_item", 27: "drop_rate", 28: "unk28", 29: "record_id", 30: "sprite_frame",
 }
 
 
@@ -84,10 +88,9 @@ def main() -> int:
         rec = {LABELS[i]: sgn(f[i]) for i in range(31)}
         rec["name"] = name
         rec.pop("name_ptr", None)
-        # 技能: 字段 16..19 (0..0x41 有效); 掉落物: 字段 20..23 + 26
-        rec["skills"] = [sgn(f[i]) for i in range(16, 20) if 0 <= sgn(f[i]) <= 0x41]
-        rec["drops"] = [sgn(f[i]) for i in list(range(20, 24)) + [26]
-                        if 0 <= sgn(f[i]) <= 355]
+        n = max(0, min(4, sgn(f[15])))
+        rec["moves"] = [sgn(f[i]) for i in range(16, 16 + n)]            # 敌方招式表下标
+        rec["weights"] = [sgn(f[i]) for i in range(20, 20 + n)]
         enemies[str(k)] = rec
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -97,8 +100,8 @@ def main() -> int:
     for k in ("16", "17", "100", "141", "200", "210", "215"):
         if k in enemies:
             e = enemies[k]
-            print(f"  id{k:>3s} {e['name']:<8s} HP{e['hp']:>4} 攻{e['attack']:>4} "
-                  f"经{e['exp']:>6} 金{e['money']:>4} 技能{e['skills']} 掉{e['drops']}")
+            print(f"  id{k:>3s} {e['name']:<8s} Lv{e['level']:>3} HP{e['hp']:>6} 攻{e['attack']:>4} 防{e['defence']:>4} "
+                  f"经{e['exp']:>6} 金{e['money']:>5} 招式{e['moves']} 权重{e['weights']}")
     return 0
 
 

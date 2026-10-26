@@ -72,7 +72,13 @@ class BattleUnit:
     has_acted: bool = False
     exp_reward: int = 0
     money_reward: int = 0
-    ai_group: int = 0                # 原版敌人表 +0x18 (1..50): 影响「放技能 vs 普攻」的倾向
+    # ---- 公式用属性 (exe 角色表 / 敌人表, 2026-10-25 字段确认; 见 tools/extract_enemies.py) ----
+    luck: int = 0                    # 幸运: 玩家 +0x58 / 敌 +0x34 — 命中/闪避/暴击
+    magic_atk: int = 0               # 法攻: 敌 +0x0c (玩家无)
+    evade: int = 0                   # 闪避: 敌 +0x28 (玩家命中率 - 此值; 玩家无)
+    speed: int = 0                   # 行动值增量: 玩家 +0x5c (存档 Unknow_9) / 敌 +0x38
+    unit_class: int = 0              # 反击概率表行: 玩家 exe 0x641820[角色] / 敌 +0x08
+    move_weights: list = field(default_factory=list)   # 敌出招权重 (+0x50..), 与 enemy_moves 对应
     wisdom: int = 0                  # 智力 (角色表 +0x48; 战斗中道具回复量用, core.battle.energy)
     equipment: tuple = ()            # 装备着的道具 id (exe FUN_0049cc2d 查 5 槽; 脱皮盾/血盾/丝巾 等影响 MP/SG)
     save_ref: object = None          # 存档 Character (战斗结束 MP/SG 写回, energy.write_back)

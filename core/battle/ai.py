@@ -84,11 +84,12 @@ def _plan_skill(battle: "TacticsBattle", unit: BattleUnit, target: BattleUnit,
 
 
 def skill_chance(unit: BattleUnit) -> float:
-    """「放技能」倾向 (0..0.85). 来自原版敌人行为组 ai_group (1..50):
-    原版把它当加值参与行动概率阈值 (0x4AA8DE: `add ecx,[unit+0x86ADBC]; cmp edx,ecx`),
-    这里据此做单调映射 (组越大越爱放技能)."""
-    g = max(0, min(50, int(getattr(unit, "ai_group", 0) or 0)))
-    return min(0.85, 0.15 + g * 0.014)
+    """「放招式 (非第 0 招)」倾向: 按原版敌人表出招权重 (+0x50..; exe FUN_004af4bf 按权重挑招),
+    = 第 1..3 招权重和 / 总权重. 没有权重数据 → 0.3."""
+    w = [max(0, int(x)) for x in (getattr(unit, "move_weights", None) or [])]
+    if not w or sum(w) <= 0:
+        return 0.3
+    return sum(w[1:]) / sum(w)
 
 
 def take_turn(battle: "TacticsBattle", unit: BattleUnit) -> None:

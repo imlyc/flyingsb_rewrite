@@ -28,7 +28,7 @@ def test_enemy_ai_uses_skill_when_in_range():
     p = _unit("美娜", 5, 5, is_player=True)
     e = _unit("羊頭怪", 5, 6, is_player=False)
     e.known_skills = [48]
-    e.ai_group = 50
+    e.move_weights = [0, 100]           # 总放招
     b = _battle([p], [e])
     # skill 48 的可达范围 + 伤害范围 (测试里直接给定: 命中玩家所在格)
     b.attack_range = lambda u=None, sid=None: {(p.x, p.y)}
@@ -43,7 +43,7 @@ def test_enemy_ai_skips_heal_skills():
     p = _unit("美娜", 5, 5, is_player=True)
     e = _unit("牧师", 5, 6, is_player=False)
     e.known_skills = [0x15]      # 生命之火 (is_heal_skill)
-    e.ai_group = 50
+    e.move_weights = [0, 100]
     b = _battle([p], [e])
     b.damage_range = lambda cursor, u=None, sid=None: {(p.x, p.y)}
     ai.take_turn(b, e)
@@ -51,14 +51,14 @@ def test_enemy_ai_skips_heal_skills():
     assert b._pending_enemy_attack is p
 
 
-def test_skill_chance_monotonic_by_ai_group():
-    """行为组 (1..50) 越大 → 放技能倾向越高."""
-    lo = _unit("弱", 1, 1, is_player=False)
-    hi = _unit("强", 1, 1, is_player=False)
-    lo.ai_group, hi.ai_group = 1, 50
-    assert ai.skill_chance(lo) < ai.skill_chance(hi)
-    # 无 ai_group (默认 0) 也不会崩
-    assert 0 < ai.skill_chance(_unit("x", 1, 1, is_player=False)) <= 0.85
+def test_skill_chance_from_move_weights():
+    """放招倾向 = 第 1..3 招权重 / 总权重 (原版敌人表 +0x50..)."""
+    u = _unit("羊頭怪", 1, 1, is_player=False)
+    u.move_weights = [70, 30]
+    assert ai.skill_chance(u) == 0.3
+    u.move_weights = [40, 30, 20, 10]
+    assert ai.skill_chance(u) == 0.6
+    assert ai.skill_chance(_unit("x", 1, 1, is_player=False)) == 0.3     # 无权重数据
 
 
 def test_enemy_ai_moves_then_attacks_without_skills():

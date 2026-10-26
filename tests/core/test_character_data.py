@@ -49,14 +49,13 @@ def test_add_exp_levels():
 
 @pytest.mark.skipif(not _have_data, reason="缺 assets/enemy_table.json")
 def test_enemy_table_real():
-    """敌人表: id17 = 羊頭怪, 真实 HP/攻击/经验."""
+    """敌人表: id17 = 羊頭怪 (字段按 exe 消费者确认, 2026-10-25 更正旧的错位标签)."""
     e = character_data.enemy(17)
     assert e is not None
     assert e["name"] == "羊頭怪"
-    assert e["hp"] == 180
-    assert e["attack"] == 370
-    assert e["exp"] == 12000
-    assert 48 in e["skills"] or 49 in e["skills"]
+    assert (e["hp"], e["magic_atk"], e["attack"], e["defence"], e["level"]) == (12000, 180, 370, 320, 34)
+    assert (e["exp"], e["money"]) == (4500, 6000)
+    assert e["moves"] == [48, 49] and e["weights"] == [70, 30]
 
 
 @pytest.mark.skipif(not _have_chars, reason="缺 assets/characters_table.json")
@@ -85,7 +84,7 @@ def test_make_enemy_by_type():
     u = make_enemy_by_type(17)
     assert u is not None
     assert u.name == "羊頭怪"
-    assert u.max_hp == 180 and u.attack == 370
-    assert u.exp_reward == 12000
+    assert (u.max_hp, u.attack, u.defence, u.level, u.magic_atk) == (12000, 370, 320, 34, 180)
+    assert u.exp_reward == 4500 and u.enemy_moves == [48, 49] and u.move_weights == [70, 30]
     # 未知类型 → None
     assert make_enemy_by_type(99999) is None
