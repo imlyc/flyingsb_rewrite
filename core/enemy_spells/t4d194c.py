@@ -12,13 +12,17 @@ FUN_004d17b3: 4 只羊 FUN_004d16b9: 格 (屏中心 x/64 + 6 + i, 目标行), �
 羊 FUN_004d16b9: state 0: x -= 8px/t, 每 t 脚下扬尘 FUN_004d1647 (x-24, y+1..4, z 0, emong seq 6567e8, 每 t 上升 1px);
   x == 停点 → 挂跳跃 seq 6566dc (seq MOVE 每步 x-8, z 弧 +24..+2 / -2..-24), state 10;
   屏幕 x < -120 → (末只) -250, 自毁.  state 10: 跳跃 seq 完 → 6566c4, state 0.
+实录校准 (wine/captures/en52_t19_F4418.log, 52 滑倒攻擊; 屏中心按原版取 施法者 x+64): 羊出生 +20 / 起点 / 跳跃 /
+  寿命 144..168 / 扬尘 / 符号 +188 / 渐亮起点 均吻合. 修正: 出屏判定 +0x120 是 800 宽窗口坐标 (= x - 屏中心 + 400, 同
+  doit.txt FUN_004cc3ac), 不是 640 框坐标; 收尾按计数归零 (b_common.finish_on_count). 残差: 施法者回待机 +272 (原版 +271, 渐亮帧率).
+  屏中心 DAT_007eb4b8 = 我们的 view_center_world (原版镜头此时在施法者与目标中间).
 近似: 战斗画面宽取 640 (exe DAT_0054005c, 640×480 战斗框); headless 无 view_center_world 时以施法者 x 作屏中心.
 """
 from __future__ import annotations
 
 from core.anim_engine.bytecode import tuple_to_bytecode
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _set_z, _getz
-from core.enemy_spells.b_common import ground
+from core.enemy_spells.b_common import ground, finish_on_count
 from core.sprites.base import TILE_W
 
 E_SLEEP, S3FEEL, EMONG = 219, 202, 248
@@ -34,7 +38,7 @@ DUST_SEQ = [('fm', EMONG, f, 2) for f in (0, 6, 7, 8, 9, 10, 11)] + [('exit',)] 
 SFX_SHEEP, SFX_SIGN = 0xd8, 0xda
 SHEEP = 4
 RUN_SPEED = 8 * FP
-SCREEN_W = 640
+WIN_W = 800                      # 640 框 + 左右各 80 边距 (满屏图 800 + 0), 两种都是 中心-400
 OFFSCREEN = -0x78
 
 
@@ -57,11 +61,12 @@ def _sheep_think(e, eng) -> None:
     if ud['state'] == 0:
         e.x -= RUN_SPEED
         ox = (_rand(b) & 3) + 1                                       # FUN_004d1647 扬尘
-        fx(b, _dust_think, e.x - 24 * FP, e.y + ox * FP, 0, DUST_SEQ, dust=True)
+        d = fx(b, _dust_think, e.x - 24 * FP, e.y + ox * FP, 0, DUST_SEQ, dust=True)
+        _dust_think(d, eng)                                           # 实录: 扬尘出生当 tick 已上升 1px (z 1..21)
         if e.x >> 16 == ud['stop']:
             eng.attach_seq(e, tuple_to_bytecode(HOP_SEQ))
             ud['state'] = 10
-        if (e.x >> 16) - sp.screen_left < OFFSCREEN:
+        if (e.x >> 16) - sp.win_left < OFFSCREEN:                    # +0x120 = 屏幕 x (800 宽窗口坐标)
             if ud['last']:
                 sp.on_passed(ud['victim'])                            # -250
             eng.destroy(e)
@@ -88,7 +93,8 @@ class Sleep(Spell):
         view = getattr(battle, 'view_center_world', None)
         cx = view[0] if view is not None else (ground(caster)[0] >> 16)
         self.center_x = cx
-        self.screen_left = cx - SCREEN_W // 2
+        # exe +0x120 屏幕 x = x - (DAT_007eb4b8 - 宽/2) + 框左边距 (doit.txt FUN_004cc3ac 同式) = x - 中心 + 400
+        self.win_left = cx - WIN_W // 2
 
     def on_cast_impact(self) -> None:
         b = self.battle
@@ -106,7 +112,7 @@ class Sleep(Spell):
     def think(self) -> None:
         if self.casting and self.live == 0:
             self.casting = False
-            self.finish()
+            finish_on_count(self)
 
     def on_passed(self, v) -> None:
         """-250: FUN_004d18d5 睡眠符号."""

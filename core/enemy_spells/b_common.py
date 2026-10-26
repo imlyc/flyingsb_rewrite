@@ -52,3 +52,11 @@ def cur_pos(battle, v) -> tuple[int, int]:
     px = hit_disp(battle, v)
     fx, fy = v.facing
     return x - fx * px * (1 << 16), y - fy * px * (1 << 16)
+
+
+def finish_on_count(spell) -> None:
+    """dispatcher 0x1e 看到子实体计数 (+0x78) 归零 (子实体 -200 后的下一 tick) → 0x28, 再下一 tick 开始渐亮.
+    框架 finish() 为飘字 -20 多等 1 tick (_quiet < 2); 无飘字、只等计数的模板不该多等 → 预置 _quiet = 1.
+    实录校准: en52_t19 (符号 -200 @250 → 0x28 @251 → 渐亮 @252), en16_t6 同."""
+    spell.finish()
+    spell._quiet = 1

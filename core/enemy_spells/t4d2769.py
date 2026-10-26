@@ -16,7 +16,7 @@ dispatcher: 渐暗 → 施法 seq → -100: 每目标 FUN_004d2746 光爆发生�
 from __future__ import annotations
 
 from core.enemy_spells.base import Spell, fx, FP, _pos, _rand, _sfx, _set_z
-from core.enemy_spells.b_common import react, cur_pos
+from core.enemy_spells.b_common import react, cur_pos, finish_on_count
 from core.anim_engine.bytecode import tuple_to_bytecode
 from core.jet_skills import HEAVY_SEQS, SHARD_SEQS
 
@@ -58,7 +58,7 @@ def _shard_think(e, eng) -> None:
     else:
         e.flags |= 0x40
     ud['age'] += 1
-    if ud['age'] > SHARD_LIFE:
+    if ud['age'] > SHARD_LIFE + ud.get('lag', 0):
         if ud.get('last'):
             sp.on_done(v)                                             # -200
         eng.destroy(e)
@@ -78,6 +78,11 @@ def _spawner_think(e, eng) -> None:
         ud['n'] += 1
         if ud['n'] == BURSTS:
             s.user_data['last'] = True
+            # 池序: 前一个发生器同 tick 刚自毁, 本光爆落进它空出的低位槽 → 出生 tick 不 think, 寿命多 1 tick
+            # (实录 en16_t6: 第 2 个目标的末个碎片 life 61, 其余 60)
+            if sp.spawner_freed == eng._tick_id:
+                s.user_data['lag'] = 1
+            sp.spawner_freed = eng._tick_id
             eng.destroy(e)
             return
         ud['next'] += BURST_STEP
@@ -88,6 +93,7 @@ class Paralyze(Spell):
     def __init__(self, battle, caster, mid):
         super().__init__(battle, caster, mid)
         self.casting = False
+        self.spawner_freed = None
 
     def on_cast_impact(self) -> None:
         for v in self.targets:
@@ -101,7 +107,7 @@ class Paralyze(Spell):
     def think(self) -> None:
         if self.casting and self.live == 0:
             self.casting = False
-            self.finish()
+            finish_on_count(self)
 
     def on_done(self, v) -> None:
         """-200."""
