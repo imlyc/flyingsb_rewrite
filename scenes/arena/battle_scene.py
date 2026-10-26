@@ -252,14 +252,19 @@ class ArenaBattleScene(BattleScene):
         if self._console_level == 2:
             self._draw_hp_editor(panel)
             return
+        from scenes.arena.roster import enemy_label, enemy_level
         items = (self._CONSOLE_TOP if self._console_level == 0
-                 else [(n, None) for n in ENEMY_ROSTER])
+                 else [(f"Lv{enemy_level(n) or '?':>3}  {enemy_label(n)}", None) for n in ENEMY_ROSTER])
         sub = "选择命令" if self._console_level == 0 else "选择要加入的敌人"
         st = self._console_small.render(sub, True, self.CONSOLE_TEXT)
         self.surface.blit(st, (panel.x + 16, panel.y + 42))
 
         y = panel.y + 70
+        rows = max(1, (panel.bottom - 34 - y) // 30)             # 敌人名册 200+ → 只画光标附近一屏
+        first = max(0, min(self._console_idx - rows // 2, len(items) - rows))
         for i, it in enumerate(items):
+            if not first <= i < first + rows:
+                continue
             label = it[0] if isinstance(it, tuple) else it
             focused = (i == self._console_idx)
             color = self.CONSOLE_FOCUS if focused else self.CONSOLE_TEXT

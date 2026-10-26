@@ -65,8 +65,9 @@ class CharacterSprite:
         return self.sheet.cols
 
     def frame(self, direction: Direction, anim_idx: int = 0) -> pygame.Surface:
-        row = self.direction_rows[direction]
-        col = anim_idx % self.walk_frames
+        # 非标准网格 (部分敌人主图 3×1: 不分朝向的静物) → 行/列按实际网格夹住
+        row = min(self.direction_rows[direction], self.sheet.rows - 1)
+        col = anim_idx % max(1, min(self.walk_frames, self.sheet.cols))
         return self.sheet.frame(col, row)
 
     def frame_for_facing(self, facing: tuple[int, int], anim_idx: int = 0) -> pygame.Surface:
@@ -82,13 +83,15 @@ class CharacterSprite:
         if owner is None:
             return None  # 180° 翻转, 无过渡帧
         row = self.direction_rows[owner]
+        if TURN_FRAME_COL >= self.sheet.cols or row >= self.sheet.rows:
+            return None
         return self.sheet.frame(TURN_FRAME_COL, row)
 
     def feet_for_direction(self, direction: Direction) -> tuple[int, int]:
         """返回该方向的统一 anchor (从 col=0 idle 站立姿态检测, 同方向所有帧共用).
         避免走路 cycle 因每帧 feet x 检测略有差异而导致 sprite 左右晃.
         """
-        row = self.direction_rows[direction]
+        row = min(self.direction_rows[direction], self.sheet.rows - 1)
         return self.sheet.feet_anchor(0, row)
 
     def feet_for_facing(self, facing: tuple[int, int]) -> tuple[int, int]:

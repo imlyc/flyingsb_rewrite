@@ -144,7 +144,7 @@ def make_enemy_by_type(etype: int) -> BattleUnit | None:
         color=(210, 120, 120),
         exp_reward=g("exp"),
         money_reward=g("money"),
-        sprite_key=None,
+        sprite_key=e.get("sprite"),               # 敌人表记录头的贴图基址 → ps_ 网格登记表 (tools/extract_enemies.py)
         # 招式 = 敌方招式表 (248 项) 下标 (不是玩家技能 id); 演出另做, 现在只用它配普攻音效.
         known_skills=[],
         enemy_moves=moves,

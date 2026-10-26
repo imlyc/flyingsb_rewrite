@@ -21,7 +21,9 @@ enemy_field_users.txt). 旧版标签整体错位 (把法攻当 HP、HP 当经验
   +0x38 speed      每回合行动值增量 (FUN_004a4108)
   +0x3c move_count 招式数; +0x40..+0x4c move0..3 招式 id (敌方招式表 0x692f58, 248 项); +0x50..+0x5c weight0..3 出招权重
   +0x60 exp  +0x64 money  +0x68 drop_item  +0x6c drop_rate (千分比, FUN_004a5c63)
-  +0x70 unk28  +0x74 record_id  +0x78 sprite_frame
+  +0x70 unk28  (+0x74 / +0x78 是**下一条**记录的 编号 / 贴图基址: 真记录起点 0x68BFE8 = [编号][贴图基址][flags]...)
+  贴图基址 (-0x04) = ps_ 网格登记表 0x5B0008 下标 (core.grid_atlas_table): 本敌人的 ps_XXX00 (+1..+7 同族 01..07).
+  2026-10-26 与外部资料包 230 条 fieldKey 全部吻合.
 
 产物: assets/enemy_table.json  {"enemies": {id: {...}}}
 跑法: cd rewrite && venv/bin/python -m tools.extract_enemies
@@ -50,7 +52,7 @@ LABELS = {
     11: "attack", 12: "defence", 13: "luck", 14: "speed", 15: "move_count",
     16: "move0", 17: "move1", 18: "move2", 19: "move3", 20: "weight0",
     21: "weight1", 22: "weight2", 23: "weight3", 24: "exp", 25: "money",
-    26: "drop_item", 27: "drop_rate", 28: "unk28", 29: "record_id", 30: "sprite_frame",
+    26: "drop_item", 27: "drop_rate", 28: "unk28", 29: "next_id", 30: "next_sprite",
 }
 
 
@@ -88,6 +90,11 @@ def main() -> int:
         rec = {LABELS[i]: sgn(f[i]) for i in range(31)}
         rec["name"] = name
         rec.pop("name_ptr", None)
+        rec.pop("next_id", None)
+        rec.pop("next_sprite", None)
+        rec["sprite_base"] = sgn(struct.unpack_from("<I", raw, o - 4)[0])      # 记录真起点在 -8: [编号][贴图基址]
+        from core.grid_atlas_table import grid_atlas_key
+        rec["sprite"] = grid_atlas_key(rec["sprite_base"])
         n = max(0, min(4, sgn(f[15])))
         rec["moves"] = [sgn(f[i]) for i in range(16, 16 + n)]            # 敌方招式表下标
         rec["weights"] = [sgn(f[i]) for i in range(20, 20 + n)]

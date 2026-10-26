@@ -48,11 +48,26 @@ def load_character_sprite(
     if not path.exists():
         raise FileNotFoundError(path)
     surf = load_image(path, color_key=AUTO)
+    grid = _grid_of(resource_name)
+    if grid is not None and grid != (6, 4):              # 非标准网格 (部分敌人 3×1): 按 exe 登记表切
+        frame_w, frame_h = surf.get_width() // grid[0], surf.get_height() // grid[1]
     sheet = SpriteSheet(surf, frame_w, frame_h)
     return CharacterSprite(
         sheet=sheet,
         direction_rows=direction_rows or DEFAULT_DIRECTION_ROWS,
     )
+
+
+_GRID_BY_NAME: dict[str, tuple[int, int]] | None = None
+
+
+def _grid_of(resource_name: str) -> tuple[int, int] | None:
+    """exe ps_ 网格登记表 (core.grid_atlas_table) 里的 (cols, rows)."""
+    global _GRID_BY_NAME
+    if _GRID_BY_NAME is None:
+        from core.grid_atlas_table import GRID_ATLAS
+        _GRID_BY_NAME = {v[0]: (v[1], v[2]) for v in GRID_ATLAS.values()}
+    return _GRID_BY_NAME.get(resource_name)
 
 
 def get_character_sprite(resource_name: str, **kwargs) -> CharacterSprite:

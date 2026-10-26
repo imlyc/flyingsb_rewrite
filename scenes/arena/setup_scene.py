@@ -31,9 +31,9 @@ TAB_ORDER = [(LEFT, POOL), (RIGHT, POOL), (LEFT, CHOSEN), (RIGHT, CHOSEN)]
 _ROSTER_IDX = {name: i for i, name in enumerate(PLAYER_ROSTER)}
 
 
-def _enemy_sprite_key(name: str) -> str | None:
-    spr = ENEMY_TEMPLATES[name].get("sprite")
-    return f"ps_{spr}" if spr else None
+def _enemy_sprite_key(key: str) -> str | None:
+    from scenes.arena.roster import enemy_sprite_key
+    return enemy_sprite_key(key)
 
 
 class ArenaSetupScene(Scene):
@@ -58,6 +58,7 @@ class ArenaSetupScene(Scene):
     CELL_H = 82
     SIDE_PAD = 12
     SPRITE_H = 60  # sprite 缩放后高度
+    VISIBLE_ROWS = {0: 3, 1: 2}   # 每区可见行数 (POOL / CHOSEN); 敌人名册 200+ → 滚动
 
     def __init__(self, surface: pygame.Surface, audio: AudioManager) -> None:
         super().__init__(surface)
@@ -81,6 +82,8 @@ class ArenaSetupScene(Scene):
         self.side = LEFT
         self.region = POOL
         self.idx = 0
+
+        self._scroll: dict[tuple[int, int], int] = {}   # (side, region) → 首个可见行
 
         # 动画状态: 可选池一直"走", 出战一直"待机" (复用 battle 的 locomotion picker)
         self._walk_anim = AnimationState()
@@ -252,9 +255,25 @@ class ArenaSetupScene(Scene):
         )
         return frame
 
+    def _first_row(self, side: int, region: int) -> int:
+        """滚动: 保证焦点所在行可见."""
+        vis = self.VISIBLE_ROWS[region]
+        first = self._scroll.get((side, region), 0)
+        n = len(self._list(side, region))
+        last_row = max(0, (n - 1) // COLS)
+        if side == self.side and region == self.region:
+            r = self.idx // COLS
+            if r < first:
+                first = r
+            elif r >= first + vis:
+                first = r - vis + 1
+        first = max(0, min(first, max(0, last_row - vis + 1)))
+        self._scroll[(side, region)] = first
+        return first
+
     def _cell_rect(self, side: int, region: int, idx: int) -> pygame.Rect:
         col = idx % COLS
-        row = idx // COLS
+        row = idx // COLS - self._scroll.get((side, region), 0)
         base_x = 0 if side == LEFT else 400
         x = base_x + self.SIDE_PAD + col * self.CELL_W
         gy = self.POOL_GRID_Y if region == POOL else self.CHOSEN_GRID_Y
@@ -264,7 +283,11 @@ class ArenaSetupScene(Scene):
     def _draw_grid(self, side: int, region: int) -> None:
         names = self._list(side, region)
         is_player = (side == LEFT)
+        first = self._first_row(side, region)
+        vis = self.VISIBLE_ROWS[region]
         for i, name in enumerate(names):
+            if not first <= i // COLS < first + vis:
+                continue
             rect = self._cell_rect(side, region, i)
             focused = (side == self.side and region == self.region and i == self.idx)
             if focused:
@@ -282,9 +305,25 @@ class ArenaSetupScene(Scene):
                 ph = pygame.Rect(0, 0, 36, 48)
                 ph.midbottom = (rect.centerx, sprite_bottom)
                 pygame.draw.rect(self.surface, (140, 90, 90), ph, border_radius=4)
-            label = self.name_font.render(name, True,
+            if is_player:
+                text = name
+            else:
+                from scenes.arena.roster import enemy_label, enemy_level
+                text = enemy_label(name)
+                lv = enemy_level(name)
+                if lv:
+                    lt = self.hint_font.render(f"Lv{lv}", True, self.HINT)
+                    self.surface.blit(lt, (rect.right - lt.get_width() - 4, rect.y + 2))
+            label = self.name_font.render(text, True,
                                           self.FOCUS if focused else self.NAME)
             self.surface.blit(label, label.get_rect(center=(rect.centerx, rect.bottom - 8)))
+        rows = (len(names) + COLS - 1) // COLS
+        if rows > vis:                                   # 滚动指示: 第几行/共几行
+            gy = self.POOL_GRID_Y if region == POOL else self.CHOSEN_GRID_Y
+            base_x = 0 if side == LEFT else 400
+            ind = self.hint_font.render(f"{'▲' if first else ' '} {first + 1}-{min(rows, first + vis)}/{rows} "
+                                        f"{'▼' if first + vis < rows else ' '}", True, self.HINT)
+            self.surface.blit(ind, (base_x + 400 - ind.get_width() - 10, gy - 18))
 
     def draw(self) -> None:
         self.surface.fill(self.BG)

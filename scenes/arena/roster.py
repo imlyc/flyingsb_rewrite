@@ -1,7 +1,7 @@
 """竞技场可选名册 + BattleUnit 构造.
 
-左侧 (我方) = 10 个可玩角色; 右侧 (敌方) = ENEMY_TEMPLATES.
-玩家单位用一套统一的竞技场基础数值 (满技能池), 敌人复用 setup.make_enemy.
+左侧 (我方) = 10 个可玩角色; 右侧 (敌方) = 原版敌人表里全部真实敌人 (键 "#编号", 按等级排序;
+2026-10-26 扩充, 原先是 4 个占位模板). 敌人用 setup.make_enemy_by_type 的真实数值/贴图/招式.
 """
 
 from __future__ import annotations
@@ -15,8 +15,49 @@ from core.skills import default_skills_for
 # 左侧可选: 10 个可玩角色 (按槽位顺序)
 PLAYER_ROSTER: list[str] = [CHARACTER_NAMES[s] for s in PLAYABLE_SLOTS]
 
-# 右侧可选: 敌人模板名
-ENEMY_ROSTER: list[str] = list(ENEMY_TEMPLATES.keys())
+def _real_enemies() -> list[str]:
+    """原版敌人表里能上场的: 有 HP、有贴图文件、不是"身份不詳"空档. 按 (等级, 编号) 排."""
+    from core.character_data import enemy
+    from core.sprites.base import SPRITES_DIR as SPRITE_DIR
+    out = []
+    for k in range(256):
+        e = enemy(k)
+        if not e or int(e.get("hp", 0)) <= 0 or e.get("name") in (None, "", "身份不詳"):
+            continue
+        spr = e.get("sprite")
+        if not spr or not (SPRITE_DIR / f"{spr}.png").exists():
+            continue
+        out.append((int(e.get("level", 0)), k))
+    return [f"#{k}" for _, k in sorted(out)]
+
+
+# 右侧可选: 全部真实敌人 ("#编号"); 缺资源时回退占位模板名
+ENEMY_ROSTER: list[str] = _real_enemies() or list(ENEMY_TEMPLATES.keys())
+
+
+def enemy_label(key: str) -> str:
+    """名册键 → 显示名 ("#83" → 電熨斗)."""
+    if key.startswith("#"):
+        from core.character_data import enemy
+        e = enemy(int(key[1:])) or {}
+        return e.get("name") or key
+    return key
+
+
+def enemy_level(key: str) -> int | None:
+    if key.startswith("#"):
+        from core.character_data import enemy
+        e = enemy(int(key[1:])) or {}
+        return int(e.get("level", 0)) or None
+    return ENEMY_TEMPLATES.get(key, {}).get("level")
+
+
+def enemy_sprite_key(key: str) -> str | None:
+    if key.startswith("#"):
+        from core.character_data import enemy
+        return (enemy(int(key[1:])) or {}).get("sprite")
+    spr = ENEMY_TEMPLATES.get(key, {}).get("sprite")
+    return f"ps_{spr}" if spr else None
 
 # 竞技场玩家统一基础数值 (沙盒对战, 不读存档). agile 影响出手序 + 移动力.
 _PLAYER_AGILE = {
@@ -49,5 +90,10 @@ def build_player_unit(name: str, weapon: int | None = None, accessories: tuple =
     return u
 
 
-def build_enemy_unit(name: str) -> BattleUnit:
-    return make_enemy(name)
+def build_enemy_unit(key: str) -> BattleUnit:
+    if key.startswith("#"):
+        from core.battle.setup import make_enemy_by_type
+        u = make_enemy_by_type(int(key[1:]))
+        if u is not None:
+            return u
+    return make_enemy(key)
