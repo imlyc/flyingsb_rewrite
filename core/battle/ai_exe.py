@@ -49,7 +49,8 @@ if TYPE_CHECKING:
 
 DIRS = ((0, -1), (0, 1), (-1, 0), (1, 0))          # exe 方向 0 上 1 下 2 左 3 右
 DASH_MOVES = (0x46, 0x49, 0x4c, 0x4f)                # 猛撞
-SUMMON_MOVE, CALF_TYPE = 2, 0x17                    # 召喚牛寶寶 / 牛寶寶
+SUMMON_MOVE, CALF_TYPE = 2, 0x17
+SUMMON_COOLDOWN = 2                                  # 召唤后接下来 2 次行动不能再召 (竞技场/游戏性偏离 exe, 用户要求)                    # 召喚牛寶寶 / 牛寶寶
 # 动作模板 flags (exe 0x64458c + t*0x18), 104 项; 只有 bit0 (瞄准单向) / bit1 (伤害单向) 被 AI 用
 TEMPLATE_FLAGS = (
     0, 0, 0, 0, 0, 4, 0, 0, 4, 0, 4, 0, 0, 0, 4, 4, 0, 0, 0, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -543,7 +544,7 @@ class ExeAI:
     # ---------- 召唤判定 (FUN_004b1286 move==2) ----------
     def summon_ok(self) -> bool:
         n = sum(1 for e in self.b.enemies if e.alive and getattr(e, 'enemy_type', -1) == CALF_TYPE)
-        if n > 0:                                        # 刻意偏离 (用户 2026-10-26): 场上还有牛寶寶就不召 (exe: n < rand%7)
+        if getattr(self.u, 'summon_cd', 0) > 0:          # 刻意偏离 (用户 2026-10-26): 召唤后冷却 2 回合 (exe 无)
             return False
         if not n < self.rand(7):
             return False
@@ -658,6 +659,8 @@ def take_turn(battle: "TacticsBattle", unit: "BattleUnit") -> None:
     """FUN_004b1286. 结果写进 battle._pending_enemy_* (post_enemy_turn 发动)."""
     from core.battle.status import has_status
     from core.enemy_moves import move
+    if getattr(unit, 'summon_cd', 0) > 0:                # 召唤冷却: 按该单位自己的行动次数递减
+        unit.summon_cd -= 1
     ai = ExeAI(battle, unit)
     ai._flood((unit.x, unit.y), FLOOD_TURN)
     ai.adf85(ai.rng_move)
@@ -691,6 +694,7 @@ def take_turn(battle: "TacticsBattle", unit: "BattleUnit") -> None:
                 battle._pending_damage_range = None
                 battle._pending_damage_falloff = None
                 battle._log(f"{unit.name} 出招 {m.name} (#{mid})")
+                unit.summon_cd = SUMMON_COOLDOWN + 1        # 每次行动开头先减 1
                 return
             continue
         if pri is None:

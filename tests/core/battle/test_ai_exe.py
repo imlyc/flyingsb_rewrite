@@ -161,12 +161,31 @@ def test_summon_requires_space_and_low_calf_count():
         b2._pending_enemy_move = None
         ai_exe.take_turn(b2, boss)
         assert b2._pending_enemy_move != SUMMON
-    b3 = _battle([p], [boss] + calves[:1])       # 场上还有 1 只就不召 (竞技场偏离 exe, 用户要求)
+
+def test_summon_cooldown_two_turns():
+    """召唤后冷却 2 次行动 (偏离 exe, 用户要求): 第 1、2 次不召, 第 3 次起恢复按 n < rand%7."""
+    boss = _unit("牛魔王", 5, 5, is_player=False, moves=[SUMMON], etype=1)
+    p = _unit("美娜", 0, 0, is_player=True)
+    b = _battle([p], [boss], seed=0)
+    for seed in range(100):                     # 先找一次召唤
+        b.rng = random.Random(seed)
+        b._pending_enemy_move = None
+        ai_exe.take_turn(b, boss)
+        if b._pending_enemy_move == SUMMON:
+            break
+    assert b._pending_enemy_move == SUMMON and boss.summon_cd == 3
+    for _ in range(2):
+        b._pending_enemy_move = None
+        ai_exe.take_turn(b, boss)
+        assert b._pending_enemy_move != SUMMON
+    hit = 0
     for seed in range(30):
-        b3.rng = random.Random(seed)
-        b3._pending_enemy_move = None
-        ai_exe.take_turn(b3, boss)
-        assert b3._pending_enemy_move != SUMMON
+        b.rng = random.Random(seed)
+        b._pending_enemy_move = None
+        boss.summon_cd = 0
+        ai_exe.take_turn(b, boss)
+        hit += b._pending_enemy_move == SUMMON
+    assert hit > 0
 
 
 def test_summon_spawns_calves_near_caster():
