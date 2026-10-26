@@ -74,7 +74,7 @@ def main() -> int:
 
     exp_table = u32(EXP_BASE, EXP_COUNT)
     group_map = u32(GROUP_MAP, CHAR_COUNT)
-    group_rows = u32(GROUP_ROWS, 32)
+    group_rows = u32(GROUP_ROWS, 64)          # 16 组 × 4 行 (0x64412C..0x64422C)
 
     chars: list[dict] = []
     rows_used: dict[int, list[int]] = {}
@@ -92,7 +92,7 @@ def main() -> int:
                "initial_skills": [s for s in extra[3:13] if s >= 0]}
         # 成长组
         g = group_map[k] if k < len(group_map) else -1
-        row_ids = [sgn(group_rows[g * 4 + i]) for i in range(4)] if 0 <= g < 8 else []
+        row_ids = [sgn(group_rows[g * 4 + i]) for i in range(4)] if 0 <= g < 16 else []
         rec["growth_group"] = g
         rec["growth_rows"] = row_ids          # [HP行, MP行, 攻击行, 防御行]
         for r in row_ids:

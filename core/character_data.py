@@ -114,20 +114,41 @@ def make_character(name: str) -> Character | None:
     s = starting_stats(name)
     if s is None:
         return None
-    return Character(
+    f = (record_for(name) or {}).get("fields", {})
+
+    def raw(k: str) -> int:                  # 角色初始表的其余字段 (Unknow_9 = +0x5c 速度 等), 缺省 0
+        v = int(f.get(k, 0) or 0)
+        return v if v >= 0 else 0
+    ch = Character(
         MaxHP=s["MaxHP"], CurrentHP=s["MaxHP"],
         MaxMP=s["MaxMP"], CurrentMP=s["MaxMP"],
         Level=s["Level"], SG=s["SG"] if s["SG"] != UNSET else 0,
         Unknow_1=0, Exp=s["Exp"], nextExp=s["nextExp"],
-        Unknow_2=0, Unknow_3=0, Unknow_4=0,
+        Unknow_2=raw("Unknow_2"), Unknow_3=raw("Unknow_3"), Unknow_4=raw("Unknow_4"),
         Unknow_5=s["base_atk"], Unknow_6=s["base_def"], Unknow_7=s["base_luck"],
-        Unknow_8=0,
+        Unknow_8=raw("Unknow_8"),
         Power=s["Power"], Wisdom=s["Wisdom"], Agile=s["Agile"],
         Attack=s["Attack"], Defence=s["Defence"], Luck=s["Luck"],
-        Unknow_9=0,
+        Unknow_9=raw("Unknow_9"),
         Head=s["Head"], Body=s["Body"], Hand=s["Hand"],
         Accessories1=s["Accessories1"], Accessories2=s["Accessories2"],
     )
+    ch.Agile = agile_with_equipment(ch)
+    return ch
+
+
+def agile_with_equipment(ch: Character) -> int:
+    """最终敏捷 = 裸装敏捷 (Unknow_4, 角色表 +0x14) + 装备敏捷加成 (存档实测: 孙悟空 70 + 0x147 的 30 = 100).
+    初始角色表的 Agile 字段不是这个值 (孙悟空 6), 所以建角色/换装后要重算. Unknow_4 缺 (0) 时保留原值."""
+    if not ch.Unknow_4:
+        return ch.Agile
+    from core.items import item_combat_bonus
+    bonus = 0
+    for eq in (ch.Head, ch.Body, ch.Hand, ch.Accessories1, ch.Accessories2):
+        if eq in (0xFFFFFFFF, -1) or eq < 0:
+            continue
+        bonus += item_combat_bonus(eq).get('agi', 0)
+    return ch.Unknow_4 + bonus
 
 
 def growth_gains(name: str, level: int) -> dict[str, int]:

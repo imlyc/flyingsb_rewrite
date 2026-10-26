@@ -60,33 +60,42 @@ def enemy_sprite_key(key: str) -> str | None:
     return f"ps_{spr}" if spr else None
 
 # 竞技场玩家统一基础数值 (沙盒对战, 不读存档). agile 影响出手序 + 移动力.
-_PLAYER_AGILE = {
-    "孙悟空": 60, "美娜": 55, "三藏法师": 40, "猪八戒": 35, "沙悟净": 45,
-    "蒙面人": 65, "乐神杰特": 50, "破无": 48, "捕山": 42, "紫河": 52,
-}
+ARENA_LEVEL = 40          # 竞技场我方等级 (40 级时学习表技能已全学会; 美娜 召喚精靈 是剧情学的, 另补)
 
 
-def build_player_unit(name: str, weapon: int | None = None, accessories: tuple = ()) -> BattleUnit:
-    agile = _PLAYER_AGILE.get(name, 45)
+def build_player_unit(name: str, weapon: int | None = None, accessories: tuple = (),
+                      level: int = ARENA_LEVEL) -> BattleUnit:
+    """原版真实数值: 初始角色表 (core.character_data.make_character) 逐级 level_up 到 level, 再走战场同一路径
+    (core.battle.setup.unit_from_character: 敏捷/HP/MP/攻防/智力/幸运/速度, 移动 = 敏捷 ÷ 10).
+    沙盒设定: MP 型满 MP, SG 型 SG=16; 武器/饰品按参数 (None = 空手, 普攻 = 本组第 0 项); 技能 = 学习表 ∪ 全技能."""
+    from core import character_data
     from core.battle import energy
+    from core.battle.setup import unit_from_character
+    ch = character_data.make_character(name)
+    if ch is None:
+        raise KeyError(name)
+    for lv in range(ch.Level + 1, level + 1):
+        character_data.level_up(ch, name, lv)
+    UNSET = 0xFFFFFFFF
+    ch.Hand = UNSET if weapon is None else weapon
+    acc = tuple(accessories) + (UNSET, UNSET)
+    ch.Accessories1, ch.Accessories2 = acc[0], acc[1]
+    ch.Agile = character_data.agile_with_equipment(ch)     # 换了武器/饰品 → 重算敏捷 (移动 = 敏捷 ÷ 10)
+    ch.CurrentHP, ch.CurrentMP = ch.MaxHP, ch.MaxMP
+    if energy.ENERGY_TYPE.get(name) != energy.ENERGY_MP:
+        ch.SG = energy.SG_MAX
+    ch.skills = []
+    u = unit_from_character(name, ch)
+    u.mp = u.max_mp
     if energy.ENERGY_TYPE.get(name) == energy.ENERGY_MP:
-        max_mp, sg = 999, 0xFFFFFFFF            # MP 型: 沙盒给足 MP, 无 SG (同原版 -1)
+        u.sg = 0xFFFFFFFF                       # MP 型无 SG (同原版 -1)
     else:
-        max_mp, sg = 0, energy.SG_MAX           # SG 型: 满格兴奋值, 无 MP
-    u = BattleUnit(
-        name=name, level=10,
-        max_hp=60, hp=60, max_mp=max_mp, mp=max_mp, sg=sg,
-        attack=24, defence=14, agile=agile,
-        move=max(2, agile // 18),
-        is_player=True,
-        color=(120, 200, 230),
-        sprite_key=sprite_resource(name),
-        known_skills=default_skills_for(name),
-        speed=24,                               # 原版主角速度 (角色表 +0x5c) 21..26
-    )
-    from core import normal_attack as NA
-    u.attack_normal, u.attack_melee = NA.attack_ids(name, weapon, accessories)   # 无武器 = 本组第 0 项
-    NA.zihe_setup(u, accessories)
+        u.sg = energy.SG_MAX
+    learned = character_data.learned_skills(name, level)
+    u.known_skills = learned + [s for s in default_skills_for(name) if s not in learned]
+    sk = sprite_resource(name)
+    if sk:
+        u.sprite_key = sk
     return u
 
 
