@@ -1484,12 +1484,17 @@ def _spawn_mfeng_feather(battle, ally) -> None:
     mfeng_feather_think(e, battle.engine)
 
 
-def _mfeng_revive(battle, targets) -> None:
-    """exe -200: 目标 (倒下队友) think 换回待机 + 白色回血飘字 (+0x7a 计数, 落定 -20). 回满 = 数值近似."""
+def _mfeng_revive(battle, targets, caster=None) -> None:
+    """exe -200: 目标 (倒下队友) think 换回待机 + 白色回血飘字 (+0x7a 计数, 落定 -20).
+    数值 = exe (formulas.skill_restore): 复活 HP = MaxHP/5, 再 + 回复公式 (威力 2000 → 实际回满)."""
     from core.battle.data import DamageEvent
-    from core.battle.combat import push_damage_event
+    from core.battle.combat import push_damage_event, _falloff
+    from core.battle.formulas import skill_restore
     for u in targets:
-        u.hp = u.max_hp
+        if caster is None:
+            u.hp = u.max_hp                          # 无施法者 (测试桩): 回满
+        else:
+            skill_restore(battle, caster, u, 0x09, _falloff(battle, u))
         u.shown_hp_override = None
         u.settle_pending = False
         u.settle_batch = False
@@ -1564,7 +1569,7 @@ def mfeng_beast_think(e: "Entity", eng: "Engine") -> None:
                 _spawn_mfeng_feather(battle, u)
             _sfx(battle, SFX_MF_FEATHER, solo=True)
         if age >= ud['end']:
-            _mfeng_revive(battle, ud['allies'])         # -200
+            _mfeng_revive(battle, ud['allies'], caster)         # -200
             _beast_rise_start(e)
             e.state_code = _MF_RISE
     elif e.state_code == _MF_RISE:

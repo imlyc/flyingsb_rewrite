@@ -257,30 +257,30 @@ def _apply_statuses(battle, caster, sid: int, targets: list) -> None:
 
 
 def _heal(battle, caster, t, full: bool = False) -> None:
-    from core.battle.combat import push_damage_event
+    """回复白字. 数值 = exe 公式 (core.battle.formulas.skill_restore; full 参数已不用 — exe 没有"回满", 威力 2000+ 的技能自然回满)."""
+    from core.battle.combat import push_damage_event, _falloff
     from core.battle.data import DamageEvent
-    from core.skill_seq import heal_amount
-    before = t.hp
-    t.hp = t.max_hp if full else min(t.max_hp, t.hp + heal_amount(caster, caster.pending_skill_id))
+    from core.battle.formulas import skill_restore
+    _, amt = skill_restore(battle, caster, t, caster.pending_skill_id, _falloff(battle, t))
     t.shown_hp_override = None
-    push_damage_event(battle, t, DamageEvent(t.hp - before, t.hp, t.x, t.y, heal=True))
+    push_damage_event(battle, t, DamageEvent(amt, t.hp, t.x, t.y, heal=True))
 
 
 def _revive(battle, caster, t, full: bool) -> None:
-    from core.skill_seq import heal_amount
-    if t.alive:
-        if full:
-            _heal(battle, caster, t, full=True)
-        return
-    t.hp = t.max_hp if full else min(t.max_hp, heal_amount(caster, caster.pending_skill_id))
+    """复活 (exe: 倒地者 HP = MaxHP/5, 技能带 0x40 再按回复公式加并飘白字; 甦生/回生舞步 只复活不飘字)."""
+    from core.battle.combat import push_damage_event, _falloff
+    from core.battle.data import DamageEvent
+    from core.battle.formulas import skill_restore
+    from core.skill_table import SKILL_TABLE
+    was_dead = not t.alive
+    _, amt = skill_restore(battle, caster, t, caster.pending_skill_id, _falloff(battle, t))
     t.shown_hp_override = None
-    t.settle_pending = False
-    t.death_anim_time_ms = -1
-    t.reaction_seq = None
-    if full:
-        from core.battle.combat import push_damage_event
-        from core.battle.data import DamageEvent
-        push_damage_event(battle, t, DamageEvent(t.hp, t.hp, t.x, t.y, heal=True))
+    if was_dead:
+        t.settle_pending = False
+        t.death_anim_time_ms = -1
+        t.reaction_seq = None
+    if SKILL_TABLE[caster.pending_skill_id][0] & 0x40:
+        push_damage_event(battle, t, DamageEvent(amt, t.hp, t.x, t.y, heal=True))
 
 
 # ---------------- 协调实体 ----------------

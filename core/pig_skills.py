@@ -171,17 +171,15 @@ def _damage(battle, caster, victims) -> None:
 
 def _heal(battle, caster, victims) -> None:
     """-210 (回復豬彈): 每个目标回血白字 (FUN_004d074e)."""
-    from core.battle.combat import push_damage_event
+    from core.battle.combat import push_damage_event, _falloff
     from core.battle.data import DamageEvent
-    from core.skill_seq import heal_amount
-    amt = heal_amount(caster, 0x19)
+    from core.battle.formulas import skill_restore
     for t in victims:
         if not t.alive:
             continue
-        before = t.hp
-        t.hp = min(t.max_hp, t.hp + amt)
-        push_damage_event(battle, t, DamageEvent(t.hp - before, t.hp, t.x, t.y, heal=True))
-        battle._log(f"{caster.name} → {t.name}: 回复 {t.hp - before} HP ({t.hp}/{t.max_hp})")
+        _, amt = skill_restore(battle, caster, t, 0x19, _falloff(battle, t))     # exe 公式 (物理型: 攻击×(90..109)%)
+        push_damage_event(battle, t, DamageEvent(amt, t.hp, t.x, t.y, heal=True))
+        battle._log(f"{caster.name} → {t.name}: 回复 {amt} HP ({t.hp}/{t.max_hp})")
 
 
 # ---------------- 协调实体 (= dispatcher 计数 + 0x14 收尾判定) ----------------

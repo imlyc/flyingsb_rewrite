@@ -238,6 +238,23 @@ def heal_amount(battle, caster: "BattleUnit", sid: int, falloff: int = 8) -> int
     return min(DMG_CAP, max(0, _div(amt * falloff, 8)))
 
 
+def skill_restore(battle, caster: "BattleUnit", t: "BattleUnit", sid: int, falloff: int = 8) -> tuple[bool, int]:
+    """我方回复/复活技能结算 (FUN_004a6efe act==2 case 1): 技能 flags 0x10000 且目标倒地 → 复活, HP = MaxHP / 5;
+    flags 0x40 → 再加 heal_amount (封顶 MaxHP). 甦生 0x0f / 回生舞步 0x2b 只有 0x10000 (= 复活到 1/5, 不回血).
+    直接改 t.hp, 返回 (是否复活, 回复量 — 只有 0x40 才飘白字)."""
+    from core.skill_table import SKILL_TABLE
+    flags = SKILL_TABLE[sid][0]
+    revived = False
+    if flags & 0x10000 and t.hp <= 0:
+        t.hp = max(1, _div(t.max_hp, 5))
+        revived = True
+    amt = 0
+    if flags & 0x40 and t.hp > 0:
+        amt = min(heal_amount(battle, caster, sid, falloff), max(0, t.max_hp - t.hp))
+        t.hp += amt
+    return revived, amt
+
+
 def mp_drain(battle, caster: "BattleUnit", e: "BattleUnit", sid: int, falloff: int = 8) -> int:
     """化精大法 0x3b / 吸精大法 0x3d (act==2 case 3): k = 威力 + (智力 - 敌智力)/2, 量 = 敌 MaxMP × k / 100;
     boss (0x20) → 化精 25 / 吸精 5; 吸精再 ≤ 施法者 MaxMP/4 且 ≤ 敌当前 MP. (exe 此处不乘衰减.)"""
