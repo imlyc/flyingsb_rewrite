@@ -99,11 +99,15 @@ class ArenaBattleScene(BattleScene):
         # 数量太多排不下时再回退到全内部补齐.
         used: set[tuple[int, int]] = set()
         total = len(players) + len(enemies)
-        mx = max(2, terrain.w // 5)               # 左右各内缩 ~1/5
-        my = max(2, terrain.h // 5)
+        # 居中区 = 主连通区 (擂台台面) 的外框四边各内缩 ~1/5 (至少 2 格), 不贴台边/台阶
+        region = _main_region(terrain)
+        x0, x1 = min(x for x, _ in region), max(x for x, _ in region)
+        y0, y1 = min(y for _, y in region), max(y for _, y in region)
+        mx = max(2, (x1 - x0 + 1) // 5)
+        my = max(2, (y1 - y0 + 1) // 5)
         allpos = _random_positions(terrain, rng, total,
-                                   mx, terrain.w - 1 - mx, used,
-                                   my, terrain.h - 1 - my)
+                                   x0 + mx, x1 - mx, used,
+                                   y0 + my, y1 - my)
         if len(allpos) < total:                   # 居中区不够 → 全内部补
             allpos += _random_positions(terrain, rng, total - len(allpos),
                                         1, terrain.w - 2, used)
