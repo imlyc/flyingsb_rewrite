@@ -157,10 +157,34 @@ def fmt_grid(grid: tuple[tuple[int, ...], ...], indent: str = "        ") -> str
     return "\n".join(rows)
 
 
+SET2_VA = 0x645D00
+
+
+def raw_set2(n: int) -> list[tuple[tuple[int, ...], ...]] | None:
+    """set2 用 exe 原始字节 (文本 dump 只印了低位): 低 4 位 4 = 伤害格, 0x8 = 中心标记,
+    **高 4 位 = 范围衰减权重** (8 = 满额; exe FUN_004ad3fb 拷进 0x7da5f4, FUN_004ad7e6 取 (v & 0xf0) >> 4 作伤害 ×w/8)."""
+    import os, struct
+    exe = Path(os.environ.get("FLYINGSB_EXE", REPO / "origin" / "flyingsb" / "FlyingSB.exe"))
+    if not exe.exists():
+        return None
+    d = exe.read_bytes()
+    pe = struct.unpack_from("<I", d, 0x3c)[0]
+    nsec = struct.unpack_from("<H", d, pe + 6)[0]
+    opt = struct.unpack_from("<H", d, pe + 20)[0]
+    for i in range(nsec):
+        so = pe + 24 + opt + i * 40
+        vs, va, rs, raw = struct.unpack_from("<IIII", d, so + 8)
+        if 0x400000 + va <= SET2_VA < 0x400000 + va + max(vs, rs):
+            o = raw + SET2_VA - 0x400000 - va
+            return [tuple(tuple(d[o + p * 121 + r * 11:o + p * 121 + r * 11 + 11]) for r in range(11)) for p in range(n)]
+    return None
+
+
 def main() -> None:
     skill_tmpl = parse_skill_template()
     tmpls = parse_action_templates()
     set1, set2 = parse_pattern_grids()
+    set2 = raw_set2(len(set2)) or set2
 
     print(f"skills: {len(skill_tmpl)}  templates: {len(tmpls)}  set1: {len(set1)}  set2: {len(set2)}")
 

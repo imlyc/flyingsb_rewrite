@@ -273,3 +273,22 @@ def enemy(etype: int) -> dict | None:
 
 def enemy_count() -> int:
     return len(_enemies())
+
+
+# ---------------- 敌方招式 ----------------
+_ENEMY_ACTIONS: dict | None = None
+
+
+def enemy_action(move_id: int) -> dict | None:
+    """敌方招式表 (assets/enemy_actions.json, tools/extract_enemy_actions.py; exe 0x692f54 stride 0x20):
+    param_a = 威力 (+4), flags (+8: 0x800000 物理 / 0x4000 计方位 / 0x8000 计属性 / 0x10 可反击 / 0xf000000 类别 /
+    0x1f00 附带异常), p3 = 出招扣敌 MP (+0xc)."""
+    global _ENEMY_ACTIONS
+    if _ENEMY_ACTIONS is None:
+        import json
+        p = ROOT / "assets" / "enemy_actions.json"
+        try:
+            _ENEMY_ACTIONS = json.loads(p.read_text(encoding="utf-8")).get("actions", {})
+        except (OSError, ValueError):
+            _ENEMY_ACTIONS = {}
+    return _ENEMY_ACTIONS.get(str(move_id))

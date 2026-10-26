@@ -100,3 +100,20 @@ def compute_template_strike(u: BattleUnit, cursor: tuple[int, int], tmpl_idx: in
         wx, wy = _rotate(dx, dy, u.facing)
         out.add((cx + wx, cy + wy))
     return out
+
+
+def strike_falloff(u: BattleUnit, cursor: tuple[int, int], tmpl_idx: int | None) -> dict[tuple[int, int], int]:
+    """伤害格 → 范围衰减权重 (pattern 字节高 4 位, 8 = 满额; exe FUN_004ad3fb/4ad7e6: 伤害 × w / 8).
+    全屏型 pattern 落在 11×11 之外的格按 8."""
+    if tmpl_idx is None or tmpl_idx >= len(ACTION_TEMPLATES):
+        return {cursor: 8}
+    grid = PATTERN_SET2[ACTION_TEMPLATES[tmpl_idx][1]]
+    cx, cy = cursor
+    out: dict[tuple[int, int], int] = {}
+    for row in range(GRID_SIZE):
+        for col in range(GRID_SIZE):
+            v = grid[row][col]
+            if v & 4:
+                wx, wy = _rotate(col - GRID_CENTER, row - GRID_CENTER, u.facing)
+                out[(cx + wx, cy + wy)] = (v & 0xF0) >> 4
+    return out

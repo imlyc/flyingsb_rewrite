@@ -113,23 +113,36 @@ def seq_for(idx: int, facing: tuple[int, int]) -> list[tuple] | None:
     return SEQ_TABLES[e.seq_table][facing_to_atk_index(facing)]
 
 
-def roll_status(battle, attacker: "BattleUnit", victim: "BattleUnit") -> int | None:
-    """FUN_004a69e7: 普攻命中后 23% 附带武器异常 (敌类型标志同位免疫). 返回状态位或 None."""
-    idx = getattr(attacker, 'attack_cur', None)
-    if idx is None or not victim.alive:
+def roll_status(battle, attacker: "BattleUnit", victim: "BattleUnit", chance: int = STATUS_CHANCE) -> int | None:
+    """FUN_004a69e7(招式 flags, 目标 flags 字, chance): 命中后 chance% 附带异常 (普攻 23, 物理技能/敌招 10).
+    种类 = flags & 0x1f00 (0x2000 = 五选一); 免疫 = 目标 flags 字 **低 5 位** (exe `kind & ~victim_flags`,
+    敌人 = 敌人表 flags, 如 0x2000029 免疫中毒 1 / 痲痺 8). 返回状态位或 None."""
+    if not victim.alive:
         return None
-    fl = entry(idx).flags
-    if battle.rng.randrange(100) >= STATUS_CHANCE:
-        return None
-    if fl & 0x2000:
-        bit = STATUS_BITS[battle.rng.randrange(5)]
+    sid = getattr(attacker, 'pending_skill_id', None)
+    if attacker.is_player:
+        if sid is not None:
+            from core.skill_table import SKILL_TABLE
+            fl = SKILL_TABLE[sid][0] if sid in SKILL_TABLE else 0
+        else:
+            idx = getattr(attacker, 'attack_cur', None)
+            if idx is None:
+                return None
+            fl = entry(idx).flags
     else:
-        bits = [b for b in STATUS_BITS if fl & b]
-        if len(bits) != 1:
+        from core.battle.formulas import enemy_move
+        move = getattr(attacker, 'pending_enemy_move', None) or (attacker.enemy_moves or [None])[0]
+        if move is None:
             return None
-        bit = bits[0]
-    if victim.type_flags & bit:
+        fl = enemy_move(move)['flags']
+    if battle.rng.randrange(100) >= chance:
         return None
+    kind = (1 << battle.rng.randrange(5)) if fl & 0x2000 else (fl & 0x1f00) >> 8
+    from core.battle.formulas import flags_of
+    kind &= ~flags_of(victim) & 0x1f
+    if kind not in (1, 2, 4, 8, 16):
+        return None
+    bit = kind << 8
     from core.battle.status import apply_status
     apply_status(victim, bit, STATUS_ROUNDS[bit])
     battle._log(f"{victim.name} 中了 {bit:#x} 异常 ({STATUS_ROUNDS[bit]} 回合)")

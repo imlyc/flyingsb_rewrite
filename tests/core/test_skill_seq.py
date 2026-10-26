@@ -72,10 +72,11 @@ def test_life_fire_heals_ally():
     apply_pending_attack(b, caster)
     caster.pending_impact2 = False
 
-    assert ally.hp == 80, "友军应被回满 (20 + caster.attack*3=60 → clamp 80)"
+    lo, hi = caster.attack * 90 // 100, caster.attack * 109 // 100   # exe: 生命之火 (0x800000 物理型) = 攻击 × (90..109)%
+    assert 20 + lo <= ally.hp <= min(80, 20 + hi)
     assert len(b.damage_events) == 1
     assert b.damage_events[0].heal is True
-    assert b.damage_events[0].damage == 60   # 实际回复量
+    assert b.damage_events[0].damage == ally.hp - 20   # 实际回复量
     # IMPACT 时放的是光球 (ehari 268), 它飞到光标格才放 esum1 (299) 火爆 (core.sam_skills)
     orb = [e for e in b.engine.entities if (e.flags & 0x800) and e.user_data.get('orb')]
     assert len(orb) == 1 and orb[0].atlas_slot == 268

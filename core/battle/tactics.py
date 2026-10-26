@@ -87,6 +87,7 @@ class TacticsBattle:
         # AoE 攻击 (孙悟空横扫等) 确认时存的伤害范围. IMPACT 时一次性对其内所有敌人造伤.
         # None = 单点攻击, IMPACT 走 combat.apply_pending_attack 的默认 pending_attack_target 路径.
         self._pending_damage_range: set[tuple[int, int]] | None = None
+        self._pending_damage_falloff: dict | None = None   # 伤害格 → 衰减权重 (core.battle.combat._falloff)
         # 动画引擎: 跑攻击 seq 字节码, 通过 SIGNAL 回调战斗逻辑.
         # UI 每 40ms 调一次 self.engine.tick() 推进所有 entity.
         from core.anim_engine.engine import Engine
@@ -355,6 +356,7 @@ class TacticsBattle:
             self._pending_enemy_skill = None
             self._pending_enemy_cursor = None
             self._pending_damage_range = None
+            self._pending_damage_falloff = None
             trigger_mine(self, self.current)
             return
         if self._pending_enemy_attack is not None and self._pending_enemy_attack.alive:
@@ -364,12 +366,22 @@ class TacticsBattle:
             self._pending_enemy_attack = None
             self._pending_enemy_skill = None
             self._pending_enemy_cursor = None
+            u = self.current
+            if sid is None:
+                self._pending_damage_range = None
+                self._pending_damage_falloff = None
+            # 敌招 (现只用第 0 招当普攻): exe FUN_004a6efe 开头 敌 MP -= 招式表 +0xc
+            u.pending_enemy_move = u.enemy_moves[0] if (sid is None and u.enemy_moves) else None
+            if u.pending_enemy_move is not None:
+                from core.battle.formulas import enemy_move
+                u.mp = max(0, u.mp - enemy_move(u.pending_enemy_move)['mp_cost'])
             try:
                 combat.begin_attack(self, self.current, target,
                                     skill_id=sid, cursor=cursor)
             except Exception as e:      # 技能 seq 缺失等 → 回退普攻
                 print(f"[AI] 敌人技能 {sid} 执行失败, 回退普攻: {e}")
                 self._pending_damage_range = None
+                self._pending_damage_falloff = None
                 if target.alive:
                     combat.begin_attack(self, self.current, target)
             return  # UI 跑 attack_seq, 命中点回调 apply_pending_attack, 'end' 回调 post_attack_anim
@@ -512,6 +524,21 @@ class TacticsBattle:
         _, strike_fn = get_aim_funcs(u.name)
         return {(x, y) for (x, y) in strike_fn(u, cursor) if self.map.in_bounds(x, y)}
 
+    def damage_falloff(self, cursor: tuple[int, int], u: BattleUnit | None = None,
+                       skill_id: int | None = None) -> dict[tuple[int, int], int]:
+        """伤害格 → 衰减权重 (8 = 满额), 与 damage_range 同一 pattern (core.skill_patterns.strike_falloff)."""
+        from core.skill_patterns import strike_falloff, SKILL_TEMPLATE
+        u = u or self.current
+        if skill_id is not None:
+            tmpl = SKILL_TEMPLATE.get(skill_id)
+        else:
+            idx = self._normal_attack_idx(u)
+            if idx is None:
+                return {}
+            from core.normal_attack import entry
+            tmpl = entry(idx).template
+        return strike_falloff(u, cursor, tmpl)
+
     def _pick_initial_cursor(self, u: BattleUnit,
                              rng: set[tuple[int, int]]) -> tuple[int, int] | None:
         """AIM 初始 cursor: 1) self-cast (unit 自己在范围内) → unit;
@@ -606,6 +633,7 @@ class TacticsBattle:
             if not can_place_mine(self, self.aim_cursor):
                 return False
             self._pending_damage_range = None
+            self._pending_damage_falloff = None
             from core.battle import energy
             energy.pay(u, 0x35)
             combat.begin_attack(self, u, u, skill_id=0x35, cursor=self.aim_cursor)
@@ -630,6 +658,7 @@ class TacticsBattle:
         primary = cur_occ if cur_occ in targets else targets[0]
         # AoE: 缓存伤害范围给 IMPACT 扫. 单点攻击保持 None 走默认路径.
         self._pending_damage_range = dmg_tiles if len(dmg_tiles) > 1 else None
+        self._pending_damage_falloff = self.damage_falloff(self.aim_cursor, u, self.aim_skill_id)
         from core.battle import energy
         energy.pay(u, self.aim_skill_id)         # exe FUN_004a6efe act==2: 出手扣 MP / SG
         # 孙悟空变身技能: 不走标准 attack seq, 由 son_transform coordinator 驱动翻跟头隐现 +
@@ -673,6 +702,7 @@ class TacticsBattle:
         hold = attacker.cast_hold
         combat.clear_pending_attack(attacker)
         self._pending_damage_range = None
+        self._pending_damage_falloff = None
         from core.battle import status_icons
         ent = None
         if was_skill:

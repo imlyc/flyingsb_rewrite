@@ -504,7 +504,11 @@ def _zihe_hit(battle, caster, coord) -> None:
     from core.hit_effect_seq import pick_hit_effects, HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
     ud = coord.user_data
     if 'dodged' not in ud:
-        ud['dodged'] = {id(v): battle.rng.random() < combat.miss_chance(caster, v) for v in ud['targets']}
+        # exe: 命中在 FUN_004a6efe 一次掷定, 演出读结果 → 预掷 (落地飘字时 _roll_damage_one 用同一结果)
+        ud['dodged'] = {}
+        for v in ud['targets']:
+            out = combat.preroll(battle, caster, v)
+            ud['dodged'][id(v)] = out is not None and not out.hit
     for v in ud['targets']:
         if not v.alive:
             continue

@@ -150,5 +150,5 @@ def make_enemy_by_type(etype: int) -> BattleUnit | None:
         move_weights=weights,
         type_flags=int(e.get("flags", 0)) & 0xffffffff,
         wisdom=g("wisdom"), luck=g("luck"), magic_atk=g("magic_atk"), evade=g("evade"),
-        speed=g("speed"), unit_class=g("class"),
+        speed=g("speed"), unit_class=g("class"), enemy_type=etype,
     )

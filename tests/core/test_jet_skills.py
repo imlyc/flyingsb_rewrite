@@ -90,4 +90,12 @@ def test_heal_and_revive():
 def test_heavy_metal_paralysis_roll():
     from core.jet_skills import ST_PARALYSIS
     hits = sum(has_status(_run(0x25, cursor=(15, 54), seed=s)[3], ST_PARALYSIS) for s in range(12))
-    assert 0 < hits < 12
+    assert hits >= 6                                     # 双方智力/幸运 0 → 成功率顶到 90%
+    # exe act==2 case 2: 威力 + (智力差)/2 + (威力 + 幸运差) + 相性, clamp 10..90
+    from types import SimpleNamespace
+    from core.battle.formulas import seal_chance
+    c = SimpleNamespace(wisdom=50, luck=10, is_player=True, status_bits=0)
+    e = SimpleNamespace(wisdom=400, luck=300, is_player=False, status_bits=0, type_flags=0)
+    assert seal_chance(c, e, 0x25) == 10
+    e.wisdom, e.luck = 100, 170
+    assert seal_chance(c, e, 0x25) == 100 + (50 - 100) // 2 + (100 + 10 - 170)    # = 15

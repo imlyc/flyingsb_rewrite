@@ -377,8 +377,7 @@ def _replay_impact_visuals(battle: "TacticsBattle", attacker: BattleUnit) -> Non
 def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
     """回血技能结算: 给 _pending_damage_range (or pending_attack_target) 的友军回 HP.
     生命之火 esum1 burst effect 在 target 上 spawn (视觉)."""
-    from core.skill_seq import heal_amount
-    amt = heal_amount(attacker, attacker.pending_skill_id)
+    from core.battle.formulas import heal_amount
     targets: list[BattleUnit] = []
     dmg_tiles = getattr(battle, '_pending_damage_range', None)
     if dmg_tiles:
@@ -391,6 +390,7 @@ def _apply_heal(battle: "TacticsBattle", attacker: BattleUnit) -> None:
         if t is not None and t.alive:
             targets.append(t)
     for t in targets:
+        amt = heal_amount(battle, attacker, attacker.pending_skill_id, _falloff(battle, t))   # exe act==2 case 1
         before = t.hp
         t.hp = min(t.max_hp, t.hp + amt)
         healed = t.hp - before
@@ -430,15 +430,9 @@ def _apply_status_skill(battle: "TacticsBattle", attacker: BattleUnit) -> None:
 
 def mp_drain_amount(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit,
                     mode: str) -> int:
-    """exe FUN_004a6efe case 3 (技能对敌 MP): base = 敌表字段(0x68c004) × k / 100, k = 技能 cost + (施法者智力 -
-    敌 0x68c010)/2; boss (0x20) → 化精 25 / 吸精 5; 吸精再 ≤ 施法者 MaxMP/4 且 ≤ 敌当前 MP.
-    我们没有智力/敌魔抗字段 → 近似: 敌 MaxMP × (cost + (攻击-防御)/2) / 100 (敌无 MP 上限时 = k)."""
-    from core.skill_seq import skill_cost
-    k = max(0, skill_cost(attacker.pending_skill_id) + (attacker.attack - target.defence) // 2)
-    base = target.max_mp * k // 100 if target.max_mp > 0 else k
-    if mode == 'absorb':
-        base = min(base, attacker.max_mp // 4, target.mp)
-    return max(0, base)
+    """化精 / 吸精 的量 (core.battle.formulas.mp_drain = exe FUN_004a6efe act==2 case 3)."""
+    from core.battle.formulas import mp_drain
+    return mp_drain(battle, attacker, target, attacker.pending_skill_id)
 
 
 def _apply_mp_drain(battle: "TacticsBattle", attacker: BattleUnit, mode: str) -> None:
@@ -488,42 +482,95 @@ def _emit_life_fire_effect(battle: "TacticsBattle", target: BattleUnit) -> None:
     battle.engine._emit('sound_play', None, 299)        # exe FUN_004fdfbf: esum1 burst spawn 播 0x12b
 
 
+def _falloff(battle: "TacticsBattle", target: BattleUnit) -> int:
+    """范围衰减权重 (8 = 满额): 确认攻击时由 tactics 记下的 {格: 权重} (伤害 pattern 字节高 4 位)."""
+    m = getattr(battle, '_pending_damage_falloff', None)
+    if m:
+        return m.get((target.x, target.y), 8)
+    return 8
+
+
+def roll_outcome(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit):
+    """掷一次命中/暴击/伤害 (core.battle.formulas = exe FUN_004a6efe). 同阵营之间 (无 exe 分支) → None."""
+    from core.battle import formulas as F
+    fo = _falloff(battle, target)
+    sid = attacker.pending_skill_id
+    if attacker.is_player and not target.is_player:
+        if sid is None:
+            from core.normal_attack import entry
+            idx = getattr(attacker, 'attack_cur', None)
+            return F.player_normal(battle, attacker, target, entry(idx).flags if idx is not None else 0x4001, fo)
+        return F.player_skill(battle, attacker, target, sid, fo)
+    if not attacker.is_player and target.is_player:
+        move = getattr(attacker, 'pending_enemy_move', None)
+        if move is None and attacker.enemy_moves:
+            move = attacker.enemy_moves[0]
+        return F.enemy_attack(battle, attacker, target, move, fo)
+    return None
+
+
+def preroll(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit):
+    """提前掷骰 (演出中途就要知道闪不闪, 如紫河第三形态); 之后 _roll_damage_one 用同一结果."""
+    out = roll_outcome(battle, attacker, target)
+    if out is not None:
+        battle.__dict__.setdefault('_prerolled', {})[id(target)] = out
+    return out
+
+
 def _roll_damage_one(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit,
                      face_attacker: bool = True) -> None:
-    """对单个 target roll miss/hit + 损伤 + 反应动画. 抽出来给 AoE 多目标循环用.
+    """对单个 target 结算一次 (命中/闪避 + 伤害 + 反应动画). 公式见 core.battle.formulas.
     face_attacker=False (范围/召唤技能): 受击保持原朝向不转向."""
     from core.battle.status import has_status, clear_status, ST_DOUZHUAN, ST_FANHE, ST_HUAJING
-    reflect = has_status(target, ST_FANHE)
-    # exe: 受击方有返荷杖时命中判定强制为命中 (bVar9), 反弹才有机会结算
-    if not reflect and battle.rng.random() < miss_chance(attacker, target):
-        push_damage_event(battle, target, DamageEvent(0, target.hp, target.x, target.y, miss=True))
-        set_reaction(target, "dodge", attacker if face_attacker else None)
-        battle._log(f"{attacker.name} → {target.name}: MISS (闪避)")
+    pre = getattr(battle, '_prerolled', None)
+    out = pre.pop(id(target), None) if pre else None
+    if out is None:
+        out = roll_outcome(battle, attacker, target)
+    if out is None:                          # 同阵营 (无 exe 分支): 旧占位
+        if battle.rng.random() < miss_chance(attacker, target):
+            _miss(battle, attacker, target, face_attacker)
+            return
+        apply_damage(battle, attacker, target, max(1, attacker.attack - target.defence), "",
+                     face_attacker=face_attacker)
         return
-    raw = attacker.attack - target.defence + battle.rng.randint(-5, 5)
-    dmg = max(1, raw)
-    if has_status(target, ST_DOUZHUAN):
-        # 斗轉星移: 伤害归零 (exe: local_238=0, 仍走命中流程, 飘 0)
-        dmg = 0
-    elif has_status(target, ST_HUAJING):
-        # 化精為氣 (0x80000, 一次性): 伤害归零 + 转成 MP (exe: 清位, 伤害 0, MP += 招式威力/人数; 近似用伤害值)
-        clear_status(target, ST_HUAJING)
-        gain = min(dmg, max(0, target.max_mp - target.mp))
-        target.mp += gain
-        push_damage_event(battle, target, DamageEvent(gain, target.mp, target.x, target.y, heal=True, mp=True))
-        battle._log(f"{target.name}: 化精為氣 伤害 {dmg} → MP +{gain}")
-        dmg = 0
-    if reflect:
-        # 返荷杖: 本人伤害归零, 攻击者扣 "攻击者攻击力" (exe local_250 = 攻击方攻击力, 非伤害的一半)
-        apply_damage(battle, attacker, target, 0, "", face_attacker=face_attacker)
-        apply_damage(battle, target, attacker, max(0, attacker.attack), "返荷")
+    if not out.hit:
+        _miss(battle, attacker, target, face_attacker)
         return
-    apply_damage(battle, attacker, target, dmg, "无效" if dmg == 0 and raw > 0 else "",
-                 face_attacker=face_attacker)
-    # 普攻表项附带异常 (武器 flags): 命中 23% 掷骰 (exe FUN_004a69e7(.., 0x17))
-    if dmg > 0 and attacker.is_player and attacker.pending_skill_id is None and attacker.attack_cur is not None:
+    dmg = out.dmg
+    label = "暴击 " if out.crit else ""
+    if target.is_player and not attacker.is_player:
+        if has_status(target, ST_DOUZHUAN):
+            dmg = 0                          # 斗轉星移: 伤害归零 (仍算命中, 飘 0)
+        if out.magic and has_status(target, ST_HUAJING):
+            # 化精為氣 (0x80000, 一次性): 法术伤害归零, MP 型角色回 招式扣 MP / 目标数
+            clear_status(target, ST_HUAJING)
+            dmg = 0
+            from core.battle import energy, formulas as F
+            if energy.energy_type(target) == energy.ENERGY_MP:
+                move = getattr(attacker, 'pending_enemy_move', None) or (attacker.enemy_moves or [None])[0]
+                n = max(1, len(getattr(battle, '_pending_targets', []) or [target]))
+                gain = min(F.enemy_move(move)['mp_cost'] // n if move is not None else 0,
+                           max(0, target.max_mp - target.mp))
+                target.mp += gain
+                push_damage_event(battle, target, DamageEvent(gain, target.mp, target.x, target.y, heal=True, mp=True))
+                battle._log(f"{target.name}: 化精為氣 → MP +{gain}")
+        if has_status(target, ST_FANHE):
+            # 返荷杖: 本人不受伤, 攻击者扣 自己的攻击力 (法术为法攻) ×暴击 ×衰减 (exe local_250)
+            apply_damage(battle, attacker, target, 0, "", face_attacker=face_attacker)
+            apply_damage(battle, target, attacker, out.reflect, "返荷")
+            return
+    apply_damage(battle, attacker, target, dmg, label, face_attacker=face_attacker)
+    if not out.magic and dmg > 0:
+        clear_status(target, 0x200)          # 物理命中打醒睡眠 (exe 清 0x200 + 计数)
+    if out.status_chance and target.alive:
         from core.normal_attack import roll_status
-        roll_status(battle, attacker, target)
+        roll_status(battle, attacker, target, out.status_chance)
+
+
+def _miss(battle: "TacticsBattle", attacker: BattleUnit, target: BattleUnit, face_attacker: bool) -> None:
+    push_damage_event(battle, target, DamageEvent(0, target.hp, target.x, target.y, miss=True))
+    set_reaction(target, "dodge", attacker if face_attacker else None)
+    battle._log(f"{attacker.name} → {target.name}: MISS (闪避)")
 
 
 def clear_pending_attack(attacker: BattleUnit) -> None:

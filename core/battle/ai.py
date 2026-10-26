@@ -81,6 +81,7 @@ def _plan_skill(battle: "TacticsBattle", unit: BattleUnit, target: BattleUnit,
     battle._pending_enemy_skill = sid
     battle._pending_enemy_cursor = cursor
     battle._pending_damage_range = tiles if len(tiles) > 1 else None
+    battle._pending_damage_falloff = battle.damage_falloff(cursor, unit, sid)
 
 
 def skill_chance(unit: BattleUnit) -> float:

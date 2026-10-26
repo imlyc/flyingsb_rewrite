@@ -109,10 +109,12 @@ def test_weapon_status_roll():
 def test_status_immunity():
     p = _u('三藏法师', 15, 53, agile=99, weapon=142)
     e = _u('e', 15, 54, is_player=False, agile=1)
-    e.type_flags = 0x100
+    e.type_flags = 0x1                      # exe: 免疫看目标 flags 低 5 位 (1 = 中毒), 不是 0x100
     b = _battle([p], [e])
     p.attack_cur = p.attack_normal
     assert all(NA.roll_status(b, p, e) is None for _ in range(100))
+    e.type_flags = 0x100                    # 0x100 位不代表免疫
+    assert any(NA.roll_status(b, p, e) == 0x100 for _ in range(200))
 
 
 # ---------------- 远程普攻 (core.ranged_attack) ----------------

@@ -249,8 +249,9 @@ def _apply_statuses(battle, caster, sid: int, targets: list) -> None:
         elif sid == 0x29:
             battle.exp_receiver = t                           # DAT_007d9900: 战后经验全给此人
         elif sid == 0x25:
-            # 命中率 clamp 10..90 (原版用双方智慧/魔防, 这里占位 50%); 敌人类型标志 0x20 免疫
-            if not (t.type_flags & 0x20) and battle.rng.randrange(101) < 50:
+            # exe act==2 case 2: 成功率 core.battle.formulas.seal_chance (10..90), 敌人类型标志 0x20 (boss) 免疫
+            from core.battle.formulas import seal_chance
+            if not (t.type_flags & 0x20) and battle.rng.randrange(101) < seal_chance(caster, t, sid):
                 apply_status(t, ST_PARALYSIS, 2)
                 battle._log(f"{t.name} 痲痺 (2 回合)")
 

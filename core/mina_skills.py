@@ -226,7 +226,12 @@ def _apply_statuses(battle, caster, sid: int, targets: list) -> None:
     for t in targets:
         if sid == 0x0b and has_status(t, ST_POISON):
             clear_status(t, ST_POISON)
-        elif sid == 0x10 and not (t.type_flags & (0x20 | ST_SILENCE)):
+        elif sid == 0x10 and not (t.type_flags & 0x20):
+            # exe act==2 case 2: 成功率 core.battle.formulas.seal_chance (10..90), boss (0x20) 免疫
+            from core.battle.formulas import seal_chance
+            if battle.rng.randrange(101) >= seal_chance(caster, t, sid):
+                battle._log(f"{t.name} 封魔未生效")
+                continue
             apply_status(t, ST_SILENCE, 3)
             battle._log(f"{t.name} 沉默 (3 回合)")
 

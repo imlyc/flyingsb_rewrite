@@ -140,6 +140,7 @@ def test_huaqi_sets_absorb_status_then_next_hit_becomes_mp():
     assert has_status(p, ST_HUAJING)
     assert J.SFX_HUAQI in played
     atk = _unit("atk", 10, 9, is_player=False, attack=50)
+    atk.enemy_moves = [7]                      # 施放魔法風暴: 法术招式 (无 0x800000), 扣 MP 20 → 化精只吸法术
     b.enemies.append(atk); b.all_units.append(atk)
     hp0, mp0 = p.hp, p.mp
     combat.strike(b, atk, p)
