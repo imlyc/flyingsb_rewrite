@@ -267,10 +267,14 @@ def _resolve_attack_frame(scene: "BattleScene", u, cs):
             key = grid_atlas_key(slot_lo) or ""
         try:
             sheet = get_fm_surface(key)
-            cols = max(1, sheet.get_width() // 64)
+            from core.sprites.loaders import _grid_info, STD_ANCHOR
+            g = _grid_info(key)              # exe 网格表: 大体型 boss 帧比 64×96 大, 锚点另记
+            fw, fh = (sheet.get_width() // g[0], sheet.get_height() // g[1]) if g else (64, 96)
+            cols = max(1, sheet.get_width() // fw)
             col, row = ent.frame_idx % cols, ent.frame_idx // cols
-            frame = sheet.subsurface(pygame.Rect(col * 64, row * 96, 64, 96))
-            return frame, (32, 84)
+            frame = sheet.subsurface(pygame.Rect(col * fw, row * fh, fw, fh))
+            anchor = (g[2], g[3] + 2) if g and (g[2], g[3]) != STD_ANCHOR else (fw // 2, fh - 12)
+            return frame, anchor
         except (FileNotFoundError, ValueError):
             pass    # 该角色无此 ps_ atlas → 退回下方 fm/兜底路径
     fm_frame_idx = ent.frame_idx if slot_lo != 0 or ent.frame_idx != 0 else None

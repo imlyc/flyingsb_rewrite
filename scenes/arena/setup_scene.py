@@ -183,6 +183,8 @@ class ArenaSetupScene(Scene):
             ni = self.idx + dy * COLS
             if 0 <= ni < n:
                 self.idx = ni
+            elif dy > 0 and self.idx // COLS < (n - 1) // COLS:
+                self.idx = n - 1                 # 下一行正下方没角色 (末行不满): 落到末行最后一个
         if dx != 0:
             ni = self.idx + dx
             # 不跨行环绕: 同行内移动

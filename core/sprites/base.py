@@ -84,6 +84,7 @@ class SpriteSheet:
         self.frame_h = frame_h
         self.cols = surface.get_width() // frame_w
         self.rows = surface.get_height() // frame_h
+        self.anchor: tuple[int, int] | None = None     # exe 网格表的非标准锚点 (大体型 boss), None = 按美术约定算
 
     def __repr__(self) -> str:
         return (f"<SpriteSheet {self.surface.get_size()} "
@@ -105,6 +106,8 @@ class SpriteSheet:
         """ps_ atlas 的每个 cell 美术已预先排版好 (居中 + 底部对齐).
         基准: cell 底沿对齐 tile 底沿 (anchor_y = frame_h - TILE_H/2).
         额外上移 12 px 让 sprite 视觉脚点落在阴影中心 (cell 底部留白 + 阴影画在 tile 中心)."""
+        if self.anchor is not None:
+            return self.anchor
         return (self.frame_w // 2, self.frame_h - TILE_H // 2 + 12)
 
 

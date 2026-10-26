@@ -48,10 +48,7 @@ def load_character_sprite(
     if not path.exists():
         raise FileNotFoundError(path)
     surf = load_image(path, color_key=AUTO)
-    grid = _grid_of(resource_name)
-    if grid is not None and grid != (6, 4):              # 非标准网格 (部分敌人 3×1): 按 exe 登记表切
-        frame_w, frame_h = surf.get_width() // grid[0], surf.get_height() // grid[1]
-    sheet = SpriteSheet(surf, frame_w, frame_h)
+    sheet = _grid_sheet(resource_name, surf, frame_w, frame_h)
     return CharacterSprite(
         sheet=sheet,
         direction_rows=direction_rows or DEFAULT_DIRECTION_ROWS,
@@ -61,13 +58,34 @@ def load_character_sprite(
 _GRID_BY_NAME: dict[str, tuple[int, int]] | None = None
 
 
-def _grid_of(resource_name: str) -> tuple[int, int] | None:
-    """exe ps_ 网格登记表 (core.grid_atlas_table) 里的 (cols, rows)."""
+def _grid_info(resource_name: str) -> tuple[int, int, int, int] | None:
+    """exe ps_ 网格登记表 (core.grid_atlas_table) 里的 (cols, rows, 锚点 x, 锚点 y)."""
     global _GRID_BY_NAME
     if _GRID_BY_NAME is None:
         from core.grid_atlas_table import GRID_ATLAS
-        _GRID_BY_NAME = {v[0]: (v[1], v[2]) for v in GRID_ATLAS.values()}
+        _GRID_BY_NAME = {v[0]: tuple(v[1:5]) for v in GRID_ATLAS.values()}
     return _GRID_BY_NAME.get(resource_name)
+
+
+def _grid_of(resource_name: str) -> tuple[int, int] | None:
+    """exe ps_ 网格登记表里的 (cols, rows)."""
+    g = _grid_info(resource_name)
+    return None if g is None else (g[0], g[1])
+
+
+STD_ANCHOR = (32, 82)                    # 网格表标准锚点 (64×96 帧); 我们的 feet_anchor 对应 (32, 84)
+
+
+def _grid_sheet(resource_name: str, surf, frame_w: int, frame_h: int) -> SpriteSheet:
+    """按 exe 网格表切帧: 帧宽高 = 图宽高 / (cols, rows) — 大体型 boss (合體五魔王 112×144 / 玉皇大帝 128×144)
+    也是 6×4 但帧比 64×96 大; 锚点非标准的照表 (y 同标准约定 +2)."""
+    g = _grid_info(resource_name)
+    if g is not None:
+        frame_w, frame_h = surf.get_width() // g[0], surf.get_height() // g[1]
+    sheet = SpriteSheet(surf, frame_w, frame_h)
+    if g is not None and (g[2], g[3]) != STD_ANCHOR:
+        sheet.anchor = (g[2], g[3] + 2)
+    return sheet
 
 
 def get_character_sprite(resource_name: str, **kwargs) -> CharacterSprite:
@@ -75,8 +93,23 @@ def get_character_sprite(resource_name: str, **kwargs) -> CharacterSprite:
         cs = load_character_sprite(resource_name, **kwargs)
         if is_flying_sprite(resource_name):
             cs.walk_frames = 4   # col 4 空白, 只循环 cols 0-3
+        else:
+            cs.walk_frames = _walk_frames(cs)
         _CACHE[resource_name] = cs
     return _CACHE[resource_name]
+
+
+def _walk_frames(cs: CharacterSprite) -> int:
+    """走路帧数 = 各朝向行开头连续非空帧的最少列数 (蜻蜓/蚯蚓怪等只画了 4 帧, 第 5 列空白 → 循环到就闪)."""
+    sh = cs.sheet
+    n = min(cs.walk_frames, sh.cols)
+    for row in range(sh.rows):
+        k = 0
+        while k < n and sh.frame(k, row).get_bounding_rect().width > 0:
+            k += 1
+        if k > 0:
+            n = min(n, k)
+    return max(1, n)
 
 
 def clear_cache() -> None:
@@ -94,7 +127,7 @@ def get_idle_sprite(resource_name: str) -> IdleSprite:
         if not path.exists():
             raise FileNotFoundError(path)
         surf = load_image(path, color_key=AUTO)
-        sheet = SpriteSheet(surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
+        sheet = _grid_sheet(resource_name, surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
         _IDLE_CACHE[resource_name] = IdleSprite(
             sheet=sheet,
             direction_cols=DEFAULT_IDLE_DIRECTION_COLS,
@@ -109,7 +142,7 @@ def get_weakened_sprite(resource_name: str) -> WeakenedSprite:
             raise FileNotFoundError(path)
         surf = load_image(path, color_key=AUTO)
         # 显式 64×96 (= DEFAULT_CHAR_FRAME_SIZE), atlas 自动算 cols×rows = 3×5
-        sheet = SpriteSheet(surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
+        sheet = _grid_sheet(resource_name, surf, DEFAULT_CHAR_FRAME_SIZE[0], DEFAULT_CHAR_FRAME_SIZE[1])
         _WEAKENED_CACHE[resource_name] = WeakenedSprite(
             sheet=sheet,
             direction_rows=WEAKENED_DIRECTION_ROWS,
