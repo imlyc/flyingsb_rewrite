@@ -35,11 +35,13 @@ OPP = (1, 0, 3, 2)              # 表 6418dc: 反方向
 
 
 def impact_fx(battle, victim, d: int, second=STAR, jitter: bool = True) -> None:
-    """-200/-250 的两个 FUN_004d0c90 特效: 655c10[d] 方向刺爆 + second (默认 655b18 星爆), 在目标 (x, y+400, z+448).
+    """-200/-250 的两个 FUN_004d0c90 特效: 655c10[d] 方向刺爆 + second (默认 655b18 星爆; None = 只刺爆), 在目标 (x, y+400, z+448).
     jitter: 各轴 (rand&15)-8 px (rand 顺序 z→y→x). 位置取受击 seq 首个后退位移之后 (core.pao_skills.hit_pos)."""
     from core.pao_skills import hit_pos
     x, y = hit_pos(victim)
     for seq in (SPARK[d], second):
+        if seq is None:
+            continue
         jx = jy = jz = 0
         if jitter:
             jz = ((_rand(battle) & 15) - 8) * FP
