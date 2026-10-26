@@ -8,6 +8,12 @@
   朝向 = 6418dc[朝向] (反向) → 施法者停在新格并转身.
   我们: -110 时若落点格在图内且空 → 单位移到落点 + 转身; 否则 (近似) 留原格不转身.
 雙拳擊 (245; FUN_004ff223): state 0 置 DAT_006566c0 = 0xbd (命中音, DOIT -100 播); seq 的 -1001 (两次挥拳) → 播 0xb9.
+DOIT 收尾 (FUN_004d0e18): 0x14 等 -110 + 飘字 + 受击标记 → 0x1e FUN_004cc4e0 镜头拉远 (FUN_00403071(0, 框, 300ms))
+  → 0x28 等镜头完 (Wine 下 13 tick) → 自毁 (-2: 猛撞 hook 此时才转身).
+实录校准 (wine/captures/en70_t36_F4370.log 70 用猛撞攻擊, en245_t0_F5922.log 245 雙拳擊):
+  施法者位移/帧序列、-100 特效 tick 吻合. 修正: (1) 命中特效以目标受击后退 4px (沿施法者朝向) 后为准 (combat._emit_hit_effect
+  按格中心, 这里临时替换成带后退的版本); (2) -110 起施法者即回待机姿 (exe 置 0x10000), 猛撞落格但先不转身;
+  (3) 收尾多 0x28 镜头 13 tick, 自毁的下一 tick 才转身 (70: 原版 +50). 镜头本身我们不做 (近似: 只等时长).
 """
 from __future__ import annotations
 
@@ -15,6 +21,26 @@ from core.enemy_spells.base import Spell, SIG_CAST_IMPACT
 from core.sprites.base import TILE_W, TILE_H
 
 SIG_END = -110
+ZOOM_TICKS = 13             # 0x28 镜头拉远 13 tick (实录 en70: 0x1e +36 → 0x28 +37..+49 自毁, 转身 +50 可见)
+
+
+def _emit_hit_effect_knocked(battle, attacker, defender) -> None:
+    """= combat._emit_hit_effect (敌方 DOIT 分支), 但位置以目标受击后退后为准: exe -100 先 FUN_004c4f20 + 挂受击 seq
+    6557f0[6418dc[施法者朝向]] (首个位移 4px 沿施法者朝向立即生效), 再 FUN_004d0c90(目标 +8/+0xc ...)."""
+    from core.battle import combat
+    from core.enemy_moves import hit_style
+    from core.hit_effect_seq import HIT_EFFECT_JITTER_PX, HIT_EFFECT_Y_BASELINE_PX
+    specs = combat.hit_effect_specs(defender, attacker.name, hit_style(getattr(attacker, 'pending_enemy_move', None)))
+    fx, fy = attacker.facing
+    cx = defender.x * TILE_W + TILE_W // 2 + fx * 4
+    cy = defender.y * TILE_H + TILE_H // 2 + fy * 4
+    for spec in specs:
+        if spec.jittered:
+            ox = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX)
+            oy = battle.rng.randint(-HIT_EFFECT_JITTER_PX, HIT_EFFECT_JITTER_PX) - HIT_EFFECT_Y_BASELINE_PX
+        else:
+            ox, oy = 0, -HIT_EFFECT_Y_BASELINE_PX
+        combat._spawn_effect_entity(battle, cx + ox, cy + oy, spec)
 
 
 class DoitHook(Spell):
@@ -24,7 +50,12 @@ class DoitHook(Spell):
     def on_cast_impact(self) -> None:
         from core.battle import combat
         b = self.battle
-        combat.apply_pending_attack(b, self.caster)
+        saved = combat._emit_hit_effect
+        combat._emit_hit_effect = _emit_hit_effect_knocked
+        try:
+            combat.apply_pending_attack(b, self.caster)
+        finally:
+            combat._emit_hit_effect = saved
         if b.engine.swing_sound >= 0:             # DOIT -100: if (-1 < DAT_006566c0) 播
             b.engine._emit('sound_play', None, b.engine.swing_sound)
 
@@ -33,10 +64,36 @@ class DoitHook(Spell):
             self.on_cast_impact()
             return True
         if sig == SIG_END:
+            c = self.caster
+            c.cast_hold = False                 # exe -110: 施法者置 0x10000, 末帧再显示 1 tick 后回待机姿 (实录 +27/+28)
+            if c.entity is not None:
+                c.entity.user_data['hold_until_tick'] = self.battle.engine._tick_id + 1
             self.on_end()
             self.finish()
             return True
         return self.on_hook(sig)
+
+    def _finish_tick(self) -> None:
+        z = getattr(self, '_zoom', None)
+        if z is not None:
+            self._zoom = z - 1
+            if self._zoom <= 0:
+                self.on_destroy()
+                super()._end()
+                c = self.caster
+                if c.entity is not None:
+                    c.entity.user_data.pop('hold_until_tick', None)    # -110 起已是待机姿
+            return
+        super()._finish_tick()
+
+    def _end(self) -> None:
+        if getattr(self, '_zoom', None) is None:
+            self._zoom = ZOOM_TICKS           # 0x1e → 0x28 镜头拉远
+            return
+        super()._end()
+
+    def on_destroy(self) -> None:
+        """-2 (dispatcher 自毁): hook 招在这里处理."""
 
     def on_hook(self, sig: int) -> bool:
         return False
@@ -73,7 +130,13 @@ class Ram(DoitHook):
         c.x, c.y = nx, ny
         c.snap_render()
         ent.x = ent.y = 0
-        c.facing = (-c.facing[0], -c.facing[1])   # -2: 朝向 = 6418dc[朝向]
+        self._moved = True
+
+    def on_destroy(self) -> None:
+        """-2: FUN_004c4f01 存归位点 + 朝向 = 6418dc[朝向] (反向)."""
+        if getattr(self, '_moved', False):
+            c = self.caster
+            c.facing = (-c.facing[0], -c.facing[1])
 
 
 class DoubleFist(DoitHook):
