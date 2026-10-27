@@ -154,6 +154,9 @@ class ArenaSetupScene(Scene):
         if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self._move_focused()
             return True
+        if k == pygame.K_e:
+            self._open_team_info()
+            return True
         if k in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET):
             self._adjust_level((1 if k == pygame.K_RIGHTBRACKET else -1) * (10 if shift else 1))
             return True
@@ -208,6 +211,28 @@ class ArenaSetupScene(Scene):
         self.p_levels[name] = max(1, min(99, self.p_levels.get(name, 40) + delta))
         from scenes.arena.store import save_selection
         save_selection(self.p_chosen, self.e_chosen, self.p_levels)
+
+    def _open_team_info(self) -> None:
+        """E: 光标在我方角色上 → 原版隊伍情報 (队伍 = 出战区; 出战为空则只有光标角色).
+        角色 = 竞技场建法 (等级 + 记住的装备), 背包 = 沙盒 (全部道具各 99 个, 不增减); 换装即写 arena_selection.json."""
+        if self.side != LEFT or not self._cur_list():
+            return
+        from core.character import CHARACTER_NAMES
+        from core.equipment import SandboxInventory, equipped
+        from scenes.arena.roster import build_player_character
+        from scenes.arena.store import load_equipment, save_equipment
+        from scenes.team_info import Member, TeamInfoScene
+        name = self._cur_list()[self.idx]
+        names = list(self.p_chosen) or [name]
+        start = names.index(name) if name in names else 0
+        equips = load_equipment()
+        rec = {v: k for k, v in CHARACTER_NAMES.items()}
+        members = [Member(n, build_player_character(n, self.p_levels.get(n, 40), equips.get(n)), rec[n])
+                   for n in names]
+        snap = self.surface.copy()
+        self.next_scene = TeamInfoScene(
+            self.surface, self.audio, members, SandboxInventory(), 0, self, backdrop=snap,
+            start_index=start, on_change=lambda m: save_equipment(m.name, equipped(m.ch)))
 
     def _move_focused(self) -> None:
         cur = self._cur_list()
@@ -384,7 +409,7 @@ class ArenaSetupScene(Scene):
 
         # 底部提示
         ready = bool(self.p_chosen and self.e_chosen)
-        hint = ("方向键: 光标   回车: 选/取消   [ ]: 等级(Shift±10)   Tab: 换区域   "
+        hint = ("方向键: 光标   回车: 选/取消   [ ]: 等级(Shift±10)   E: 队伍情报   Tab: 换区域   "
                 + ("空格: 开始战斗" if ready else "(双方各需≥1人)")
                 + "   ESC: 返回")
         ht = self.hint_font.render(hint, True, self.FOCUS if ready else self.HINT)

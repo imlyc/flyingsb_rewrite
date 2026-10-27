@@ -51,7 +51,7 @@ class PauseScene(Scene):
     # ------- 菜单项 -------
     def _items(self) -> list[str]:
         if self.mode == "menu":
-            return ["继续游戏", "背包物品", "保存存档", "读取存档", "返回标题"]
+            return ["继续游戏", "队伍情报", "背包物品", "保存存档", "读取存档", "返回标题"]
         return []                            # 存档/读档走槽位列表
 
     # ------- 输入 -------
@@ -82,6 +82,12 @@ class PauseScene(Scene):
             act = items[self.cursor]
             if act == "继续游戏":
                 self.next_scene = self.world
+            elif act == "队伍情报":
+                if self.world is None:
+                    self.msg = "标题界面无法打开队伍情报"
+                else:
+                    from scenes.team_info import open_from_world
+                    self.next_scene = open_from_world(self.world)
             elif act == "背包物品":
                 if self.world is None:
                     self.msg = "标题界面无法打开背包"

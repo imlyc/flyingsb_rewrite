@@ -1,4 +1,4 @@
-"""背包/装备界面 (原版窗口样式) + 头像/光标 回归."""
+"""背包界面 (原版窗口样式) + 头像/光标 回归. 换装测试在 tests/test_team_info.py."""
 import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
@@ -52,20 +52,6 @@ def test_use_consumable_restores_and_consumes(_pygame):
     _key(sc, pygame.K_RETURN)
     assert ch.CurrentHP > before
     assert save.inventory.count(299) == cnt0 - 1
-
-
-def test_equip_weapon_into_hand(_pygame):
-    sc, save = _inv(((128, 1),))                # 如意双截棍 (武器)
-    from core.items import get_item_category, ItemCategory
-    assert get_item_category(128) is ItemCategory.WEAPON
-    sc.sel = next(i for i, (iid, _) in enumerate(sc.items) if iid == 128)
-    _key(sc, pygame.K_RETURN)                   # → 装备模式
-    assert sc.mode == "equip"
-    _key(sc, pygame.K_RETURN)                   # 给当前队员装备
-    assert sc.mode == "list"
-    slot = party_mod.NAME_TO_SLOT["美娜"]
-    assert save.characters[slot].Hand == 128
-    assert save.inventory.count(128) == 0
 
 
 def test_esc_returns_to_parent(_pygame):

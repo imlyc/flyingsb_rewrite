@@ -63,25 +63,42 @@ def enemy_sprite_key(key: str) -> str | None:
 ARENA_LEVEL = 40          # 竞技场我方等级 (40 级时学习表技能已全学会; 美娜 召喚精靈 是剧情学的, 另补)
 
 
-def build_player_unit(name: str, weapon: int | None = None, accessories: tuple = (),
-                      level: int = ARENA_LEVEL) -> BattleUnit:
-    """原版真实数值: 初始角色表 (core.character_data.make_character) 逐级 level_up 到 level, 再走战场同一路径
-    (core.battle.setup.unit_from_character: 敏捷/HP/MP/攻防/智力/幸运/速度, 移动 = 敏捷 ÷ 10).
-    沙盒设定: MP 型满 MP, SG 型 SG=16; 武器/饰品按参数 (None = 空手, 普攻 = 本组第 0 项); 技能 = 学习表 ∪ 全技能."""
+def build_player_character(name: str, level: int = ARENA_LEVEL, equipment=None,
+                           weapon: int | None = None, accessories: tuple = ()):
+    """竞技场角色卡 (core.character.Character): 初始角色表 (character_data.make_character) 逐级 level_up 到 level.
+    equipment = 隊伍情報里记住的 5 槽 [头, 身, 手, 饰, 饰] (-1/None = 空): 写槽后按 exe FUN_00433296 重算属性;
+    没记过 → 旧沙盒设定 (初始头/身, 武器/饰品按参数, None = 空手). 技能列表 = 学习表 (隊伍情報 特殊能力 用)."""
     from core import character_data
-    from core.battle import energy
-    from core.battle.setup import unit_from_character
+    from core import equipment as EQ
     ch = character_data.make_character(name)
     if ch is None:
         raise KeyError(name)
     for lv in range(ch.Level + 1, level + 1):
         character_data.level_up(ch, name, lv)
     UNSET = 0xFFFFFFFF
-    ch.Hand = UNSET if weapon is None else weapon
-    acc = tuple(accessories) + (UNSET, UNSET)
-    ch.Accessories1, ch.Accessories2 = acc[0], acc[1]
-    ch.Agile = character_data.agile_with_equipment(ch)     # 换了武器/饰品 → 重算敏捷 (移动 = 敏捷 ÷ 10)
+    if equipment is not None:
+        for f, v in zip(EQ.SLOT_FIELDS, list(equipment) + [None] * 5):
+            setattr(ch, f, UNSET if v is None or int(v) < 0 else int(v))
+        EQ.recompute_stats(ch)
+    else:
+        ch.Hand = UNSET if weapon is None else weapon
+        acc = tuple(accessories) + (UNSET, UNSET)
+        ch.Accessories1, ch.Accessories2 = acc[0], acc[1]
+        ch.Agile = character_data.agile_with_equipment(ch)     # 换了武器/饰品 → 重算敏捷 (移动 = 敏捷 ÷ 10)
     ch.CurrentHP, ch.CurrentMP = ch.MaxHP, ch.MaxMP
+    ch.skills = character_data.learned_skills(name, level)[:10]
+    return ch
+
+
+def build_player_unit(name: str, weapon: int | None = None, accessories: tuple = (),
+                      level: int = ARENA_LEVEL, equipment=None) -> BattleUnit:
+    """原版真实数值: build_player_character, 再走战场同一路径
+    (core.battle.setup.unit_from_character: 敏捷/HP/MP/攻防/智力/幸运/速度, 移动 = 敏捷 ÷ 10).
+    沙盒设定: MP 型满 MP, SG 型 SG=16; 技能 = 学习表 ∪ 全技能."""
+    from core import character_data
+    from core.battle import energy
+    from core.battle.setup import unit_from_character
+    ch = build_player_character(name, level, equipment, weapon, accessories)
     if energy.ENERGY_TYPE.get(name) != energy.ENERGY_MP:
         ch.SG = energy.SG_MAX
     ch.skills = []

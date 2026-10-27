@@ -306,8 +306,12 @@ class WorldMapScene(Scene):
             from scenes.world_map.atlas import WorldAtlasScene
             self.next_scene = WorldAtlasScene(self.surface, self, self.audio)
             return True
-        if event.type == pygame.KEYDOWN and event.key in (pygame.K_i, pygame.K_e):
-            from scenes.inventory import InventoryScene
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_e:
+            from scenes.team_info import open_from_world      # 原版 隊伍情報 (装备/道具/特殊能力)
+            self.next_scene = open_from_world(self)
+            return True
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_i:
+            from scenes.inventory import InventoryScene       # 道具 (消耗品使用)
             self.next_scene = InventoryScene(self.surface, self, self.audio, self.save)
             return True
         if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_RETURN):

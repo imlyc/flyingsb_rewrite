@@ -1,13 +1,12 @@
-"""背包 / 装备界面 (原版样式: WHDLGBOX 窗口 + SITEM 道具图标 + WHARROW 光标).
+"""背包界面 (WHDLGBOX 窗口 + SITEM 道具图标 + WHARROW 光标). 只负责浏览 + 消耗品使用.
 
-从世界地图按 I (或 E) 进入. 操作:
+从世界地图按 I 进入. 操作:
   ↑/↓   选择物品
-  Enter  消耗品→当场使用(回血/回蓝); 装备→进入"选角色装备"
-  装备模式下 ←/→ 选角色, Enter 装备(旧装备退回背包), Esc 取消
+  Enter  消耗品→当场使用(回血/回蓝); 装备品→提示去 隊伍情報 (E) 换装
   Esc    返回世界地图
 
-背包数据在 SaveData.inventory (core.inventory); 装备写入对应角色的
-Head/Body/Hand/Accessories 槽. 数值/描述取自原版 exe 物品表 (见 core.items + assets/items_table.json).
+换装按原版流程在 scenes/team_info.py (隊伍情報 → 裝備: 先选槽再选道具); 旧的"先选道具再选角色"流程已删.
+背包数据在 SaveData.inventory (core.inventory). 数值/描述取自原版 exe 物品表 (见 core.items + assets/items_table.json).
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from __future__ import annotations
 import pygame
 
 from core import item_icons, portraits, ui_cursor, ui_window
-from core.character import UNSET
 from core.inventory import Inventory
 from core.items import (
     ItemCategory, get_item_category, get_item_name,
@@ -63,15 +61,6 @@ def _detail_lines(item_id: int) -> list[str]:
     return lines
 
 
-def _slot_field(cat: ItemCategory) -> str | None:
-    return {
-        ItemCategory.HAT: "Head",
-        ItemCategory.CLOTHES: "Body",
-        ItemCategory.WEAPON: "Hand",
-        ItemCategory.ACCESSORY: "Accessories1",
-    }.get(cat)
-
-
 class InventoryScene:
     """背包 + 装备界面 (原版窗口样式)."""
 
@@ -91,10 +80,9 @@ class InventoryScene:
         self.title_font = load_chinese_font(26)
         self.small = load_chinese_font(16)
 
-        self.mode = "list"          # "list" | "equip"
+        self.mode = "list"
         self.sel = 0                # 当前选中的背包物品下标
         self.top = 0
-        self.target = 0             # 装备模式下选中的队伍成员下标
         self.toast = ""
         self.toast_t = 0.0
         self._refresh_items()
@@ -125,15 +113,9 @@ class InventoryScene:
         if event.type != pygame.KEYDOWN:
             return True
         if event.key == pygame.K_ESCAPE:
-            if self.mode == "equip":
-                self.mode = "list"
-                return True
             self.next_scene = self.parent          # 返回世界地图
             return True
-
-        if self.mode == "list":
-            return self._handle_list(event)
-        return self._handle_equip(event)
+        return self._handle_list(event)
 
     def _handle_list(self, event: pygame.event.Event) -> bool:
         if not self.items:
@@ -148,25 +130,8 @@ class InventoryScene:
             if cat is ItemCategory.CONSUMABLE:
                 self._use_field(item_id)
             else:
-                self.mode = "equip"
-                self.target = 0
+                self._say("装备请在 队伍情报 (E) 里更换")
         self._refresh_items()
-        return True
-
-    def _handle_equip(self, event: pygame.event.Event) -> bool:
-        slots = self._party_slots()
-        if not slots:
-            self.mode = "list"
-            return True
-        if event.key in (pygame.K_LEFT, pygame.K_a):
-            self.target = (self.target - 1) % len(slots)
-        elif event.key in (pygame.K_RIGHT, pygame.K_d):
-            self.target = (self.target + 1) % len(slots)
-        elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
-            item_id, _ = self.items[self.sel]
-            self._equip(item_id, slots[self.target])
-            self.mode = "list"
-            self._refresh_items()
         return True
 
     # ------- 动作 -------
@@ -192,21 +157,6 @@ class InventoryScene:
         if gained_mp:
             bits.append(f"+{gained_mp} MP")
         self._say(f"{name} 使用 {get_item_name(item_id)} {(' '.join(bits)).strip()}")
-
-    def _equip(self, item_id: int, slot: int) -> None:
-        ch = self.save.characters[slot]
-        cat = get_item_category(item_id)
-        field = _slot_field(cat)
-        if field is None:
-            return
-        prev = getattr(ch, field)
-        setattr(ch, field, item_id)
-        self.save.inventory.remove(item_id, 1)
-        if prev not in (UNSET, 0xFFFFFFFF) and prev != 0:
-            self.save.inventory.add(prev, 1)
-        names = active_party(self.save)
-        name = names[self.target] if self.target < len(names) else "?"
-        self._say(f"{name} 装备 {get_item_name(item_id)}")
 
     def _say(self, msg: str) -> None:
         self.toast = msg
@@ -272,7 +222,7 @@ class InventoryScene:
         # 上下有更多
         tip = self.small.render(
             f"{self.top + 1}-{min(len(self.items), self.top + ROWS)}/{len(self.items)}"
-            "   ↑↓ 选择  Enter 使用/装备  Esc 返回", True, self.DIM)
+            "   ↑↓ 选择  Enter 使用  E 队伍情报  Esc 返回", True, self.DIM)
         self.surface.blit(tip, (box.x + 18, box.bottom - 26))
 
     def _draw_detail(self, box: pygame.Rect) -> None:
@@ -300,7 +250,7 @@ class InventoryScene:
         y = box.y + 34
         for i, slot in enumerate(slots):
             ch = self.save.characters[slot]
-            sel = (self.mode == "equip" and i == self.target)
+            sel = False
             face = portraits.head_face(names[i], 22) if i < len(names) else None
             row = pygame.Rect(box.x + 12, y - 2, box.width - 24, 26)
             if sel:
