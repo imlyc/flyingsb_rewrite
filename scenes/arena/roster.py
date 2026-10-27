@@ -86,6 +86,8 @@ def build_player_character(name: str, level: int = ARENA_LEVEL, equipment=None,
         ch.Accessories1, ch.Accessories2 = acc[0], acc[1]
         ch.Agile = character_data.agile_with_equipment(ch)     # 换了武器/饰品 → 重算敏捷 (移动 = 敏捷 ÷ 10)
     ch.CurrentHP, ch.CurrentMP = ch.MaxHP, ch.MaxMP
+    from core.battle import energy
+    ch.SG = UNSET if energy.ENERGY_TYPE.get(name) == energy.ENERGY_MP else energy.SG_MAX   # 沙盒: SG 型满格 (隊伍情報也显示满)
     ch.skills = character_data.learned_skills(name, level)[:10]
     return ch
 
@@ -99,8 +101,6 @@ def build_player_unit(name: str, weapon: int | None = None, accessories: tuple =
     from core.battle import energy
     from core.battle.setup import unit_from_character
     ch = build_player_character(name, level, equipment, weapon, accessories)
-    if energy.ENERGY_TYPE.get(name) != energy.ENERGY_MP:
-        ch.SG = energy.SG_MAX
     ch.skills = []
     u = unit_from_character(name, ch)
     u.mp = u.max_mp
