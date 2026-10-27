@@ -87,12 +87,14 @@ class ArenaBattleScene(BattleScene):
         player_names: list[str],
         enemy_names: list[str],
         return_scene: Scene,
+        player_levels: dict[str, int] | None = None,
     ) -> None:
         rng = random.Random()
         terrain = self._make_terrain()
         battle_map = terrain.build_battle_map()
 
-        players = [build_player_unit(n) for n in player_names]
+        from scenes.arena.roster import ARENA_LEVEL
+        players = [build_player_unit(n, level=(player_levels or {}).get(n, ARENA_LEVEL)) for n in player_names]
         enemies = [build_enemy_unit(n) for n in enemy_names]
 
         # 敌我双方位置随机, 不分左右. 优先居中内缩区域 (远离围墙 + 开局都在视野内),

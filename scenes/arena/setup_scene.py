@@ -77,6 +77,9 @@ class ArenaSetupScene(Scene):
         self.p_pool: list[str] = [n for n in PLAYER_ROSTER if n not in self.p_chosen]
         self.e_pool: list[str] = list(ENEMY_ROSTER)
         self.e_chosen: list[str] = list(saved_e)
+        from scenes.arena.store import load_levels
+        from scenes.arena.roster import ARENA_LEVEL
+        self.p_levels: dict[str, int] = {n: load_levels().get(n, ARENA_LEVEL) for n in PLAYER_ROSTER}
 
         # 光标: (side, region, idx)
         self.side = LEFT
@@ -151,6 +154,9 @@ class ArenaSetupScene(Scene):
         if k in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self._move_focused()
             return True
+        if k in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET):
+            self._adjust_level((1 if k == pygame.K_RIGHTBRACKET else -1) * (10 if shift else 1))
+            return True
 
         arrow = {pygame.K_UP: (0, -1), pygame.K_DOWN: (0, 1),
                  pygame.K_LEFT: (-1, 0), pygame.K_RIGHT: (1, 0)}.get(k)
@@ -191,6 +197,18 @@ class ArenaSetupScene(Scene):
             if 0 <= ni < n and (self.idx // COLS == ni // COLS):
                 self.idx = ni
 
+    def _adjust_level(self, delta: int) -> None:
+        """[ / ] 调光标所在我方角色的等级 ±1 (Shift ±10), 1..99, 立即记住."""
+        if self.side != LEFT:
+            return
+        cur = self._cur_list()
+        if not cur:
+            return
+        name = cur[self.idx]
+        self.p_levels[name] = max(1, min(99, self.p_levels.get(name, 40) + delta))
+        from scenes.arena.store import save_selection
+        save_selection(self.p_chosen, self.e_chosen, self.p_levels)
+
     def _move_focused(self) -> None:
         cur = self._cur_list()
         if not cur:
@@ -220,11 +238,12 @@ class ArenaSetupScene(Scene):
         if not self.p_chosen or not self.e_chosen:
             return
         from scenes.arena.store import save_selection
-        save_selection(self.p_chosen, self.e_chosen)   # 记住本次出战名单
+        save_selection(self.p_chosen, self.e_chosen, self.p_levels)   # 记住本次出战名单 + 等级
         from scenes.arena.battle_scene import ArenaBattleScene
         self.next_scene = ArenaBattleScene(
             self.surface, self.audio,
             player_names=list(self.p_chosen),
+            player_levels={n: self.p_levels[n] for n in self.p_chosen},
             enemy_names=list(self.e_chosen),
             return_scene=self,
         )
@@ -309,6 +328,8 @@ class ArenaSetupScene(Scene):
                 pygame.draw.rect(self.surface, (140, 90, 90), ph, border_radius=4)
             if is_player:
                 text = name
+                lt = self.hint_font.render(f"Lv{self.p_levels.get(name, 40)}", True, self.HINT)
+                self.surface.blit(lt, (rect.right - lt.get_width() - 4, rect.y + 2))
             else:
                 from scenes.arena.roster import enemy_label, enemy_level
                 text = enemy_label(name)
@@ -363,7 +384,7 @@ class ArenaSetupScene(Scene):
 
         # 底部提示
         ready = bool(self.p_chosen and self.e_chosen)
-        hint = ("方向键移动光标   回车: 选/取消出战   Tab/Shift+方向: 换区域   "
+        hint = ("方向键: 光标   回车: 选/取消   [ ]: 等级(Shift±10)   Tab: 换区域   "
                 + ("空格: 开始战斗" if ready else "(双方各需≥1人)")
                 + "   ESC: 返回")
         ht = self.hint_font.render(hint, True, self.FOCUS if ready else self.HINT)
