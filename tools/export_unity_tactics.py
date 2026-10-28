@@ -1,0 +1,353 @@
+"""把 Python 战斗数值层的数据表 + 黄金对照样本导出给 Unity 工程 (flyingsb-unity, FlyingSb.Domain.Tactics).
+
+  python3 -m tools.export_unity_tactics <unity 工程根>
+    → Assets/FlyingSb/Resources/Tactics/TacticsData.json        (运行数据: 技能/敌招/敌人/角色/道具/普攻表)
+    → Assets/FlyingSb/Tests/EditMode/Golden/tactics_golden.json (同种子下 Python 公式的输入输出, C# 测试逐项比对)
+
+黄金样本: 用固定 random.Random 种子随机生成场景 (角色/等级/装备/敌人/站位/朝向/状态), 每个用例记录
+调用前的单位快照 + rng 种子 + 返回值 + 调用后被改动的字段 + rng 状态. 随机数是 core.exe_rng (= C# BattleRng).
+"""
+from __future__ import annotations
+
+import json
+import random
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from core import character_data as CD  # noqa: E402
+from core import normal_attack as NA  # noqa: E402
+from core.battle import energy, formulas as F, settlement, status  # noqa: E402
+from core.battle.setup import PLAYER_UNIT_CLASS, make_enemy_by_type, unit_from_character  # noqa: E402
+from core.battle.tactics import TacticsBattle  # noqa: E402
+from core.enemy_move_data import MOVES  # noqa: E402
+from core.enemy_moves import heal_amount as enemy_heal_amount, move as enemy_move, resolve_status, status_chance  # noqa: E402
+from core.exe_rng import ExeRng  # noqa: E402
+from core.items import is_equippable, item_slot_mask  # noqa: E402
+from core.normal_attack_data import ATTACK_ENTRIES, WEAPON_ATTACK  # noqa: E402
+from core.skill_table import SKILL_TABLE  # noqa: E402
+from core.skills import CHARACTER_SKILL_POOL  # noqa: E402
+
+PLAYERS = list(CD.NAME_TO_RECORD)
+UNIT_FIELDS = ('name', 'level', 'max_hp', 'hp', 'max_mp', 'mp', 'sg', 'attack', 'defence', 'agile', 'move', 'is_player',
+               'x', 'y', 'luck', 'magic_atk', 'evade', 'speed', 'action_value', 'exp_reward', 'money_reward',
+               'drop_item', 'drop_rate', 'enemy_type', 'unit_class', 'wisdom', 'type_flags', 'status_bits',
+               'attack_normal', 'attack_melee')
+
+
+# ---------------- 数据表 ----------------
+def export_data() -> dict:
+    chars = json.loads((ROOT / 'assets/characters_table.json').read_text(encoding='utf-8'))
+    items = json.loads((ROOT / 'assets/items_table.json').read_text(encoding='utf-8'))['items']
+    return {
+        'skills': {str(k): list(v) for k, v in SKILL_TABLE.items()},
+        'enemy_moves': [list(m[:7]) + [m[7]] for m in MOVES],          # name power flags mp_cost p4 template fn kind
+        'enemies': json.loads((ROOT / 'assets/enemy_table.json').read_text(encoding='utf-8'))['enemies'],
+        'characters': chars['characters'],
+        'growth_rows': chars['growth_rows'],
+        'exp_table': chars['exp_table'],
+        'skill_learn': {k: v['learn'] for k, v in
+                        json.loads((ROOT / 'assets/skill_learn.json').read_text(encoding='utf-8'))['records'].items()},
+        'skill_pools': CHARACTER_SKILL_POOL,
+        'story_skills': CD.STORY_LEARNED,
+        'record_names': CD.RECORD_NAME,
+        'name_to_record': CD.NAME_TO_RECORD,
+        'items': {k: {'val': int(v.get('val', 0) or 0), 'slot': int(v.get('slot', 0) or 0), 'type': int(v.get('type', 0) or 0),
+                      'stats': {s: int(n) for s, n in (v.get('stats') or {}).items() if n}} for k, v in items.items()},
+        'attack_entries': [[e[0], e[1], e[2], e[4]] for e in ATTACK_ENTRIES],   # group flags template kind
+        'weapon_attack': {str(k): list(v) for k, v in WEAPON_ATTACK.items()},
+        'char_group': NA.CHAR_GROUP,
+        'ranged_melee': NA.RANGED_MELEE,
+        'energy_type': energy.ENERGY_TYPE,
+        'unit_class': PLAYER_UNIT_CLASS,
+    }
+
+
+# ---------------- 黄金样本 ----------------
+def snap(u) -> dict:
+    d = {k: getattr(u, k) for k in UNIT_FIELDS}
+    d['facing'] = list(u.facing)
+    d['equipment'] = list(u.equipment)
+    d['status_turns'] = {str(k): v for k, v in u.status_turns.items()}
+    d['known_skills'] = list(u.known_skills)
+    d['enemy_moves'] = list(u.enemy_moves)
+    d['move_weights'] = list(u.move_weights)
+    d['zihe_transformed'] = bool(u.zihe and u.zihe.get('transformed'))
+    return d
+
+
+class Gen:
+    def __init__(self, seed: int):
+        self.r = random.Random(seed)
+        self.equip_by_slot: dict[int, list[int]] = {}
+        for i in range(400):
+            if is_equippable(i):
+                self.equip_by_slot.setdefault(item_slot_mask(i), []).append(i)
+        self.all_equip = [i for v in self.equip_by_slot.values() for i in v]
+        self.enemy_types = [t for t in range(CD.enemy_count()) if CD.enemy(t)]
+
+    def character(self, name: str | None = None):
+        name = name or self.r.choice(PLAYERS)
+        ch = CD.make_character(name)
+        lv = self.r.choice((1, 5, 12, 25, 40, 60, 99))
+        for L in range(ch.Level + 1, lv + 1):
+            CD.level_up(ch, name, L)
+        for slot in ('Head', 'Body', 'Hand', 'Accessories1', 'Accessories2'):
+            if self.r.random() < 0.6:
+                setattr(ch, slot, self.r.choice(self.all_equip))
+        if self.r.random() < 0.3:          # 关注装备: 脱皮盾 / 丝巾 / 血盾 / 黄金苹果 / 坏手表 / 那印克星 / 紫河套装
+            setattr(ch, self.r.choice(('Accessories1', 'Accessories2')),
+                    self.r.choice((0xfa, 0xfb, 0x145, 0xf4, 0xe1, 0x146, 0x15c, 0x129, 0x12a, 0x144)))
+        ch.Agile = CD.agile_with_equipment(ch)
+        ch.SG = self.r.choice((0, 3, 9, 16, 0xFFFFFFFF))
+        ch.Unknow_1 = self.r.randrange(30)
+        ch.CurrentHP = self.r.randint(1, ch.MaxHP)
+        ch.CurrentMP = self.r.randint(0, ch.MaxMP)
+        return name, ch
+
+    def player(self):
+        name, ch = self.character()
+        u = unit_from_character(name, ch)
+        self.place(u)
+        return u
+
+    def enemy(self):
+        u = make_enemy_by_type(self.r.choice(self.enemy_types))
+        self.place(u)
+        if self.r.random() < 0.3:
+            u.hp = self.r.randint(1, u.max_hp)
+        return u
+
+    def place(self, u):
+        u.x, u.y = self.r.randint(0, 12), self.r.randint(0, 12)
+        u.facing = self.r.choice(((0, -1), (0, 1), (-1, 0), (1, 0)))
+        bits = 0
+        for b in (0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000, 0x10000, 0x20000, 0x80000):
+            if self.r.random() < 0.06:
+                bits |= b
+                u.status_turns[b] = self.r.randint(0, 3)
+        u.status_bits = bits
+        if self.r.random() < 0.05:
+            u.hp = 0
+
+    def adjacent(self, att, dfn):
+        """一半用例让守方站攻方正前方 (反击/方位分支)."""
+        if self.r.random() < 0.5:
+            dfn.x, dfn.y = att.x + att.facing[0], att.y + att.facing[1]
+
+
+def rng(seed: int) -> SimpleNamespace:
+    return SimpleNamespace(rng=ExeRng(seed), _log=lambda *_: None, players=[], enemies=[])
+
+
+def golden(n: int = 400) -> dict:
+    g = Gen(20261027)
+    cases: list = []
+    attack_skills = [s for s, v in SKILL_TABLE.items() if v[0] & 1 and not v[0] & 0x0f000000]
+    heal_skills = [s for s, v in SKILL_TABLE.items() if v[0] & 0x40 and not v[0] & 1]
+    for i in range(n):
+        seed = g.r.randrange(1 << 31)
+        p, e = g.player(), g.enemy()
+        g.adjacent(p, e)
+        pre = [snap(p), snap(e)]
+
+        def add(fn, battle, units, args, result):
+            cases.append({'fn': fn, 'units': pre if units is None else units, 'args': args, 'result': result,
+                          'rng_after': battle.rng.state, 'seed': seed})
+
+        def outcome(o):
+            return [int(o.hit), int(o.crit), o.dmg, int(o.magic), o.reflect, o.dir, o.status_chance, o.roll]
+
+        b = rng(seed)
+        idx = g.r.choice([a for a in (p.attack_normal, p.attack_melee) if a is not None] or [0])
+        fl = NA.entry(idx).flags
+        fo = g.r.choice((8, 8, 8, 4, 6, 12))
+        add('player_normal', b, None, {'entry_flags': fl, 'falloff': fo}, outcome(F.player_normal(b, p, e, fl, fo)))
+        b = rng(seed)
+        sid = g.r.choice(attack_skills)
+        add('player_skill', b, None, {'sid': sid, 'falloff': fo}, outcome(F.player_skill(b, p, e, sid, fo)))
+        b = rng(seed)
+        mv = g.r.choice(e.enemy_moves + [None]) if e.enemy_moves else None
+        o = F.enemy_attack(b, e, p, mv, fo)
+        add('enemy_attack', b, [pre[1], pre[0]], {'move': -1 if mv is None else mv, 'falloff': fo}, outcome(o))
+        b = rng(seed)
+        cc = F.counter_check(e, p, o, F.enemy_move(mv)['flags'] if mv is not None else F.F_DEFAULT_ENEMY)
+        add('counter_check', b, [pre[1], pre[0]], {'outcome': outcome(o),
+                                                   'flags': F.enemy_move(mv)['flags'] if mv is not None else F.F_DEFAULT_ENEMY},
+            int(cc))
+        b = rng(seed)
+        b._weapon27_idx = g.r.randrange(4)
+        w0 = b._weapon27_idx
+        dmg, crit = F.counter_damage(b, p, e)
+        add('counter_damage', b, None, {'weapon27': w0}, [dmg, int(crit), b._weapon27_idx])
+        b = rng(seed)
+        dmg, crit = F.counter_damage(b, e, p)
+        add('counter_damage', b, [pre[1], pre[0]], {'weapon27': 0}, [dmg, int(crit), 0])
+        b = rng(seed)
+        hs = g.r.choice(heal_skills)
+        add('heal_amount', b, None, {'sid': hs, 'falloff': fo}, F.heal_amount(b, p, hs, fo))
+        b = rng(seed)
+        t = g.player()
+        tpre = snap(t)
+        revived, amt = F.skill_restore(b, p, t, hs, fo)
+        add('skill_restore', b, [pre[0], tpre], {'sid': hs, 'falloff': fo}, [int(revived), amt, t.hp])
+        b = rng(seed)
+        ds = g.r.choice((0x3b, 0x3d))
+        add('mp_drain', b, None, {'sid': ds, 'falloff': fo}, F.mp_drain(b, p, e, ds, fo))
+        ss = g.r.choice((0x10, 0x25))
+        add('seal_chance', rng(seed), None, {'sid': ss}, F.seal_chance(p, e, ss))
+        add('dir_index', rng(seed), None, {}, F.dir_index(p, e))
+        add('affinity', rng(seed), None, {}, F.affinity(p, e))
+        # 敌招非伤害类
+        m = enemy_move(g.r.randrange(len(MOVES)))
+        add('status_chance', rng(seed), [pre[1], pre[0]], {'move': m.idx}, status_chance(e, p, m))
+        b = rng(seed)
+        p2 = g.player()
+        p2pre = snap(p2)
+        got = resolve_status(b, e, p2, m)
+        add('resolve_status', b, [pre[1], p2pre], {'move': m.idx}, [got, p2.status_bits, {str(k): v for k, v in p2.status_turns.items()}])
+        b = rng(seed)
+        add('enemy_heal_amount', b, [pre[1]], {'move': m.idx, 'falloff': fo}, enemy_heal_amount(b, e, m, fo))
+        # 普攻附带异常
+        b = rng(seed)
+        e2 = g.enemy()
+        e2pre = snap(e2)
+        p.pending_skill_id = g.r.choice((None, None, g.r.choice(list(SKILL_TABLE))))
+        p.attack_cur = idx
+        chance = g.r.choice((23, 10))
+        got = NA.roll_status(b, p, e2, chance)
+        add('roll_status', b, [pre[0], e2pre], {'skill': -1 if p.pending_skill_id is None else p.pending_skill_id,
+                                                 'attack': idx, 'chance': chance}, [got or 0, e2.status_bits])
+        p.pending_skill_id = None
+        # 能量
+        sk = g.r.choice(list(SKILL_TABLE))
+        add('energy', rng(seed), None, {'sid': sk},
+            [energy.energy_type(p), int(energy.uses_sg(p)), energy.mp_cost(p, sk), energy.sg_threshold(p, sk),
+             int(energy.can_cast(p, sk))])
+        q = g.player()
+        qpre = snap(q)
+        energy.pay(q, sk)
+        add('energy_pay', rng(seed), [qpre], {'sid': sk}, [q.mp, q.sg])
+        b = rng(seed)
+        it = g.r.choice(energy.HP_ITEMS + energy.MP_ITEMS + energy.REVIVE_ITEMS + (energy.ITEM_SG_FULL,))
+        q = g.player()
+        qpre = snap(q)
+        r = energy.battle_item(b, p, q, it, fo)
+        add('battle_item', b, [pre[0], qpre], {'item': it, 'falloff': fo},
+            [r.get('hp', -1), r.get('mp', -1), r.get('sg', -1), int(r.get('revived', False)), q.hp, q.mp, q.sg])
+        # 普攻表
+        name, ch = g.character()
+        weapon = None if ch.Hand in (0xFFFFFFFF, -1) else ch.Hand
+        acc = [a for a in (ch.Accessories1, ch.Accessories2) if a not in (0xFFFFFFFF, -1)]
+        a1, a2 = NA.attack_ids(name, weapon, acc)
+        add('attack_ids', rng(seed), [], {'name': name, 'weapon': -1 if weapon is None else weapon, 'acc': acc},
+            [-1 if a1 is None else a1, -1 if a2 is None else a2])
+        if i % 4 == 0:
+            cases.extend(turn_case(g, seed))
+            cases.extend(settle_case(g, seed))
+            cases.extend(setup_case(g))
+    return {'cases': cases}
+
+
+def turn_case(g: Gen, seed: int) -> list:
+    """行动顺序: 起回合 (状态递减 → SG → 行动值) + 连续挑人 12 次 (= TacticsBattle._start_round/_pick_next)."""
+    tb = object.__new__(TacticsBattle)
+    tb.players = [g.player() for _ in range(g.r.randint(1, 3))]
+    tb.enemies = [g.enemy() for _ in range(g.r.randint(1, 4))]
+    tb.rng = ExeRng(seed)
+    pre = [snap(u) for u in tb.players + tb.enemies]
+    picks = []
+    for _ in range(12):
+        u = tb._pick_next()
+        if u is None:
+            status.round_tick(tb.players + tb.enemies)
+            energy.round_start(tb)
+            for x in tb.players + tb.enemies:
+                if not x.is_player and not tb._can_act(x):
+                    x.action_value = 0
+                x.action_value += tb._action_gain(x)
+            picks.append(-1)
+            continue
+        picks.append((tb.players + tb.enemies).index(u))
+    post = [[u.action_value, u.sg, u.status_bits] for u in tb.players + tb.enemies]
+    return [{'fn': 'turns', 'units': pre, 'args': {'players': len(tb.players)}, 'result': [picks, post],
+             'rng_after': tb.rng.state, 'seed': seed}]
+
+
+def settle_case(g: Gen, seed: int) -> list:
+    b = SimpleNamespace(rng=ExeRng(seed), players=[], enemies=[g.enemy() for _ in range(g.r.randint(1, 5))],
+                        level_ups=[], exp_receiver=None)
+    for e in b.enemies:
+        if g.r.random() < 0.5 and e.drop_item >= 0:
+            e.drop_rate = g.r.choice((0, 300, 999, 1000))
+    chars = []
+    for _ in range(g.r.randint(1, 3)):
+        name, ch = g.character()
+        u = unit_from_character(name, ch)
+        g.place(u)
+        b.players.append(u)
+        chars.append([ch.Level, ch.Exp, ch.nextExp])
+    if g.r.random() < 0.3:
+        b.exp_receiver = g.r.choice(b.players)
+    pre = [snap(u) for u in b.players + b.enemies]
+    recv = -1 if b.exp_receiver is None else b.players.index(b.exp_receiver)
+    settlement.rewards(b)
+    scale = g.r.choice((1, 1, 30, 400))
+    b.exp_gained = b.exp_gained * scale                               # 放大经验, 覆盖升级分支
+    settlement.distribute_exp(b)
+    post = [[u.level, u.max_hp, u.max_mp, u.attack, u.defence, u.hp, u.mp, u.save_ref.Exp, u.save_ref.nextExp,
+             list(u.known_skills)] for u in b.players]
+    return [{'fn': 'settle', 'units': pre, 'args': {'players': len(b.players), 'receiver': recv, 'chars': chars,
+                                                    'exp_scale': scale},
+             'result': [b.exp_gained, b.money_gained, [list(d) for d in b.drops], post],
+             'rng_after': b.rng.state, 'seed': seed}]
+
+
+def setup_case(g: Gen) -> list:
+    """建角色 (初始 + 升级到 L) + 装备 → 战斗单位; 敌人类型 → 战斗单位."""
+    out = []
+    name, ch = g.character()
+    u = unit_from_character(name, ch)
+    out.append({'fn': 'setup_player', 'units': [], 'result': snap(u), 'rng_after': 0, 'seed': 0,
+                'args': {'name': name, 'level': ch.Level, 'equip': [ch.Head, ch.Body, ch.Hand, ch.Accessories1, ch.Accessories2],
+                         'hp': ch.CurrentHP, 'mp': ch.CurrentMP, 'sg': ch.SG, 'action': ch.Unknow_1,
+                         'save': {k: getattr(ch, k) for k in ('MaxHP', 'MaxMP', 'Exp', 'nextExp', 'Unknow_5', 'Unknow_6',
+                                                               'Agile', 'Luck', 'Wisdom', 'Unknow_9', 'Attack', 'Defence')}}})
+    t = g.r.choice(g.enemy_types)
+    out.append({'fn': 'setup_enemy', 'units': [], 'args': {'type': t}, 'result': snap(make_enemy_by_type(t)),
+                'rng_after': 0, 'seed': 0})
+    return out
+
+
+def intern_units(gold: dict) -> dict:
+    """单位快照去重: cases[i].units 改成 units 池下标 (setup 用例的 result 照旧内联)."""
+    pool, seen = [], {}
+    for c in gold['cases']:
+        ids = []
+        for u in c['units']:
+            k = json.dumps(u, sort_keys=True, ensure_ascii=False)
+            if k not in seen:
+                seen[k] = len(pool)
+                pool.append(u)
+            ids.append(seen[k])
+        c['units'] = ids
+    return {'units': pool, 'cases': gold['cases']}
+
+
+def main(argv: list[str]) -> None:
+    unity = Path(argv[1]) if len(argv) > 1 else ROOT.parent / 'flyingsb-unity'
+    data_p = unity / 'Assets/FlyingSb/Resources/Tactics/TacticsData.json'
+    gold_p = unity / 'Assets/FlyingSb/Tests/EditMode/Golden/tactics_golden.json'
+    data_p.parent.mkdir(parents=True, exist_ok=True)
+    gold_p.parent.mkdir(parents=True, exist_ok=True)
+    data_p.write_text(json.dumps(export_data(), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    gold = intern_units(golden(240))
+    gold_p.write_text(json.dumps(gold, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'{data_p} {data_p.stat().st_size}B\n{gold_p} {gold_p.stat().st_size}B, {len(gold["cases"])} cases')
+
+
+if __name__ == '__main__':
+    main(sys.argv)
