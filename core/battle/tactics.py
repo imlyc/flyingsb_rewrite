@@ -34,7 +34,25 @@ from core.battle.data import (
 DOIT_ZOOM_TICKS = 13                 # DOIT 收尾镜头拉远 (exe 300ms, Wine 实录 13 tick)
 
 
+def row_major(c: tuple[int, int]) -> tuple[int, int]:
+    return c[1], c[0]
+
+
+class TileSet(set):
+    """伤害范围: 集合语义, 但遍历按 (y, x) 行优先 — 多目标结算的掷骰顺序不依赖 CPython 哈希序 (Unity 移植逐条对照)."""
+    def __iter__(self):
+        return iter(sorted(set.__iter__(self), key=row_major))
+
+
 class TacticsBattle:
+    @property
+    def _pending_damage_range(self):
+        return self.__dict__.get('_pdr')
+
+    @_pending_damage_range.setter
+    def _pending_damage_range(self, v) -> None:
+        self.__dict__['_pdr'] = None if v is None else TileSet(v)
+
     def __init__(
         self,
         players: list[BattleUnit],
@@ -647,7 +665,7 @@ class TacticsBattle:
         targets = []
         from core.skills import REVIVE_SKILLS
         revive = self.aim_skill_id in REVIVE_SKILLS
-        for (x, y) in dmg_tiles:
+        for (x, y) in sorted(dmg_tiles, key=row_major):
             occ = self.q.occupant(x, y)
             if occ is None or (not occ.alive and not (revive and occ.is_player == u.is_player)):
                 continue                         # 复活类技能 (回生舞步/強力慢曲/甦生/重生) 可选倒地队友
