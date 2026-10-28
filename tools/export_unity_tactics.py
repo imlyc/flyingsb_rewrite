@@ -76,7 +76,11 @@ def export_data() -> dict:
         'attack_fx': [[e[6], list(e[7]) if e[7] else None, list(e[8]) if e[8] else None, e[5]] for e in ATTACK_ENTRIES],
         'move_seq': [[m[9], m[10]] for m in MOVES],              # 敌招 DOIT seq 表 / 命中特效
         'hit_fx': {k: [hit_effect_seq.ATLAS_KEY_TO_IDX[a], {d: list(v) for d, v in by.items()}, t]
-                   for k, (a, by, t) in hit_effect_seq._STYLE_PRESETS.items()},
+                   for k, (a, by, t) in hit_effect_seq._STYLE_PRESETS.items()} | {
+                   'SPARK': [hit_effect_seq.ATLAS_KEY_TO_IDX[hit_effect_seq.UNIVERSAL_SPARK_ATLAS],
+                             {d: list(v) for d, v in hit_effect_seq.UNIVERSAL_SPARK_BY_DIR.items()},
+                             hit_effect_seq.UNIVERSAL_SPARK_FRAME_TICKS]},
+        'seq_meta': export_seq_meta(),
         'reaction': {'hit': [[list(st) for st in sq] for sq in HIT_SEQ], 'dodge': [[list(st) for st in sq] for sq in DODGE_SEQ]},
     }
 
@@ -91,6 +95,55 @@ def export_seqs() -> dict:
         for k, dirs in tables.items():
             for d, sq in enumerate(dirs):
                 out[f'{pre}/{k}/{d}'] = tuple_to_bytecode(sq).hex()
+    return out
+
+
+def export_seq_meta() -> dict:
+    """每段 seq 的 IMPACT 数 (tuple 里 'impact' 或 jump -100) 与首个帧 op 前的 move tick 和 (exe 仍显示待机姿)."""
+    from core.enemy_move_data import SEQ_TABLES as EM_SEQ
+    from core.normal_attack_data import SEQ_TABLES as NA_SEQ
+    out = {}
+    for pre, tables in (('na', NA_SEQ), ('em', EM_SEQ)):
+        for k, dirs in tables.items():
+            for d, sq in enumerate(dirs):
+                impacts = sum(1 for t in sq if t[0] == 'impact' or (t[0] == 'jump' and t[1] == -100))
+                lead = 0
+                for t in sq:
+                    if t[0] in ('fm', 'idle', 'fm_mode1'):
+                        break
+                    if t[0] == 'move':
+                        lead += t[-1]
+                hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in sq)
+                out[f'{pre}/{k}/{d}'] = [max(1, impacts), lead, int(hold)]
+    return out
+
+
+def trace_cases() -> list:
+    """普攻逐 tick 跟踪 (tools.skill_trace --attack N): 每个 DOIT 普攻项 × 4 朝向, 敌人站正前方一格.
+    朝下的存全文 (失败时可看差异), 其余只存 md5."""
+    import contextlib, hashlib, io
+    from tools import skill_trace
+    names = {g: n for n, g in NA.CHAR_GROUP.items()}
+    out = []
+    for idx, e in enumerate(ATTACK_ENTRIES):
+        if e[4] != 'doit' or e[5] is None:
+            continue
+        name = names.get(e[0], '孙悟空') if idx < 88 or idx > 90 else '紫河'
+        for facing, (dx, dy) in skill_trace.FACING.items():
+            argv = ['skill_trace', '0', '--attack', str(idx), '--caster', name, '--facing', facing,
+                    '--enemy-dx', str(dx), '--enemy-dy', str(dy)]
+            buf = io.StringIO()
+            old = sys.argv
+            sys.argv = argv
+            try:
+                with contextlib.redirect_stdout(buf):
+                    skill_trace.main()
+            finally:
+                sys.argv = old
+            text = buf.getvalue()
+            out.append({'fn': 'trace', 'units': [], 'rng_after': 0, 'seed': 0,
+                        'args': {'caster': name, 'attack': idx, 'facing': facing, 'dx': dx, 'dy': dy},
+                        'result': text if facing == 'down' else hashlib.md5(text.encode()).hexdigest()})
     return out
 
 
@@ -304,6 +357,7 @@ def golden(n: int = 400) -> dict:
             cases.extend(settle_case(g, seed))
             cases.extend(setup_case(g))
     cases.extend(engine_cases())
+    cases.extend(trace_cases())
     return {'cases': cases}
 
 
