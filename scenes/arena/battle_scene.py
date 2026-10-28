@@ -17,6 +17,7 @@ from scenes.base import Scene
 from scenes.battle import BattleScene
 from scenes.arena.roster import ENEMY_ROSTER, build_enemy_unit, build_player_unit
 from scenes.arena.terrain import ArenaTerrain
+from core.exe_rng import ExeRng
 
 
 def _main_region(terrain) -> set[tuple[int, int]]:
@@ -89,7 +90,7 @@ class ArenaBattleScene(BattleScene):
         return_scene: Scene,
         player_levels: dict[str, int] | None = None,
     ) -> None:
-        rng = random.Random()
+        rng = ExeRng()
         terrain = self._make_terrain()
         battle_map = terrain.build_battle_map()
 

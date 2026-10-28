@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pygame
 
+from core.exe_rng import ExeRng
 from core import real_map as realm
 from core import world_graph
 from core import chests as chests_mod
@@ -140,7 +141,7 @@ class WorldMapScene(Scene):
         self.font = load_chinese_font(20)
         self.small = load_chinese_font(16)      # HUD 按键提示用小字
         self.steps = 0
-        self.rng = random.Random()
+        self.rng = ExeRng()
         # 队长角色 sprite (已在上方按队伍设为美娜, 此处保留 facing 初始化)
         self.facing: tuple[int, int] = (0, 1)  # 初始朝下
         self._anim = AnimationState()

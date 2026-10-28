@@ -11,6 +11,7 @@ from enum import Enum, auto
 
 from core.anim_engine.entity import Entity
 from core.anim_state import AnimationState
+from core.exe_rng import ExeRng
 
 
 # ---------------- 事件 / 升级 ----------------
@@ -239,7 +240,7 @@ class BattleMap:
 
 
 def default_battle_map(w: int = 15, h: int = 10, rng: random.Random | None = None) -> BattleMap:
-    rng = rng or random.Random()
+    rng = rng or ExeRng()
     m = BattleMap(w, h)
     for _ in range(8):
         x = rng.randint(3, w - 4)

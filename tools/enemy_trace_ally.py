@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from core.battle.data import BattleMap
 from core.battle.tactics import TacticsBattle
 from tools.skill_trace import FACING, _unit, unit_line, effect_line, _CUR_TICK
+from core.exe_rng import ExeRng
 
 
 def main():
@@ -50,7 +51,7 @@ def main():
             p.wisdom = a.wisdom
         ps.append(p)
     idxs = [int(v) for v in a.target_idx.split(',')] if a.target_idx else list(range(len(ps)))
-    b = TacticsBattle(players=ps, enemies=[e], battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
+    b = TacticsBattle(players=ps, enemies=[e], battle_map=BattleMap(32, 64), rng=ExeRng(a.seed),
                       player_positions=[(u.x, u.y) for u in ps], enemy_positions=[(e.x, e.y)])
     e.facing = FACING[a.facing]
     for p in ps:

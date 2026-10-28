@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 from core.battle.data import BattleMap, BattleUnit
 from core.battle.tactics import TacticsBattle
 from core.sprites.base import TILE_W, TILE_H
+from core.exe_rng import ExeRng
 
 FACING = {'up': (0, -1), 'down': (0, 1), 'left': (-1, 0), 'right': (1, 0)}
 
@@ -78,7 +79,7 @@ def main():
             ally.hp = 0; ally.death_anim_time_ms = 0
     es = [e] + [_unit(f'enemy{i}', 15 + int(t.split(',')[0]), 53 + int(t.split(',')[1]), is_player=False, agile=1)
                 for i, t in enumerate(x for x in a.more_enemies.split(';') if x)]
-    b = TacticsBattle(players=players, enemies=es, battle_map=BattleMap(32, 64), rng=random.Random(a.seed),
+    b = TacticsBattle(players=players, enemies=es, battle_map=BattleMap(32, 64), rng=ExeRng(a.seed),
                       player_positions=[(u.x, u.y) for u in players], enemy_positions=[(u.x, u.y) for u in es])
     p.facing = FACING[a.facing]
     if a.ally_facing and len(players) > 1:

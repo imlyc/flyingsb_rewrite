@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import random
 
+from core.exe_rng import ExeRng
 from core.anim_engine.entity import Entity
 from core.character import UNSET
 from core.battle import ai, combat
@@ -44,7 +45,7 @@ class TacticsBattle:
         enemy_positions: list[tuple[int, int]] | None = None,
         arena_mode: bool = False,
     ) -> None:
-        self.rng = rng or random.Random()
+        self.rng = rng or ExeRng()        # 原版 rand() (core.exe_rng); 测试可传任何兼容 random.Random 的对象
         # 竞技场模式: 胜利不结算经验/金钱/升级 (纯对战沙盒)
         self.arena_mode = arena_mode
         self.players = players
