@@ -32,6 +32,8 @@ from core.skill_table import SKILL_TABLE  # noqa: E402
 from core.skills import CHARACTER_SKILL_POOL  # noqa: E402
 from core.skill_patterns_data import ACTION_TEMPLATES, PATTERN_SET1, PATTERN_SET2, SKILL_TEMPLATE  # noqa: E402
 from core.battle import ai_exe  # noqa: E402
+from core import hit_effect_seq  # noqa: E402
+from core.reaction_seq import DODGE_SEQ, HIT_SEQ  # noqa: E402
 
 PLAYERS = list(CD.NAME_TO_RECORD)
 UNIT_FIELDS = ('name', 'level', 'max_hp', 'hp', 'max_mp', 'mp', 'sg', 'attack', 'defence', 'agile', 'move', 'is_player',
@@ -70,7 +72,51 @@ def export_data() -> dict:
         'pattern_set2': [[list(r) for r in g] for g in PATTERN_SET2],
         'skill_template': {str(k): v for k, v in SKILL_TEMPLATE.items()},
         'ai_template_flags': list(ai_exe.TEMPLATE_FLAGS),
+        'seqs': export_seqs(),
+        'attack_fx': [[e[6], list(e[7]) if e[7] else None, list(e[8]) if e[8] else None, e[5]] for e in ATTACK_ENTRIES],
+        'move_seq': [[m[9], m[10]] for m in MOVES],              # 敌招 DOIT seq 表 / 命中特效
+        'hit_fx': {k: [hit_effect_seq.ATLAS_KEY_TO_IDX[a], {d: list(v) for d, v in by.items()}, t]
+                   for k, (a, by, t) in hit_effect_seq._STYLE_PRESETS.items()},
+        'reaction': {'hit': [[list(st) for st in sq] for sq in HIT_SEQ], 'dodge': [[list(st) for st in sq] for sq in DODGE_SEQ]},
     }
+
+
+def export_seqs() -> dict:
+    """动画 seq 预编码成字节码 (hex): na/<表>/<方向> 普攻, em/<表>/<方向> 敌招 DOIT."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    from core.enemy_move_data import SEQ_TABLES as EM_SEQ
+    from core.normal_attack_data import SEQ_TABLES as NA_SEQ
+    out = {}
+    for pre, tables in (('na', NA_SEQ), ('em', EM_SEQ)):
+        for k, dirs in tables.items():
+            for d, sq in enumerate(dirs):
+                out[f'{pre}/{k}/{d}'] = tuple_to_bytecode(sq).hex()
+    return out
+
+
+def engine_cases() -> list:
+    """引擎对照: 每段 seq 单独挂在一个实体上逐 tick 推进, 记录实体状态 + 信号/音效/位移事件."""
+    from core.anim_engine.engine import Engine
+    out = []
+    seqs = export_seqs()
+    for name in sorted(seqs):
+        eng = Engine()
+        ev = []
+        eng.on('signal', lambda e, sg: ev.append(['sig', sg]))
+        eng.on('sound_play', lambda e, sd: ev.append(['snd', sd]))
+        eng.on('sound_stop', lambda e, sd: ev.append(['stop', sd]))
+        eng.on('move', lambda e, dx, dy, dz, t: ev.append(['mv', dx, dy, dz, t]))
+        e = eng.spawn()
+        eng.attach_seq(e, bytes.fromhex(seqs[name]))
+        rows = []
+        for t in range(120):
+            rows.append([e.flags, e.x, e.y, e.z, e.atlas_slot, e.frame_idx, e.ticks, e.offset, eng.swing_sound, ev[:]])
+            ev.clear()
+            if not e.is_playing():
+                break
+            eng.tick()
+        out.append({'fn': 'engine', 'units': [], 'args': {'seq': name}, 'result': rows, 'rng_after': 0, 'seed': 0})
+    return out
 
 
 # ---------------- 黄金样本 ----------------
@@ -257,6 +303,7 @@ def golden(n: int = 400) -> dict:
             cases.extend(ai_case(g, seed))
             cases.extend(settle_case(g, seed))
             cases.extend(setup_case(g))
+    cases.extend(engine_cases())
     return {'cases': cases}
 
 
