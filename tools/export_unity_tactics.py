@@ -30,6 +30,8 @@ from core.items import is_equippable, item_slot_mask  # noqa: E402
 from core.normal_attack_data import ATTACK_ENTRIES, WEAPON_ATTACK  # noqa: E402
 from core.skill_table import SKILL_TABLE  # noqa: E402
 from core.skills import CHARACTER_SKILL_POOL  # noqa: E402
+from core.skill_patterns_data import ACTION_TEMPLATES, PATTERN_SET1, PATTERN_SET2, SKILL_TEMPLATE  # noqa: E402
+from core.battle import ai_exe  # noqa: E402
 
 PLAYERS = list(CD.NAME_TO_RECORD)
 UNIT_FIELDS = ('name', 'level', 'max_hp', 'hp', 'max_mp', 'mp', 'sg', 'attack', 'defence', 'agile', 'move', 'is_player',
@@ -63,6 +65,11 @@ def export_data() -> dict:
         'ranged_melee': NA.RANGED_MELEE,
         'energy_type': energy.ENERGY_TYPE,
         'unit_class': PLAYER_UNIT_CLASS,
+        'action_templates': [list(t) for t in ACTION_TEMPLATES],
+        'pattern_set1': [[list(r) for r in g] for g in PATTERN_SET1],
+        'pattern_set2': [[list(r) for r in g] for g in PATTERN_SET2],
+        'skill_template': {str(k): v for k, v in SKILL_TEMPLATE.items()},
+        'ai_template_flags': list(ai_exe.TEMPLATE_FLAGS),
     }
 
 
@@ -247,6 +254,7 @@ def golden(n: int = 400) -> dict:
             [-1 if a1 is None else a1, -1 if a2 is None else a2])
         if i % 4 == 0:
             cases.extend(turn_case(g, seed))
+            cases.extend(ai_case(g, seed))
             cases.extend(settle_case(g, seed))
             cases.extend(setup_case(g))
     return {'cases': cases}
@@ -275,6 +283,64 @@ def turn_case(g: Gen, seed: int) -> list:
     post = [[u.action_value, u.sg, u.status_bits] for u in tb.players + tb.enemies]
     return [{'fn': 'turns', 'units': pre, 'args': {'players': len(tb.players)}, 'result': [picks, post],
              'rng_after': tb.rng.state, 'seed': seed}]
+
+
+def ai_case(g: Gen, seed: int) -> list:
+    """敌方 AI 连续两轮 (ai_exe.take_turn): 每次行动后记录站位/朝向/路径/待出招 + 跨调用残留的全局表."""
+    from core.battle.data import BattleMap
+    from core.battle.queries import BattleQueries
+    tb = object.__new__(TacticsBattle)
+    w, h = g.r.randint(10, 16), g.r.randint(8, 14)
+    m = BattleMap(w, h)
+    for _ in range(g.r.randint(0, 14)):
+        m.obstacles.add((g.r.randrange(w), g.r.randrange(h)))
+    tb.map = m
+    tb.players = [g.player() for _ in range(g.r.randint(1, 4))]
+    tb.enemies = [g.enemy() for _ in range(g.r.randint(1, 5))]
+    special = [t for t in g.enemy_types if any(enemy_move(mv).category == 2 or mv == 2 for mv in CD.enemy(t).get('moves', [])
+                                              if 0 <= mv < len(MOVES))]
+    for _ in range(g.r.randint(0, 2)):          # 偏置: 带回复/召唤招的敌人 (覆盖 FUN_004b0532 / 召唤分支)
+        u = make_enemy_by_type(g.r.choice(special))
+        g.place(u)
+        tb.enemies.append(u)
+    taken = set()
+    for u in tb.players + tb.enemies:
+        while True:
+            c = (g.r.randrange(w), g.r.randrange(h))
+            if c not in taken and c not in m.obstacles:
+                break
+        taken.add(c)
+        u.x, u.y = c
+        if not u.is_player and g.r.random() < 0.4:
+            u.hp = g.r.randint(1, u.max_hp)            # 受伤 → 回复招分支
+        if not u.is_player and g.r.random() < 0.2:
+            u.status_bits |= 0x400                      # 沉默
+    tb.q = BattleQueries(m, tb.players, tb.enemies)
+    tb.rng = ExeRng(seed)
+    tb._log = lambda *_: None
+    pre = [snap(u) for u in tb.players + tb.enemies]
+    steps = []
+    for _ in range(2):
+        for e in tb.enemies:
+            if not e.alive:
+                continue
+            for k in ('_pending_enemy_attack', '_pending_enemy_skill', '_pending_enemy_move', '_pending_enemy_cursor',
+                      '_pending_damage_range', '_pending_damage_falloff'):
+                setattr(tb, k, None)
+            e.move_path, e.post_move_facing = [], None
+            ai_exe.take_turn(tb, e)
+            all_u = tb.players + tb.enemies
+            pa = tb._pending_enemy_attack
+            steps.append([
+                [e.x, e.y, e.facing[0], e.facing[1]], [list(c) for c in e.move_path],
+                None if e.post_move_facing is None else list(e.post_move_facing), getattr(e, 'summon_cd', 0),
+                -1 if pa is None else all_u.index(pa), -1 if tb._pending_enemy_move is None else tb._pending_enemy_move,
+                None if tb._pending_enemy_cursor is None else list(tb._pending_enemy_cursor),
+                None if tb._pending_damage_range is None else sorted(list(c) for c in tb._pending_damage_range),
+                None if tb._pending_damage_falloff is None else sorted([c[0], c[1], v] for c, v in tb._pending_damage_falloff.items()),
+                [list(c) for c in tb._ai_stand], [list(x) for x in tb._ai_ent], tb.rng.state])
+    return [{'fn': 'ai', 'units': pre, 'args': {'players': len(tb.players), 'w': w, 'h': h, 'obstacles': sorted(list(c) for c in m.obstacles)},
+             'result': steps, 'rng_after': tb.rng.state, 'seed': seed}]
 
 
 def settle_case(g: Gen, seed: int) -> list:
