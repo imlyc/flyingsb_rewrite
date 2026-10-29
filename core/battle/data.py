@@ -94,6 +94,7 @@ class BattleUnit:
     anim: AnimationState = field(default_factory=AnimationState)
     loco: Locomotion = field(default_factory=Locomotion)          # exe 运动状态/计数/左右脚 (core.battle.locomotion)
     loco_pose: tuple | None = None   # 最近一 tick 的姿态 (atlas, 列, 行); None = 还没跑过
+    loco_prev: tuple | None = None   # 最近一 tick 走之前的渲染坐标 (画面在 tick 之间从它插值到 render_x/y); None = 那一 tick 没走
     move_path: list[tuple[int, int]] = field(default_factory=list)   # render 待经过的剩余路径节点 (不含起点; 含终点)
     # AI 移动结束后强制朝向 (= face_toward 设的攻击朝向). UI 走完 move_path 时还原, 防止
     # 移动 lerp 中 "切下一段方向" 把攻击 facing 覆盖成最后一段移动方向.
@@ -226,6 +227,7 @@ class BattleUnit:
         """把渲染坐标瞬间对齐到逻辑位置 (无动画). 摆阵 / 复活时用."""
         self.render_x = float(self.x)
         self.render_y = float(self.y)
+        self.loco_prev = None
 
 
 # ---------------- 地图 ----------------

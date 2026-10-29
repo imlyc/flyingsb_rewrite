@@ -159,7 +159,9 @@ def _loco_step(unit, global_tick: int) -> None:
     else:
         tgt_x, tgt_y = unit.x, unit.y
     walking = unit.render_x != float(tgt_x) or unit.render_y != float(tgt_y)
+    unit.loco_prev = None
     if motion_tick(unit.loco, walking):
+        unit.loco_prev = (unit.render_x, unit.render_y)
         for rattr, target in (("render_x", tgt_x), ("render_y", tgt_y)):
             rval = getattr(unit, rattr)
             delta = target - rval

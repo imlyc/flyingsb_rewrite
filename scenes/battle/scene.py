@@ -359,9 +359,16 @@ class BattleScene(Scene):
         return r.centerx, r.centery
 
     def _unit_rect(self, u, cam_x: int, cam_y: int) -> pygame.Rect:
-        """用 render_x/y (浮点 tile) 算单位的渲染像素 rect."""
-        px = int(round(u.render_x * TILE_W)) - cam_x
-        py = int(round(u.render_y * TILE_H)) - cam_y
+        """用 render_x/y (浮点 tile) 算单位的渲染像素 rect. 走格时在上一 tick 与本 tick 坐标间按 tick 内已过时间插值:
+        逻辑每 30ms 走 1/4 格, 画面 60fps — 不插值的话有的 16px 停 2 帧有的停 1 帧, 看着卡顿 (原版 1 帧 = 1 tick 没这问题)."""
+        rx, ry = u.render_x, u.render_y
+        if u.loco_prev is not None:
+            from scenes.battle.update import LOCO_TICK_MS
+            f = min(1.0, getattr(self, "_loco_acc", 0) / LOCO_TICK_MS)
+            px0, py0 = u.loco_prev
+            rx, ry = px0 + (rx - px0) * f, py0 + (ry - py0) * f
+        px = int(round(rx * TILE_W)) - cam_x
+        py = int(round(ry * TILE_H)) - cam_y
         return pygame.Rect(px, py, TILE_W, TILE_H)
 
     def _compute_camera_offset(self, focus_x: int, focus_y: int) -> tuple[int, int]:
