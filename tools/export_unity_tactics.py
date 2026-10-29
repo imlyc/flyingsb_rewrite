@@ -48,7 +48,7 @@ def export_data() -> dict:
     items = json.loads((ROOT / 'assets/items_table.json').read_text(encoding='utf-8'))['items']
     return {
         'skills': {str(k): list(v) for k, v in SKILL_TABLE.items()},
-        'enemy_moves': [list(m[:7]) + [m[7]] for m in MOVES],          # name power flags mp_cost p4 template fn kind
+        'enemy_moves': [list(m[:7]) + [m[7], int(m[8][4:], 16) if m[8] else -1] for m in MOVES],   # name power flags mp_cost p4 template fn kind called(模板函数地址)
         'enemies': json.loads((ROOT / 'assets/enemy_table.json').read_text(encoding='utf-8'))['enemies'],
         'characters': chars['characters'],
         'growth_rows': chars['growth_rows'],
@@ -147,36 +147,44 @@ def trace_cases() -> list:
     return out
 
 
-def enemy_trace_cases(kinds=('doit', 'doit+hook')) -> list:
-    """敌招逐 tick 跟踪 (tools.enemy_trace): 指定演出类别的每招 × 4 朝向, 我方目标站施法者正前方一格;
-    施法敌人 = 第一个招式表含该招的敌种 (没有则 0). 朝下的存全文, 其余只存 md5."""
+def enemy_trace_cases(unity: Path | None = None) -> list:
+    """敌招逐 tick 跟踪 (tools.enemy_trace; 对己方招 tools.enemy_trace_ally --self 自疗): 每招 × 4 朝向, 我方目标站施法者正前方一格;
+    施法敌人 = 第一个招式表含该招的敌种 (没有则 0). DOIT 类朝下的存全文, 其余只存 md5 (控制对照文件大小);
+    全文另写到 <unity>/LocalOnly/tactics-traces/ (git 忽略, 测试失败时定位差异行)."""
     import contextlib, hashlib, io
-    from tools import enemy_trace, skill_trace
+    from tools import enemy_trace, enemy_trace_ally, skill_trace
     from core.enemy_move_data import MOVES
     owner = {}
     for t in range(CD.enemy_count()):
         e = CD.enemy(t)
         for mv in (e or {}).get('moves', []) or []:
             owner.setdefault(mv, t)
+    local = unity / 'LocalOnly' / 'tactics-traces' if unity else None
+    if local:
+        local.mkdir(parents=True, exist_ok=True)
     out = []
     for mid, m in enumerate(MOVES):
-        if m[7] not in kinds:
-            continue
         etype = owner.get(mid, 0)
+        ally = (m[2] & 3) == 1
         for facing, (dx, dy) in skill_trace.FACING.items():
             argv = ['enemy_trace', str(mid), '--type', str(etype), '--facing', facing, '--targets', f'{dx},{dy}']
+            if ally:
+                argv.append('--self')
             buf = io.StringIO()
             old = sys.argv
             sys.argv = argv
             try:
                 with contextlib.redirect_stdout(buf):
-                    enemy_trace.main()
+                    (enemy_trace_ally if ally else enemy_trace).main()
             finally:
                 sys.argv = old
             text = buf.getvalue()
+            if local:
+                (local / f'enemy_{mid}_{facing}.txt').write_text(text)
+            full = m[7] in ('doit', 'doit+hook') and facing == 'down'
             out.append({'fn': 'enemy_trace', 'units': [], 'rng_after': 0, 'seed': 0,
-                        'args': {'move': mid, 'type': etype, 'facing': facing, 'targets': f'{dx},{dy}'},
-                        'result': text if facing == 'down' else hashlib.md5(text.encode()).hexdigest()})
+                        'args': {'move': mid, 'type': etype, 'facing': facing, 'targets': f'{dx},{dy}', 'self': ally},
+                        'result': text if full else hashlib.md5(text.encode()).hexdigest()})
     return out
 
 
@@ -282,7 +290,7 @@ def rng(seed: int) -> SimpleNamespace:
     return SimpleNamespace(rng=ExeRng(seed), _log=lambda *_: None, players=[], enemies=[])
 
 
-def golden(n: int = 400) -> dict:
+def golden(n: int = 400, unity: Path | None = None) -> dict:
     g = Gen(20261027)
     cases: list = []
     attack_skills = [s for s, v in SKILL_TABLE.items() if v[0] & 1 and not v[0] & 0x0f000000]
@@ -391,7 +399,7 @@ def golden(n: int = 400) -> dict:
             cases.extend(setup_case(g))
     cases.extend(engine_cases())
     cases.extend(trace_cases())
-    cases.extend(enemy_trace_cases())
+    cases.extend(enemy_trace_cases(unity))
     return {'cases': cases}
 
 
@@ -545,7 +553,7 @@ def main(argv: list[str]) -> None:
     data_p.parent.mkdir(parents=True, exist_ok=True)
     gold_p.parent.mkdir(parents=True, exist_ok=True)
     data_p.write_text(json.dumps(export_data(), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-    gold = intern_units(golden(240))
+    gold = intern_units(golden(240, unity))
     gold_p.write_text(json.dumps(gold, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f'{data_p} {data_p.stat().st_size}B\n{gold_p} {gold_p.stat().st_size}B, {len(gold["cases"])} cases')
 
