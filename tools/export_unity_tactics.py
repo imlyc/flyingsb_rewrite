@@ -108,6 +108,9 @@ def spell_seq_tables() -> dict:
             elif isinstance(v, (list, tuple)) and v and all(_is_seq(x) for x in v):
                 for i, x in enumerate(v):
                     out[f'sp/{info.name}.{k}/{i}'] = x
+    from core.enemy_spells import m133                      # 运行时拼出的 seq (首遍跳帧的摇扇)
+    for d in range(4):
+        out[f'sp/m133.fan_seq/{d}'] = m133.fan_seq(d)
     return out
 
 
