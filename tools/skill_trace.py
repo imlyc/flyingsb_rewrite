@@ -68,9 +68,11 @@ def main():
     ap.add_argument('--ally-facing', default=None); ap.add_argument('--ally-dx', type=int); ap.add_argument('--ally-dy', type=int, help='加一个队友 (我方目标技能用)')
     ap.add_argument('--cursor-dx', type=int); ap.add_argument('--cursor-dy', type=int, help='光标相对施法者格 (默认敌人格, 失败回施法者)')
     ap.add_argument('--attack', type=int, default=None, help='普攻表 idx (普攻实录; skill 参数忽略)')
+    ap.add_argument('--sg', type=int, default=0, help='施法者兴奋值 (SG 型角色要够门槛才放得出)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
     a = ap.parse_args()
     p = _unit(a.caster, 15, 53, is_player=True, agile=99)
+    p.sg = a.sg
     e = _unit('enemy', 15 + a.enemy_dx, 53 + a.enemy_dy, is_player=False, agile=1)
     players = [p]
     if a.ally_dx is not None and (a.ally_dx, a.ally_dy) != (0, 0):      # (0,0) = 目标就是施法者自己

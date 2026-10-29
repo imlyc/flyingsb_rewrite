@@ -50,6 +50,8 @@ def export_data() -> dict:
     items = json.loads((ROOT / 'assets/items_table.json').read_text(encoding='utf-8'))['items']
     return {
         'skills': {str(k): list(v) for k, v in SKILL_TABLE.items()},
+        'name_hit_style': {n: __import__('core.hit_effect_seq', fromlist=['x'])._resolve_first_spawn_style(n, None)
+                           for n in ('孙悟空', '美娜', '乐神杰特', '紫河', '三藏法师', '猪八戒', '蒙面人', '破无', '捕山', '沙悟净')},
         'skill_names': {str(k): v for k, v in __import__('core.skills', fromlist=['SKILLS']).SKILLS.items()},
         'skill_descs': {str(k): d for k in __import__('core.skills', fromlist=['SKILLS']).SKILLS
                         if (d := __import__('core.skills', fromlist=['get_skill_desc']).get_skill_desc(k))},
@@ -131,6 +133,38 @@ def _all_seq_tuples() -> dict:
             for d, sq in enumerate(dirs):
                 out[f'{pre}/{k}/{d}'] = sq
     out.update(spell_seq_tables())
+    out.update(skill_seq_tables())
+    return out
+
+
+PLAYER_SKILL_MODULES = ('skill_seq', 'sam_skills', 'pig_skills', 'pao_skills', 'bosan_skills', 'jet_skills', 'mina_skills',
+                        'jah_skills', 'projectile', 'son_transform', 'fenshen_seqs', 'ranged_attack')
+
+
+def skill_seq_tables() -> dict:
+    """玩家技能: sk/<sid>/<方向> = core.skill_seq.SKILL_SEQS (施法 seq), sk/extra/<sid> = SKILL_IMPACT_EXTRA;
+    ps/<模块>.<名>[/i] = 技能模块里的 seq 常量 (C# 版按名取)."""
+    import importlib
+    from core.skill_seq import SKILL_SEQS, SKILL_IMPACT_EXTRA
+    out = {}
+    for sid, dirs in SKILL_SEQS.items():
+        for d, sq in enumerate(dirs):
+            out[f'sk/{sid}/{d}'] = list(sq)
+    for sid, sq in SKILL_IMPACT_EXTRA.items():
+        out[f'sk/extra/{sid}'] = sq
+    for name in PLAYER_SKILL_MODULES:
+        mod = importlib.import_module(f'core.{name}')
+        for k, v in sorted(vars(mod).items()):
+            if isinstance(v, tuple) and _is_seq(list(v)):
+                v = list(v)
+            if _is_seq(v):
+                out[f'ps/{name}.{k}'] = v
+            elif isinstance(v, (list, tuple)) and v and all(_is_seq(list(x)) if isinstance(x, (list, tuple)) else False for x in v):
+                for i, x in enumerate(v):
+                    out[f'ps/{name}.{k}/{i}'] = list(x)
+            elif isinstance(v, dict) and v and all(_is_seq(x) for x in v.values()):
+                for kk, x in v.items():
+                    out[f'ps/{name}.{k}/{kk}'] = x
     return out
 
 
@@ -223,6 +257,70 @@ def enemy_trace_cases(unity: Path | None = None) -> list:
             out.append({'fn': 'enemy_trace', 'units': [], 'rng_after': 0, 'seed': 0,
                         'args': {'move': mid, 'type': etype, 'facing': facing, 'targets': f'{dx},{dy}', 'self': ally},
                         'result': text if full else hashlib.md5(text.encode()).hexdigest()})
+    return out
+
+
+SKILL_OWNER = [(0x00, 0x09, '孙悟空'), (0x0a, 0x13, '美娜'), (0x14, 0x18, '三藏法师'), (0x19, 0x1d, '猪八戒'),
+               (0x1e, 0x1f, '沙悟净'), (0x20, 0x24, '蒙面人'), (0x25, 0x2e, '乐神杰特'), (0x2f, 0x33, '破无'),
+               (0x34, 0x38, '捕山'), (0x39, 0x41, '紫河')]
+
+
+def skill_owner(sid: int) -> str:
+    return next(n for lo, hi, n in SKILL_OWNER if lo <= sid <= hi)
+
+
+def _skill_trace_candidates(sid: int, facing: str) -> list:
+    """skill_trace 参数候选 (相对施法者): 对友方技能先试队友在正前方 (光标放队友), 再试自身; 对敌技能敌人在正前方 1..6 格; 地雷光标放空格."""
+    from tools import skill_trace
+    from core.skill_seq import is_heal_skill
+    from core.skill_table import skill_targets_allies
+    fx, fy = skill_trace.FACING[facing]
+    ally = is_heal_skill(sid) or skill_targets_allies(sid)
+    enemies = [['--enemy-dx', str(fx * d), '--enemy-dy', str(fy * d)] for d in range(1, 7)]
+    if sid == 0x35:
+        return [['--enemy-dx', str(fx * 3), '--enemy-dy', str(fy * 3), '--cursor-dx', str(fx), '--cursor-dy', str(fy)]]
+    if ally:
+        far = ['--enemy-dx', str(fx * 3), '--enemy-dy', str(fy * 3)]
+        return ([far + ['--ally-dx', str(fx), '--ally-dy', str(fy), '--cursor-dx', str(fx), '--cursor-dy', str(fy)],
+                 far + ['--ally-dx', '0', '--ally-dy', '0', '--cursor-dx', '0', '--cursor-dy', '0']] + enemies)
+    return enemies
+
+
+def skill_trace_cases(unity: Path | None = None) -> list:
+    """玩家技能逐 tick 跟踪 (tools.skill_trace): 每技能 × 4 朝向, 施法者 = 技能所属角色, 参数取第一个能放出的候选.
+    结果只存 md5, 全文写到 <unity>/LocalOnly/tactics-traces/skill_<sid>_<朝向>.txt (git 忽略, 失败时定位差异行)."""
+    import contextlib, hashlib, io
+    from tools import skill_trace
+    local = unity / 'LocalOnly' / 'tactics-traces' if unity else None
+    if local:
+        local.mkdir(parents=True, exist_ok=True)
+    out = []
+    for sid in range(0x42):
+        name = skill_owner(sid)
+        for facing in skill_trace.FACING:
+            text = None
+            for extra in _skill_trace_candidates(sid, facing):
+                argv = ['skill_trace', f'{sid:x}', '--caster', name, '--facing', facing, '--sg', '16'] + extra
+                buf = io.StringIO()
+                old = sys.argv
+                sys.argv = argv
+                try:
+                    with contextlib.redirect_stdout(buf):
+                        skill_trace.main()
+                except AssertionError:
+                    continue
+                finally:
+                    sys.argv = old
+                text = buf.getvalue()
+                break
+            if text is None:
+                print(f'skill {sid:#x} {facing}: no candidate casts', file=sys.stderr)
+                continue
+            if local:
+                (local / f'skill_{sid}_{facing}.txt').write_text(text)
+            out.append({'fn': 'skill_trace', 'units': [], 'rng_after': 0, 'seed': 0,
+                        'args': {'skill': sid, 'caster': name, 'facing': facing, 'argv': argv[2:]},
+                        'result': hashlib.md5(text.encode()).hexdigest()})
     return out
 
 
@@ -438,6 +536,7 @@ def golden(n: int = 400, unity: Path | None = None) -> dict:
     cases.extend(engine_cases())
     cases.extend(trace_cases())
     cases.extend(enemy_trace_cases(unity))
+    cases.extend(skill_trace_cases(unity))
     return {'cases': cases}
 
 
