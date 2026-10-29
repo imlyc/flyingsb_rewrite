@@ -639,6 +639,7 @@ def golden(n: int = 400, unity: Path | None = None) -> dict:
     cases.extend(skill_trace_cases(unity))
     cases.extend(mine_trace_cases(unity))
     cases.extend(equip_cases())
+    cases.extend(locomotion_cases())
     return {'cases': cases}
 
 
@@ -791,6 +792,29 @@ def equip_cases() -> list:
                           list(ch.skills)])
         out.append({'fn': 'equip', 'units': [], 'rng_after': 0, 'seed': 0, 'args': {'name': name, 'record': rec[name]},
                     'result': steps})
+    return out
+
+
+def locomotion_cases() -> list:
+    """战斗走格/待机姿态 (core.battle.locomotion): 4 变体 × 玩家/敌 × 虚弱 × 定格 × 周期, 随机走/停序列 (每 tick 一项), 逐 tick 姿态."""
+    import random
+    from core.battle.locomotion import Locomotion, motion_tick, pose
+    r = random.Random(1029)
+    out = []
+    facings = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+    for i in range(48):
+        variant, player = i % 4, bool(i // 4 % 2)
+        weak, frozen, period = bool(i // 8 % 2), (i // 16) == 1, (6, 8, 11)[i // 16 % 3]
+        walks = [int(r.random() < 0.6) for _ in range(120)]
+        faces = [r.randrange(4) for _ in range(120)]
+        lo, poses = Locomotion(), []
+        for t in range(120):
+            motion_tick(lo, bool(walks[t]))
+            poses.append(list(pose(lo, facings[faces[t]], variant=variant, player=player, weak=weak, frozen=frozen,
+                                   period=period, global_tick=t * 7 + 3)))
+        out.append({'fn': 'locomotion', 'units': [], 'rng_after': 0, 'seed': 0,
+                    'args': {'variant': variant, 'player': int(player), 'weak': int(weak), 'frozen': int(frozen),
+                             'period': period, 'walks': walks, 'faces': faces}, 'result': poses})
     return out
 
 
