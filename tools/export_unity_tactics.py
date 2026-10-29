@@ -295,11 +295,18 @@ def skill_trace_cases(unity: Path | None = None) -> list:
     if local:
         local.mkdir(parents=True, exist_ok=True)
     out = []
-    for sid in range(0x42):
+    # (sid, 变体): '' = 默认候选; 'ally' = 队友在正前方 (召喚精靈 走回血精灵分支)
+    plan = [(sid, '') for sid in range(0x42)] + [(0x13, 'ally')]
+    for sid, variant in plan:
         name = skill_owner(sid)
         for facing in skill_trace.FACING:
             text = None
-            for extra in _skill_trace_candidates(sid, facing):
+            cands = _skill_trace_candidates(sid, facing)
+            if variant == 'ally':
+                fx, fy = skill_trace.FACING[facing]
+                cands = [['--enemy-dx', str(fx * 3), '--enemy-dy', str(fy * 3), '--ally-dx', str(fx), '--ally-dy', str(fy),
+                          '--cursor-dx', str(fx), '--cursor-dy', str(fy)]]
+            for extra in cands:
                 argv = ['skill_trace', f'{sid:x}', '--caster', name, '--facing', facing, '--sg', '16'] + extra
                 buf = io.StringIO()
                 old = sys.argv
@@ -316,10 +323,11 @@ def skill_trace_cases(unity: Path | None = None) -> list:
             if text is None:
                 print(f'skill {sid:#x} {facing}: no candidate casts', file=sys.stderr)
                 continue
+            tag = facing + (f'_{variant}' if variant else '')
             if local:
-                (local / f'skill_{sid}_{facing}.txt').write_text(text)
+                (local / f'skill_{sid}_{tag}.txt').write_text(text)
             out.append({'fn': 'skill_trace', 'units': [], 'rng_after': 0, 'seed': 0,
-                        'args': {'skill': sid, 'caster': name, 'facing': facing, 'argv': argv[2:]},
+                        'args': {'skill': sid, 'caster': name, 'facing': tag, 'argv': argv[2:]},
                         'result': hashlib.md5(text.encode()).hexdigest()})
     return out
 
