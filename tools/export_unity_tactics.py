@@ -58,6 +58,7 @@ def export_data() -> dict:
         'consumables': {str(i): [IT.get_item_name(i), *IT.item_effect(i)] for i in sorted(IT.ITEMS)
                         if IT.get_item_category(i) is IT.ItemCategory.CONSUMABLE},   # 战斗道具菜单 (scene._draw_item_menu)
         'arena_enemy_roster': [int(k[1:]) for k in ARENA_ROSTER if k.startswith('#')],   # scenes.arena.roster.ENEMY_ROSTER
+        'arena_map': export_arena_map(),
         'enemy_moves': [list(m[:7]) + [m[7], int(m[8][4:], 16) if m[8] else -1] for m in MOVES],   # name power flags mp_cost p4 template fn kind called(模板函数地址)
         'enemies': json.loads((ROOT / 'assets/enemy_table.json').read_text(encoding='utf-8'))['enemies'],
         'characters': chars['characters'],
@@ -96,6 +97,29 @@ def export_data() -> dict:
 
 
 _SEQ_OPS = {'fm', 'idle', 'fm_mode1', 'move', 'sound', 'impact', 'jump', 'end', 'exit', 'loop', 'raw'}
+
+
+def export_arena_map() -> dict | None:
+    """竞技场真实地图 (scenes.arena.battle_scene._make_terrain: core.real_map 西州格鬥場, 通行按第 1 层):
+    两层瓦片号 + 图集 .mat + 不可站格 (= RealMap.passable 为假, 战场障碍). 无地图资源 → None (Unity 用回退草地)."""
+    import os
+    os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
+    import pygame
+    if pygame.display.get_surface() is None:
+        pygame.display.init()
+        pygame.display.set_mode((1, 1))
+    from core import real_map as realm
+    if not (realm.maps_available() and realm.is_available(realm.DEFAULT_ARENA_MAP)):
+        return None
+    import copy
+    m = realm.load(realm.DEFAULT_ARENA_MAP)
+    if realm.DEFAULT_ARENA_LAYER == 1 and m._layer1:
+        m = copy.copy(m)
+        m.layer = 1
+        m.cells_active = m.cells1
+    return {'map': m.base, 'tileset': m.ts_name, 'w': m.w, 'h': m.h, 'ts_cols': m.ts_cols, 'ts_rows': m.ts_rows,
+            'grid0': m.grid, 'grid1': m.grid1 if m._layer1 else [], 'mat': m.mat or [],
+            'solid': [y * m.w + x for y in range(m.h) for x in range(m.w) if not m.passable(x, y)]}
 
 
 def _is_seq(v) -> bool:

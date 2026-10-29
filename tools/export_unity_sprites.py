@@ -285,6 +285,22 @@ def main(argv: list[str]) -> None:
         if p.stem not in own:
             p.unlink()
             p.with_name(p.name + '.meta').unlink(missing_ok=True)
+    from core import real_map as realm                               # 竞技场真实地图的图集 (TacticsData arena_map.tileset)
+    if realm.maps_available() and realm.is_available(realm.DEFAULT_ARENA_MAP):
+        ts = realm.load(realm.DEFAULT_ARENA_MAP).ts_name
+        raw = realm._load_surface(ts)
+        if raw is not None:
+            key = raw.get_colorkey()
+            surf = raw.convert_alpha()
+            surf.lock()
+            for y in range(surf.get_height()):
+                for x in range(surf.get_width()):
+                    c = surf.get_at((x, y))
+                    if key is not None and (c.r, c.g, c.b) == tuple(key)[:3]:
+                        surf.set_at((x, y), (0, 0, 0, 0))
+            surf.unlock()
+            p = gen / 'Atlases' / f'{ts}.png'
+            bind(f'map_{ts}', surf, [p] if p.exists() else [])
     for ui in ('SMENU',):                                          # 战斗 UI 图 (十字菜单图标), 直接用工程已有的
         p = gen / 'Battle/Pages' / f'{ui}.png'
         if p.exists():
