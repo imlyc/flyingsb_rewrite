@@ -48,6 +48,7 @@ def export_data() -> dict:
     items = json.loads((ROOT / 'assets/items_table.json').read_text(encoding='utf-8'))['items']
     return {
         'skills': {str(k): list(v) for k, v in SKILL_TABLE.items()},
+        'skill_names': {str(k): v for k, v in __import__('core.skills', fromlist=['SKILLS']).SKILLS.items()},
         'enemy_moves': [list(m[:7]) + [m[7], int(m[8][4:], 16) if m[8] else -1] for m in MOVES],   # name power flags mp_cost p4 template fn kind called(模板函数地址)
         'enemies': json.loads((ROOT / 'assets/enemy_table.json').read_text(encoding='utf-8'))['enemies'],
         'characters': chars['characters'],

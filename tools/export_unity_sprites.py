@@ -276,6 +276,10 @@ def main(argv: list[str]) -> None:
         if p.stem not in own:
             p.unlink()
             p.with_name(p.name + '.meta').unlink(missing_ok=True)
+    for ui in ('SMENU',):                                          # 战斗 UI 图 (十字菜单图标), 直接用工程已有的
+        p = gen / 'Battle/Pages' / f'{ui}.png'
+        if p.exists():
+            entries[f'ui_{ui}'] = guid_of(p)
     write_catalog(res / 'TacticsSpriteCatalog.asset', entries)
     (res / 'TacticsSprites.json').write_text(json.dumps(pack, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     total = sum(p.stat().st_size for p in (res / 'Sprites').glob('*.png'))
