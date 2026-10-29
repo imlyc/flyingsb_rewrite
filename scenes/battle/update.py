@@ -264,10 +264,9 @@ def _tick_flicker(battle) -> None:
 
 
 def _tick_camera(scene: "BattleScene") -> None:
-    """镜头 lerp 跟随当前单位 (用 render 值, 让镜头也跟着平滑跑)."""
+    """镜头 lerp 跟随当前单位的画面坐标 (连续值; 取整到格的话镜头每格才换一次目标, 角色在屏上每格一顿)."""
     u = scene.battle.current
-    target_x, target_y = scene._compute_camera_offset(
-        int(round(u.render_x)), int(round(u.render_y)))
+    target_x, target_y = scene._compute_camera_offset(*scene._unit_draw_pos(u))
     scene._cam_x += (target_x - scene._cam_x) * scene.CAMERA_LERP
     scene._cam_y += (target_y - scene._cam_y) * scene.CAMERA_LERP
     # 发布可见屏幕中心 (世界 px) 给满屏特效 (超亂舞) 当框中心
