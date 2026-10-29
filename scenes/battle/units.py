@@ -3,7 +3,7 @@
 全部写成自由函数, 第一参数 scene 当 namespace 用 (拿 scene.surface / scene.battle /
 scene.small / 常量等). 比 mixin 直观, 比把 200 行塞回 BattleScene 干净.
 
-底层图元 (blit_unit / blit_shadow / pick_locomotion_frame) 仍走 scenes.unit_render —
+底层图元 (blit_unit / blit_shadow) 仍走 scenes.unit_render —
 那层是场景无关的, 跟 world_map 共用.
 """
 
@@ -16,11 +16,10 @@ import pygame
 from core.sprites.atlas_classes import (
     DEFAULT_IDLE_DIRECTION_COLS,
     idle_key_from_walk_key,
-    is_flying_sprite,
 )
 from core.sprites.base import TILE_W, TILE_H, facing_to_direction
 from core.sprites.loaders import get_character_sprite, get_idle_sprite
-from scenes.unit_render import blit_shadow, blit_unit, pick_locomotion_frame
+from scenes.unit_render import blit_shadow, blit_unit
 
 if TYPE_CHECKING:
     from scenes.battle.scene import BattleScene
@@ -183,29 +182,8 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
         except FileNotFoundError:
             frame, anchor = cs.frame_for_facing(u.facing, 0), cs.feet_for_facing(u.facing)
     else:
-        # 通用 locomotion: 走路 / 待机 / (HP<40%) 虚弱, 用共享 picker
-        flying = is_flying_sprite(u.sprite_key)
-        try:
-            idle_sprite = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
-        except FileNotFoundError:
-            idle_sprite = None
-        weakened_sprite = None
-        # 虚弱姿态跟 display_hp 一起在"落定"时切换 (原版: HP 与虚弱都读真实表, 提交时一起变,
-        # 早于数字闪烁). display_weakened 基于 display_hp → 受击后滞后到落定才虚弱.
-        if u.display_weakened:
-            from core.sprites.atlas_classes import weakened_key_from_walk_key
-            from core.sprites.loaders import get_weakened_sprite
-            try:
-                weakened_sprite = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
-            except FileNotFoundError:
-                pass    # 该角色无 ps_*04 atlas, 退回普通 walk/idle
-        frame, anchor = pick_locomotion_frame(
-            cs, idle_sprite, u.facing, u.anim,
-            walk_period_ms=scene.WALK_FRAME_PERIOD_MS,
-            idle_period_ms=scene.IDLE_FRAME_PERIOD_MS,
-            flying=flying,
-            weakened_sprite=weakened_sprite,
-        )
+        # 通用 locomotion: 原版姿态函数 (core.battle.locomotion, 每 tick 在 update 里算好) → 走路图 / 待机图 / 虚弱图
+        frame, anchor = _locomotion_frame(u, cs)
     # 攻击中不要变半透明 (会让玩家误以为已结束行动)
     holding = u.cast_hold and u.entity is not None
     alpha = 140 if (u.has_acted and not u.is_attacking and not holding) else None
@@ -402,3 +380,32 @@ def draw_facing_arrow(scene: "BattleScene", u, tile_rect: pygame.Rect) -> None:
         base1 = (tip[0] - 5, tip[1] - dy * 6)
         base2 = (tip[0] + 5, tip[1] - dy * 6)
     pygame.draw.polygon(scene.surface, scene.HIGHLIGHT, [tip, base1, base2])
+
+
+def _locomotion_frame(u, cs):
+    """loco_pose (atlas, 列, 行) → (帧, 脚点). 行 -1 = 列是线性帧号 (鬼火类不分方向). 缺 atlas 时退回走路图第 0 列."""
+    from core.battle.locomotion import IDLE, WEAK
+    atlas, col, row = u.loco_pose or ("walk", 0, None)
+    feet = cs.feet_for_facing(u.facing)
+    if atlas == IDLE:
+        try:
+            idle = get_idle_sprite(idle_key_from_walk_key(u.sprite_key))
+            return idle.sheet.frame(col, row), idle.feet_for_facing(u.facing)
+        except FileNotFoundError:
+            return cs.frame_for_facing(u.facing, 0), feet
+    if atlas == WEAK:
+        from core.sprites.atlas_classes import weakened_key_from_walk_key
+        from core.sprites.loaders import get_weakened_sprite
+        try:
+            weak = get_weakened_sprite(weakened_key_from_walk_key(u.sprite_key))
+            return weak.sheet.frame(col, row), feet    # 脚点复用站立 (蹲姿自动检测会偏)
+        except FileNotFoundError:
+            return cs.frame_for_facing(u.facing, 0), feet
+    sh = cs.sheet
+    if row is None:
+        return cs.frame_for_facing(u.facing, 0), feet
+    if row < 0:
+        col, row = col % sh.cols, col // sh.cols
+    if col >= sh.cols or row >= sh.rows:
+        return cs.frame_for_facing(u.facing, 0), feet
+    return sh.frame(col, row), feet

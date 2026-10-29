@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 import pygame
 
 from core.battle.data import Phase
+from core.battle.locomotion import WALK_TICKS, motion_tick, tick_pose
+from core.attack_seq import ATTACK_TICK_MS
 from core.sprites.base import TILE_W, TILE_H
 from scenes.battle import input as input_mod
 from core.battle.float_digits import floats_animating
@@ -126,50 +128,62 @@ def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
                 scene.battle.player_end_turn()
 
 
+LOCO_TICK_MS = ATTACK_TICK_MS       # 战斗 1 tick (与引擎同)
+WALK_STEP = 1.0 / WALK_TICKS        # 每 tick 1/4 格
+
+
 def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:
-    """单位渲染坐标按速度向当前路径节点插值. 沿格逐步走, 防止两轴并行 lerp 出 45° 飞行."""
-    step = scene.UNIT_TILES_PER_SEC * dt_ms / 1000.0
+    """单位走格 = 原版运动状态机 (core.battle.locomotion): 每 LOCO_TICK_MS 一 tick, 状态 2 每 tick 走 1/4 格
+    (4 tick 一格), 到格那一 tick phase 翻转; 姿态 (走路/待机/虚弱帧) 也在 tick 里算 (exe 姿态函数每 tick 推进计数).
+    沿路径节点逐格走, 防止两轴并行插值出 45° 飞行."""
+    scene._loco_acc = getattr(scene, "_loco_acc", 0) + dt_ms
+    while scene._loco_acc >= LOCO_TICK_MS:
+        scene._loco_acc -= LOCO_TICK_MS
+        scene._loco_tick = getattr(scene, "_loco_tick", 0) + 1
+        for unit in scene.battle.all_units:
+            # settle_pending: 逻辑已死但视觉仍站立 (大金刚延迟结算) → 仍推进待机/呼吸动画, 防静止.
+            if not unit.alive and not unit.settle_pending:
+                continue
+            _loco_step(unit, scene._loco_tick)
     for unit in scene.battle.all_units:
-        # settle_pending: 逻辑已死但视觉仍站立 (大金刚延迟结算) → 仍推进待机/呼吸动画, 防静止.
         if not unit.alive and not unit.settle_pending:
             continue
-        # 当前 lerp 目标: 路径头节点 / 否则 unit 逻辑位置
-        if unit.move_path:
-            tgt_x, tgt_y = unit.move_path[0]
-        else:
-            tgt_x, tgt_y = unit.x, unit.y
-        moving = False
-        for axis_name, target in (("x", tgt_x), ("y", tgt_y)):
-            rattr = f"render_{axis_name}"
+        # 行走 / 待机时间 (施法姿等仍按 ms 计)
+        unit.anim.tick(dt_ms, moving=unit.loco.state == 2)
+
+
+def _loco_step(unit, global_tick: int) -> None:
+    # 当前目标: 路径头节点 / 否则 unit 逻辑位置
+    if unit.move_path:
+        tgt_x, tgt_y = unit.move_path[0]
+    else:
+        tgt_x, tgt_y = unit.x, unit.y
+    walking = unit.render_x != float(tgt_x) or unit.render_y != float(tgt_y)
+    if motion_tick(unit.loco, walking):
+        for rattr, target in (("render_x", tgt_x), ("render_y", tgt_y)):
             rval = getattr(unit, rattr)
             delta = target - rval
-            if abs(delta) <= step:
-                if rval != float(target):
-                    setattr(unit, rattr, float(target))
-                    moving = True       # 到格这一帧也在动: 否则每格都把走路帧时间清零, 只看得到 col 0/1
-            else:
-                setattr(unit, rattr, rval + (step if delta > 0 else -step))
-                moving = True
-        # 到达当前节点 → 弹出, 切换 facing 到下一段方向
-        if (unit.move_path
-                and abs(unit.render_x - unit.move_path[0][0]) < scene.ANIM_EPSILON
-                and abs(unit.render_y - unit.move_path[0][1]) < scene.ANIM_EPSILON):
-            arrived = unit.move_path.pop(0)
-            if unit.move_path:
-                nxt = unit.move_path[0]
-                ddx = nxt[0] - arrived[0]
-                ddy = nxt[1] - arrived[1]
-                if abs(ddx) >= abs(ddy) and ddx != 0:
-                    unit.facing = (1 if ddx > 0 else -1, 0)
-                elif ddy != 0:
-                    unit.facing = (0, 1 if ddy > 0 else -1)
-            else:
-                # 路径跑完: 还原 AI 设的攻击朝向 (否则 facing 留在最后一段移动方向)
-                if unit.post_move_facing is not None:
-                    unit.facing = unit.post_move_facing
-                    unit.post_move_facing = None
-        # 行走帧时间 / 待机帧时间互补累加 (静止 = 走帧重置, 移动 = 待机帧重置)
-        unit.anim.tick(dt_ms, moving=moving)
+            if delta:
+                setattr(unit, rattr, float(target) if abs(delta) <= WALK_STEP else rval + (WALK_STEP if delta > 0 else -WALK_STEP))
+    # 到达当前节点 → 弹出, 切换 facing 到下一段方向
+    if (unit.move_path
+            and unit.render_x == float(unit.move_path[0][0])
+            and unit.render_y == float(unit.move_path[0][1])):
+        arrived = unit.move_path.pop(0)
+        if unit.move_path:
+            nxt = unit.move_path[0]
+            ddx = nxt[0] - arrived[0]
+            ddy = nxt[1] - arrived[1]
+            if abs(ddx) >= abs(ddy) and ddx != 0:
+                unit.facing = (1 if ddx > 0 else -1, 0)
+            elif ddy != 0:
+                unit.facing = (0, 1 if ddy > 0 else -1)
+        else:
+            # 路径跑完: 还原 AI 设的攻击朝向 (否则 facing 留在最后一段移动方向)
+            if unit.post_move_facing is not None:
+                unit.facing = unit.post_move_facing
+                unit.post_move_facing = None
+    unit.loco_pose = tick_pose(unit, global_tick)
 
 
 def _ingest_damage_events(scene: "BattleScene", now: int) -> None:

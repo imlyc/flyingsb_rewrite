@@ -259,7 +259,4 @@ def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:
     # 朝向已对齐: 是否走一步
     if not scene._hold.should_walk(edge, scene.WALK_HOLD_DELAY_MS):
         return
-    if scene.battle.player_step(dx, dy) and (u.x, u.y) != (int(round(u.render_x)), int(round(u.render_y))):
-        if u.anim.anim_time_ms <= 0:
-            u.anim.anim_time_ms = 1
-        u.anim.idle_time_ms = 0
+    scene.battle.player_step(dx, dy)     # 走格动画由运动状态机接手 (update._tick_unit_positions)

@@ -11,6 +11,7 @@ from enum import Enum, auto
 
 from core.anim_engine.entity import Entity
 from core.anim_state import AnimationState
+from core.battle.locomotion import Locomotion
 from core.exe_rng import ExeRng
 
 
@@ -91,6 +92,8 @@ class BattleUnit:
     sprite_key: str | None = None    # 角色 atlas 资源名 (如 'ps_CSON100'); None=用 color 方块
     # 渲染态 (UI 写入, 战斗逻辑不动)
     anim: AnimationState = field(default_factory=AnimationState)
+    loco: Locomotion = field(default_factory=Locomotion)          # exe 运动状态/计数/左右脚 (core.battle.locomotion)
+    loco_pose: tuple | None = None   # 最近一 tick 的姿态 (atlas, 列, 行); None = 还没跑过
     move_path: list[tuple[int, int]] = field(default_factory=list)   # render 待经过的剩余路径节点 (不含起点; 含终点)
     # AI 移动结束后强制朝向 (= face_toward 设的攻击朝向). UI 走完 move_path 时还原, 防止
     # 移动 lerp 中 "切下一段方向" 把攻击 facing 覆盖成最后一段移动方向.
