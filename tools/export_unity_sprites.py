@@ -234,6 +234,7 @@ def main(argv: list[str]) -> None:
             enemies[t] = e['sprite']
     bases = sorted({k[:-2] for k in list(players.values()) + list(enemies.values())})
     ps_names = sorted(p.stem for b in bases for p in SPRITES_DIR.glob(f'{b}??.pcx'))
+    ps_names += [n for n in ('ps_CUN00', 'ps_CDE00') if (SPRITES_DIR / f'{n}.pcx').exists() and n not in ps_names]   # 召喚精靈 (core.mina_skills)
     from tools.export_unity_tactics import export_seqs
     used = {214, 215, 216, 217}
     for hx in export_seqs().values():
@@ -243,6 +244,7 @@ def main(argv: list[str]) -> None:
             if b[i] == 4:                                    # FM mode 0: 全局 fm 图集号
                 used.add(b[i + 2] | b[i + 3] << 8)
             i += max(b[i + 1], 1)
+    used |= set(ATLAS_NAME_BY_IDX)                   # 技能/远程普攻的特效实体在代码里直接设图集号 (不在 seq 里) → 全部战斗 fm 图集都接上
     slots = {i: 'fm_' + ATLAS_NAME_BY_IDX[i].upper() for i in sorted(used) if i in ATLAS_NAME_BY_IDX}
     from core.grid_atlas_table import GRID_ATLAS
     pack = {'ps': {}, 'fm': {}, 'slots': {str(k): v for k, v in slots.items()}, 'players': players,
