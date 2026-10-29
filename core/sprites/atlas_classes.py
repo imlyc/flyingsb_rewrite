@@ -46,7 +46,7 @@ TURN_TRANSITION_DIR: dict[frozenset[Direction], Direction] = {
 #   - walk_frames 用 4 (避免循环到空白 col 4)
 #   - 待机不读 06 行 0/1, 改成在 walk atlas 上以 idle 节奏循环 (扇翅膀)
 #   - reaction 仍读 06 行 2/3/4 (那几行有内容)
-FLYING_WALK_KEYS: set[str] = {"ps_CCROW00"}
+FLYING_WALK_KEYS: set[str] = {"ps_CCROW00", "ps_CGAGO00", "ps_CHAR00"}   # 乌鸦/達高/河皮: 06 行 0/1 都空
 
 
 def is_flying_sprite(walk_key: str) -> bool:
