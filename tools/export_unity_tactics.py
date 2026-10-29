@@ -159,6 +159,9 @@ def skill_seq_tables() -> dict:
                 v = list(v)
             if _is_seq(v):
                 out[f'ps/{name}.{k}'] = v
+            elif isinstance(v, tuple) and v and all(isinstance(x, bytes) for x in v):     # 原始 exe 字节码 (fenshen_seqs)
+                for i, x in enumerate(v):
+                    out[f'ps/{name}.{k}/{i}'] = x
             elif isinstance(v, (list, tuple)) and v and all(_is_seq(list(x)) if isinstance(x, (list, tuple)) else False for x in v):
                 for i, x in enumerate(v):
                     out[f'ps/{name}.{k}/{i}'] = list(x)
@@ -171,13 +174,15 @@ def skill_seq_tables() -> dict:
 def export_seqs() -> dict:
     """动画 seq 预编码成字节码 (hex): na/<表>/<方向> 普攻, em/<表>/<方向> 敌招 DOIT, sp/... 敌招演出模块常量."""
     from core.anim_engine.bytecode import tuple_to_bytecode
-    return {k: tuple_to_bytecode(sq).hex() for k, sq in _all_seq_tuples().items()}
+    return {k: (sq.hex() if isinstance(sq, bytes) else tuple_to_bytecode(sq).hex()) for k, sq in _all_seq_tuples().items()}
 
 
 def export_seq_meta() -> dict:
     """每段 seq 的 IMPACT 数 (tuple 里 'impact' 或 jump -100) 与首个帧 op 前的 move tick 和 (exe 仍显示待机姿)."""
     out = {}
     for key, sq in _all_seq_tuples().items():
+        if isinstance(sq, bytes):
+            continue
         impacts = sum(1 for t in sq if t[0] == 'impact' or (t[0] == 'jump' and t[1] == -100))
         lead = 0
         for t in sq:
