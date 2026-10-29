@@ -45,7 +45,7 @@ UNIT_FIELDS = ('name', 'level', 'max_hp', 'hp', 'max_mp', 'mp', 'sg', 'attack', 
 # ---------------- 数据表 ----------------
 def export_data() -> dict:
     from core import items as IT
-    from scenes.arena.roster import ENEMY_ROSTER as ARENA_ROSTER
+    from scenes.arena.roster import ENEMY_ROSTER as ARENA_ROSTER, PLAYER_ROSTER as ARENA_PLAYERS
     chars = json.loads((ROOT / 'assets/characters_table.json').read_text(encoding='utf-8'))
     items = json.loads((ROOT / 'assets/items_table.json').read_text(encoding='utf-8'))['items']
     return {
@@ -58,6 +58,7 @@ def export_data() -> dict:
         'consumables': {str(i): [IT.get_item_name(i), *IT.item_effect(i)] for i in sorted(IT.ITEMS)
                         if IT.get_item_category(i) is IT.ItemCategory.CONSUMABLE},   # 战斗道具菜单 (scene._draw_item_menu)
         'arena_enemy_roster': [int(k[1:]) for k in ARENA_ROSTER if k.startswith('#')],   # scenes.arena.roster.ENEMY_ROSTER
+        'arena_player_roster': list(ARENA_PLAYERS),   # scenes.arena.roster.PLAYER_ROSTER
         'arena_map': export_arena_map(),
         'enemy_moves': [list(m[:7]) + [m[7], int(m[8][4:], 16) if m[8] else -1] for m in MOVES],   # name power flags mp_cost p4 template fn kind called(模板函数地址)
         'enemies': json.loads((ROOT / 'assets/enemy_table.json').read_text(encoding='utf-8'))['enemies'],
