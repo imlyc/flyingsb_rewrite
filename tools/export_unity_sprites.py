@@ -244,7 +244,9 @@ def main(argv: list[str]) -> None:
                 used.add(b[i + 2] | b[i + 3] << 8)
             i += max(b[i + 1], 1)
     slots = {i: 'fm_' + ATLAS_NAME_BY_IDX[i].upper() for i in sorted(used) if i in ATLAS_NAME_BY_IDX}
+    from core.grid_atlas_table import GRID_ATLAS
     pack = {'ps': {}, 'fm': {}, 'slots': {str(k): v for k, v in slots.items()}, 'players': players,
+            'grid': {str(k): v[0] for k, v in sorted(GRID_ATLAS.items()) if v[0] in ps_names},   # fm_mode1 绝对下标 → ps_ 资源名 (grid_atlas_key)
             'enemies': {str(k): v for k, v in enemies.items()}}
     entries: dict[str, str] = {}
     own: list[str] = []
@@ -272,6 +274,11 @@ def main(argv: list[str]) -> None:
         if surf:
             pack['fm'][n] = [list(f) for f in FM_FRAMES[key]]
             bind(n, surf, pages.get(idx, []))
+    sh = pygame.image.load(str(ROOT / 'assets/ui/SHADOW.png')).convert()      # 单位/分身落地影子 (core.sprites.base.load_shadow), 工程里没有原图
+    sh.set_colorkey((0, 163, 0))
+    sh = sh.convert_alpha()
+    entries['ui_SHADOW'] = own_png(sh, res / 'Sprites' / 'ui_SHADOW.png')
+    own.append('ui_SHADOW')
     for p in (res / 'Sprites').glob('*.png'):                       # 不再需要的自带 PNG
         if p.stem not in own:
             p.unlink()
