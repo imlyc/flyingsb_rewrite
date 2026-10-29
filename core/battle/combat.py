@@ -325,11 +325,16 @@ def begin_attack(battle: "TacticsBattle", attacker: BattleUnit, defender: Battle
 
 
 def _enemy_spell(attacker: BattleUnit):
-    """敌人本次出招若有专门演出 (core.enemy_spells) → 演出类, 否则 None."""
-    if attacker.is_player or getattr(attacker, 'is_countering', False):
+    """敌人本次出招若有专门演出 (core.enemy_spells) → 演出类, 否则 None.
+    反击 (exe 用第 0 招的处理函数): DOIT 招走普通 DOIT seq; 非 DOIT 招 (玉皇大帝 37 / 暴走族甲 214) 也走演出,
+    否则会落到没有 END 信号的 ATK_UNKNOWN, 回合卡住."""
+    if attacker.is_player:
         return None
     from core.enemy_spells import spell_class
-    return spell_class(getattr(attacker, 'pending_enemy_move', None))
+    mid = getattr(attacker, 'pending_enemy_move', None)
+    if getattr(attacker, 'is_countering', False) and _enemy_doit(attacker) is not None:
+        return None
+    return spell_class(mid)
 
 
 def _enemy_doit(attacker: BattleUnit) -> int | None:
