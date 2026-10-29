@@ -134,6 +134,22 @@ def _all_seq_tuples() -> dict:
                 out[f'{pre}/{k}/{d}'] = sq
     out.update(spell_seq_tables())
     out.update(skill_seq_tables())
+    out.update(ranged_seq_tables())
+    return out
+
+
+def ranged_seq_tables() -> dict:
+    """远程普攻 (core.ranged_attack): ra/<表>/<方向> = 信号重映射后的施法 / 重挂 seq (-100/-150/-110/-105 → RA_*),
+    na1/<地址> = normal_attack_data.SEQS 单条 seq (火爆 / 冒烟 / 火球)."""
+    from core import ranged_attack as RA
+    from core.normal_attack_data import SEQ_TABLES as NA_SEQ, SEQS as NA_SEQS1
+    tables = set(RA.CAST_TABLE.values()) | set(RA.RECAST_TABLE.values()) | {a for k, a in RA.KINDS.values() if k == 'pig_hitscan'}
+    out = {}
+    for t in sorted(tables):
+        for d, sq in enumerate(NA_SEQ[t]):
+            out[f'ra/{t}/{d}'] = RA._remap(sq)
+    for addr, sq in NA_SEQS1.items():
+        out[f'na1/{addr}'] = sq
     return out
 
 
@@ -202,22 +218,33 @@ def trace_cases() -> list:
     from tools import skill_trace
     names = {g: n for n, g in NA.CHAR_GROUP.items()}
     out = []
+    from core import ranged_attack as RA
     for idx, e in enumerate(ATTACK_ENTRIES):
-        if e[4] != 'doit' or e[5] is None:
+        ranged = RA.handles(idx)
+        if not ranged and (e[4] != 'doit' or e[5] is None):
             continue
         name = names.get(e[0], '孙悟空') if idx < 88 or idx > 90 else '紫河'
-        for facing, (dx, dy) in skill_trace.FACING.items():
-            argv = ['skill_trace', '0', '--attack', str(idx), '--caster', name, '--facing', facing,
-                    '--enemy-dx', str(dx), '--enemy-dy', str(dy)]
-            buf = io.StringIO()
-            old = sys.argv
-            sys.argv = argv
-            try:
-                with contextlib.redirect_stdout(buf):
-                    skill_trace.main()
-            finally:
-                sys.argv = old
-            text = buf.getvalue()
+        for facing, (fx, fy) in skill_trace.FACING.items():
+            text = None
+            for dist in (range(1, 7) if ranged else (1,)):        # 远程: 敌人放在第一个能打到的距离
+                dx, dy = fx * dist, fy * dist
+                argv = ['skill_trace', '0', '--attack', str(idx), '--caster', name, '--facing', facing,
+                        '--enemy-dx', str(dx), '--enemy-dy', str(dy)]
+                buf = io.StringIO()
+                old = sys.argv
+                sys.argv = argv
+                try:
+                    with contextlib.redirect_stdout(buf):
+                        skill_trace.main()
+                except AssertionError:
+                    continue
+                finally:
+                    sys.argv = old
+                text = buf.getvalue()
+                break
+            if text is None:
+                print(f'attack {idx} {facing}: no distance hits', file=sys.stderr)
+                continue
             out.append({'fn': 'trace', 'units': [], 'rng_after': 0, 'seed': 0,
                         'args': {'caster': name, 'attack': idx, 'facing': facing, 'dx': dx, 'dy': dy},
                         'result': text if facing == 'down' else hashlib.md5(text.encode()).hexdigest()})
