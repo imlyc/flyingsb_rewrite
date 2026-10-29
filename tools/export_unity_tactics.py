@@ -85,36 +85,63 @@ def export_data() -> dict:
     }
 
 
-def export_seqs() -> dict:
-    """动画 seq 预编码成字节码 (hex): na/<表>/<方向> 普攻, em/<表>/<方向> 敌招 DOIT."""
-    from core.anim_engine.bytecode import tuple_to_bytecode
+_SEQ_OPS = {'fm', 'idle', 'fm_mode1', 'move', 'sound', 'impact', 'jump', 'end', 'exit', 'loop', 'raw'}
+
+
+def _is_seq(v) -> bool:
+    return isinstance(v, list) and bool(v) and all(isinstance(t, tuple) and t and isinstance(t[0], str) and t[0] in _SEQ_OPS
+                                                   for t in v)
+
+
+def spell_seq_tables() -> dict:
+    """core/enemy_spells 各模块的 seq 常量 (演出 C# 版按名取, 免手抄): sp/<模块>.<名> 单段, sp/<模块>.<名>/<i> 按朝向等下标."""
+    import importlib, pkgutil
+    import core.enemy_spells as P
+    out = {}
+    for info in sorted(pkgutil.iter_modules(P.__path__), key=lambda i: i.name):
+        mod = importlib.import_module(f'core.enemy_spells.{info.name}')
+        for k, v in sorted(vars(mod).items()):
+            if k.startswith('_') and not k.startswith('_HOP'):
+                continue
+            if _is_seq(v):
+                out[f'sp/{info.name}.{k}'] = v
+            elif isinstance(v, (list, tuple)) and v and all(_is_seq(x) for x in v):
+                for i, x in enumerate(v):
+                    out[f'sp/{info.name}.{k}/{i}'] = x
+    return out
+
+
+def _all_seq_tuples() -> dict:
     from core.enemy_move_data import SEQ_TABLES as EM_SEQ
     from core.normal_attack_data import SEQ_TABLES as NA_SEQ
     out = {}
     for pre, tables in (('na', NA_SEQ), ('em', EM_SEQ)):
         for k, dirs in tables.items():
             for d, sq in enumerate(dirs):
-                out[f'{pre}/{k}/{d}'] = tuple_to_bytecode(sq).hex()
+                out[f'{pre}/{k}/{d}'] = sq
+    out.update(spell_seq_tables())
     return out
+
+
+def export_seqs() -> dict:
+    """动画 seq 预编码成字节码 (hex): na/<表>/<方向> 普攻, em/<表>/<方向> 敌招 DOIT, sp/... 敌招演出模块常量."""
+    from core.anim_engine.bytecode import tuple_to_bytecode
+    return {k: tuple_to_bytecode(sq).hex() for k, sq in _all_seq_tuples().items()}
 
 
 def export_seq_meta() -> dict:
     """每段 seq 的 IMPACT 数 (tuple 里 'impact' 或 jump -100) 与首个帧 op 前的 move tick 和 (exe 仍显示待机姿)."""
-    from core.enemy_move_data import SEQ_TABLES as EM_SEQ
-    from core.normal_attack_data import SEQ_TABLES as NA_SEQ
     out = {}
-    for pre, tables in (('na', NA_SEQ), ('em', EM_SEQ)):
-        for k, dirs in tables.items():
-            for d, sq in enumerate(dirs):
-                impacts = sum(1 for t in sq if t[0] == 'impact' or (t[0] == 'jump' and t[1] == -100))
-                lead = 0
-                for t in sq:
-                    if t[0] in ('fm', 'idle', 'fm_mode1'):
-                        break
-                    if t[0] == 'move':
-                        lead += t[-1]
-                hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in sq)
-                out[f'{pre}/{k}/{d}'] = [max(1, impacts), lead, int(hold)]
+    for key, sq in _all_seq_tuples().items():
+        impacts = sum(1 for t in sq if t[0] == 'impact' or (t[0] == 'jump' and t[1] == -100))
+        lead = 0
+        for t in sq:
+            if t[0] in ('fm', 'idle', 'fm_mode1'):
+                break
+            if t[0] == 'move':
+                lead += t[-1]
+        hold = any(t[0] in ('fm', 'fm_mode1', 'idle') for t in sq)
+        out[key] = [max(1, impacts), lead, int(hold)]
     return out
 
 
