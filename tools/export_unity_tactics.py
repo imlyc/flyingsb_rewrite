@@ -72,7 +72,18 @@ def export_data() -> dict:
         'record_names': CD.RECORD_NAME,
         'name_to_record': CD.NAME_TO_RECORD,
         'items': {k: {'val': int(v.get('val', 0) or 0), 'slot': int(v.get('slot', 0) or 0), 'type': int(v.get('type', 0) or 0),
-                      'stats': {s: int(n) for s, n in (v.get('stats') or {}).items() if n}} for k, v in items.items()},
+                      'stats': {s: int(n) for s, n in (v.get('stats') or {}).items() if n},
+                      # 隊伍情報 / 装备规则 (core.items.get_item_name / item_desc, core.equipment.item_kind / item_class)
+                      'name': __import__('core.items', fromlist=['x']).get_item_name(int(k)), 'desc': str(v.get('desc', '') or ''),
+                      'kind': int(v.get('kind', 0) or 0), 'cls': __import__('core.equipment', fromlist=['x']).item_class(int(k))}
+                  for k, v in items.items()},
+        'field_use': {'hp': {str(i): n for i, n in __import__('core.items', fromlist=['x']).FIELD_HP.items()},
+                      'mp': {str(i): n for i, n in __import__('core.items', fromlist=['x']).FIELD_MP.items()},
+                      'both': list(__import__('core.items', fromlist=['x']).FIELD_BOTH),
+                      'party': __import__('core.items', fromlist=['x']).FIELD_PARTY},
+        # 隊伍情報 转盘立绘: 角色记录号 → (ps 走路图, 锚 x, y) = GRID_ATLAS[8 * (记录号 + 1)]
+        'stand_sheets': {str(r): [g[0], g[3], g[4]] for r in __import__('core.character', fromlist=['x']).CHARACTER_NAMES
+                         if (g := __import__('core.grid_atlas_table', fromlist=['x']).GRID_ATLAS.get(8 * (r + 1)))},
         'attack_entries': [[e[0], e[1], e[2], e[4]] for e in ATTACK_ENTRIES],   # group flags template kind
         'weapon_attack': {str(k): list(v) for k, v in WEAPON_ATTACK.items()},
         'char_group': NA.CHAR_GROUP,
@@ -627,6 +638,7 @@ def golden(n: int = 400, unity: Path | None = None) -> dict:
     cases.extend(enemy_trace_cases(unity))
     cases.extend(skill_trace_cases(unity))
     cases.extend(mine_trace_cases(unity))
+    cases.extend(equip_cases())
     return {'cases': cases}
 
 
@@ -755,6 +767,30 @@ def setup_case(g: Gen) -> list:
     t = g.r.choice(g.enemy_types)
     out.append({'fn': 'setup_enemy', 'units': [], 'args': {'type': t}, 'result': snap(make_enemy_by_type(t)),
                 'rng_after': 0, 'seed': 0})
+    return out
+
+
+def equip_cases() -> list:
+    """装备规则 (core.equipment): 竞技场 40 级角色 (沙盒背包) 各槽候选 + 前 6 项预览, 再按槽依次换上首个可选物品后的属性与技能."""
+    from core import equipment as EQ
+    from core.character import CHARACTER_NAMES
+    from scenes.arena.roster import PLAYER_ROSTER, build_player_character
+    rec = {v: k for k, v in CHARACTER_NAMES.items()}
+    out = []
+    for name in PLAYER_ROSTER:
+        ch = build_player_character(name, 40)
+        inv = EQ.SandboxInventory()
+        steps = []
+        for slot in range(5):
+            cands = EQ.candidates(ch, rec[name], slot, inv)
+            prev = [EQ.preview_stats(ch, slot, None if it == EQ.UNEQUIP else it) for it, _ in cands[:6]]
+            pick = next((it for it, en in cands if en and it != EQ.UNEQUIP), None)
+            if pick is not None:
+                EQ.equip(ch, slot, pick, inv, name)
+            steps.append([[[it, int(en)] for it, en in cands], prev, -1 if pick is None else pick, EQ.current_stats(ch),
+                          list(ch.skills)])
+        out.append({'fn': 'equip', 'units': [], 'rng_after': 0, 'seed': 0, 'args': {'name': name, 'record': rec[name]},
+                    'result': steps})
     return out
 
 

@@ -301,7 +301,7 @@ def main(argv: list[str]) -> None:
             surf.unlock()
             p = gen / 'Atlases' / f'{ts}.png'
             bind(f'map_{ts}', surf, [p] if p.exists() else [])
-    for ui in ('SMENU',):                                          # 战斗 UI 图 (十字菜单图标), 直接用工程已有的
+    for ui in ('SMENU', 'SITEM'):                                          # 战斗 UI 图 (十字菜单图标), 直接用工程已有的
         p = gen / 'Battle/Pages' / f'{ui}.png'
         if p.exists():
             entries[f'ui_{ui}'] = guid_of(p)
