@@ -146,6 +146,7 @@ def _tick_unit_positions(scene: "BattleScene", dt_ms: int) -> None:
             if abs(delta) <= step:
                 if rval != float(target):
                     setattr(unit, rattr, float(target))
+                    moving = True       # 到格这一帧也在动: 否则每格都把走路帧时间清零, 只看得到 col 0/1
             else:
                 setattr(unit, rattr, rval + (step if delta > 0 else -step))
                 moving = True
