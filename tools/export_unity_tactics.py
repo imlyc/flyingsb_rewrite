@@ -364,6 +364,30 @@ def skill_trace_cases(unity: Path | None = None) -> list:
     return out
 
 
+def mine_trace_cases(unity: Path | None = None) -> list:
+    """捕山埋雷 + 敌人踩雷 (tools.mine_trace) × 4 朝向: md5, 全文写 LocalOnly/tactics-traces/mine_<朝向>.txt."""
+    import contextlib, hashlib, io
+    from tools import mine_trace, skill_trace
+    local = unity / 'LocalOnly' / 'tactics-traces' if unity else None
+    out = []
+    for facing in skill_trace.FACING:
+        buf = io.StringIO()
+        old = sys.argv
+        sys.argv = ['mine_trace', '--facing', facing]
+        try:
+            with contextlib.redirect_stdout(buf):
+                mine_trace.main()
+        finally:
+            sys.argv = old
+        text = buf.getvalue()
+        if local:
+            local.mkdir(parents=True, exist_ok=True)
+            (local / f'mine_{facing}.txt').write_text(text)
+        out.append({'fn': 'mine_trace', 'units': [], 'rng_after': 0, 'seed': 0, 'args': {'facing': facing},
+                    'result': hashlib.md5(text.encode()).hexdigest()})
+    return out
+
+
 def engine_cases() -> list:
     """引擎对照: 每段 seq 单独挂在一个实体上逐 tick 推进, 记录实体状态 + 信号/音效/位移事件."""
     from core.anim_engine.engine import Engine
@@ -577,6 +601,7 @@ def golden(n: int = 400, unity: Path | None = None) -> dict:
     cases.extend(trace_cases())
     cases.extend(enemy_trace_cases(unity))
     cases.extend(skill_trace_cases(unity))
+    cases.extend(mine_trace_cases(unity))
     return {'cases': cases}
 
 
