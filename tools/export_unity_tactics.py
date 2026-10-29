@@ -147,6 +147,39 @@ def trace_cases() -> list:
     return out
 
 
+def enemy_trace_cases(kinds=('doit', 'doit+hook')) -> list:
+    """敌招逐 tick 跟踪 (tools.enemy_trace): 指定演出类别的每招 × 4 朝向, 我方目标站施法者正前方一格;
+    施法敌人 = 第一个招式表含该招的敌种 (没有则 0). 朝下的存全文, 其余只存 md5."""
+    import contextlib, hashlib, io
+    from tools import enemy_trace, skill_trace
+    from core.enemy_move_data import MOVES
+    owner = {}
+    for t in range(CD.enemy_count()):
+        e = CD.enemy(t)
+        for mv in (e or {}).get('moves', []) or []:
+            owner.setdefault(mv, t)
+    out = []
+    for mid, m in enumerate(MOVES):
+        if m[7] not in kinds:
+            continue
+        etype = owner.get(mid, 0)
+        for facing, (dx, dy) in skill_trace.FACING.items():
+            argv = ['enemy_trace', str(mid), '--type', str(etype), '--facing', facing, '--targets', f'{dx},{dy}']
+            buf = io.StringIO()
+            old = sys.argv
+            sys.argv = argv
+            try:
+                with contextlib.redirect_stdout(buf):
+                    enemy_trace.main()
+            finally:
+                sys.argv = old
+            text = buf.getvalue()
+            out.append({'fn': 'enemy_trace', 'units': [], 'rng_after': 0, 'seed': 0,
+                        'args': {'move': mid, 'type': etype, 'facing': facing, 'targets': f'{dx},{dy}'},
+                        'result': text if facing == 'down' else hashlib.md5(text.encode()).hexdigest()})
+    return out
+
+
 def engine_cases() -> list:
     """引擎对照: 每段 seq 单独挂在一个实体上逐 tick 推进, 记录实体状态 + 信号/音效/位移事件."""
     from core.anim_engine.engine import Engine
@@ -358,6 +391,7 @@ def golden(n: int = 400) -> dict:
             cases.extend(setup_case(g))
     cases.extend(engine_cases())
     cases.extend(trace_cases())
+    cases.extend(enemy_trace_cases())
     return {'cases': cases}
 
 
