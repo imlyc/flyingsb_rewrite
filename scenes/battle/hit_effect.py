@@ -25,6 +25,8 @@ def draw_hit_effects(scene: "BattleScene", cam_x: int, cam_y: int, behind: bool 
     支持 mid-seq atlas 切换 (= 技能 extra fx 中段从一个 atlas 换到另一个), 每帧从
     entity.atlas_slot 反查 atlas_key, 不缓存.
     投射物 (think_fn 物理驱动) 在飞行期没 seq running, 但 visible flag (0x40) 为 1, 也要画.
+    只画带 visible (0x40) 的: exe 战斗绘制循环 FUN_004c8184 `if (flags & 0x40) FUN_004b3663(i)` —
+    飘字落定后 / 碎冰后半程每 tick XOR 0x40 = 闪烁, 清 0x40 = 隐去 (冰柱/冰龙本体).
 
     绘制顺序: 按 user_data['draw_order'] 升序 (默认 0), 同序保持 spawn 顺序. 神兽本体
     (draw_order 高) 最后画 = 在冰锥等粒子之上 (e.g. 青龙盖在冰锥上).
@@ -36,6 +38,7 @@ def draw_hit_effects(scene: "BattleScene", cam_x: int, cam_y: int, behind: bool 
     ents = [e for e in scene.battle.engine.entities
             if e.user_data.get('kind') == 'hit_effect'
             and (e.is_playing() or e.user_data.get('projectile') or e.user_data.get('float'))
+            and e.flags & 0x40
             and bool(e.user_data.get('behind_units')) == behind]
     ents.sort(key=lambda e: e.user_data.get('draw_order', 0))
     for ent in ents:
