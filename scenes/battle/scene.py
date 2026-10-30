@@ -312,8 +312,12 @@ class BattleScene(Scene):
                 for (px, py) in self.battle.attack_range(u):
                     self.surface.blit(self._attack_range_tint,
                                       self._tile_rect(px, py, cam_x, cam_y))
-                cursor = (pending.x, pending.y)
-                for (sx, sy) in self.battle.damage_range(cursor, u):
+                # 招式的光标/伤害范围以 AI 出招时算出的为准 (群体招罩多格; 以前一律按普攻在目标脚下画单格)
+                cursor = self.battle._pending_enemy_cursor or (pending.x, pending.y)
+                strike = self.battle._pending_damage_range
+                if strike is None:
+                    strike = {cursor} if self.battle._pending_enemy_move is not None else self.battle.damage_range(cursor, u)
+                for (sx, sy) in strike:
                     self.surface.blit(self._damage_tint, self._tile_rect(sx, sy, cam_x, cam_y))
                 self.surface.blit(self._focus_tint,
                                   self._tile_rect(cursor[0], cursor[1], cam_x, cam_y))
