@@ -281,10 +281,6 @@ def main(argv: list[str]) -> None:
     sh = sh.convert_alpha()
     entries['ui_SHADOW'] = own_png(sh, res / 'Sprites' / 'ui_SHADOW.png')
     own.append('ui_SHADOW')
-    for p in (res / 'Sprites').glob('*.png'):                       # 不再需要的自带 PNG
-        if p.stem not in own:
-            p.unlink()
-            p.with_name(p.name + '.meta').unlink(missing_ok=True)
     from core import real_map as realm                               # 竞技场真实地图的图集 (TacticsData arena_map.tileset)
     if realm.maps_available() and realm.is_available(realm.DEFAULT_ARENA_MAP):
         ts = realm.load(realm.DEFAULT_ARENA_MAP).ts_name
@@ -305,6 +301,10 @@ def main(argv: list[str]) -> None:
         p = gen / 'Battle/Pages' / f'{ui}.png'
         if p.exists():
             entries[f'ui_{ui}'] = guid_of(p)
+    for p in (res / 'Sprites').glob('*.png'):                       # 不再需要的自带 PNG (全部登记完再清, 否则后登记的擂台图集会被删掉重建、换 GUID)
+        if p.stem not in own:
+            p.unlink()
+            p.with_name(p.name + '.meta').unlink(missing_ok=True)
     write_catalog(res / 'TacticsSpriteCatalog.asset', entries)
     (res / 'TacticsSprites.json').write_text(json.dumps(pack, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     total = sum(p.stat().st_size for p in (res / 'Sprites').glob('*.png'))

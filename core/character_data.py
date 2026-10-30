@@ -299,7 +299,8 @@ def enemy(etype: int) -> dict | None:
 
 
 def enemy_count() -> int:
-    return len(_enemies())
+    """敌人表槽位数 = 最大编号 + 1 (编号有空档: 15/155/192..197; 按条目数会漏掉 222..229)."""
+    return max((int(k) for k in _enemies()), default=-1) + 1
 
 
 # ---------------- 敌方招式 ----------------
