@@ -457,7 +457,8 @@ def _place_mine(battle, tile: tuple[int, int]) -> None:
     e.flags |= 0x40
     e.x, e.y, e.z = x, y, 0
     e.state_code = 20                      # 常驻但不阻塞回合推进 (PROJ_STATE_DONE)
-    e.user_data.update(kind='hit_effect', projectile=True, mine=True, draw_order=-10)
+    e.user_data.update(kind='hit_effect', projectile=True, mine=True, draw_order=-10,
+                       behind_units=True)   # 铺在地上: 画在单位 (和十字菜单/技能列表) 之前
     battle.mines[tile] = e
     _sfx(battle, SFX_MINE_SET)
 
