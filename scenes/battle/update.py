@@ -34,7 +34,8 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
     input_mod.poll_player_hold(scene, dt_ms)
     _ingest_damage_events(scene, now)
     _tick_reactions(scene, dt_ms)            # 受击反应结束 → commit HP (原版 case0xb 在反应后提交)
-    _tick_damage_signals(scene, now)         # 飘字闪烁信号 → 触发死亡动画 (原版数字闪烁驱动)
+    _tick_damage_signals(scene, now)         # 飘字闪烁信号 → 放行存活单位的虚弱视觉
+    _tick_death_gate(scene, dt_ms)           # 全场飘字落定 + 暗化恢复后 2 tick → 致死单位起倒
     _tick_death_animations(scene, now, dt_ms)
     _tick_anim_engine(scene, dt_ms)
 
@@ -205,13 +206,34 @@ def _tick_reactions(scene: "BattleScene", dt_ms: int) -> None:
 
 
 def _on_damage_flash(scene: "BattleScene", unit) -> None:
-    """伤害数字"闪烁"信号 handler: 放行死亡/虚弱视觉, 致死单位启动死亡动画
-    (原版: 死亡动画在数字闪烁时触发). 大金刚 settle_batch 由批量处理, 跳过."""
-    if unit.settle_batch:
+    """伤害数字"闪烁"信号 handler: 放行存活单位的虚弱视觉. 致死单位不在这里起倒 (见 _tick_death_gate).
+    大金刚 settle_batch 由批量处理, 跳过."""
+    if unit.settle_batch or not unit.alive:
         return
     unit.release_death_visual()
-    if not unit.alive and unit.reaction_seq is None and unit.death_anim_time_ms < 0:
-        unit.death_anim_time_ms = 0
+
+
+DEATH_RELEASE_TICKS = 2
+
+
+def _tick_death_gate(scene: "BattleScene", dt_ms: int) -> None:
+    """致死单位起倒 (原版实录 2026-10-30, 真·魔塔 1 楼 7 敌): 不是数字闪烁时, 而是全场飘字都落定
+    (float_pending == 0) 且技能暗化已恢复 (dim_level == 0) 之后 2 tick, 同批死者同时起倒.
+    普攻: 末位落定 +2 (以前等首位闪烁, 晚 ~30 tick); 冰龍升天: 施法者收手后调色板恢复完 +2."""
+    from core.attack_seq import ATTACK_TICK_MS
+    b = scene.battle
+    waiting = [u for u in b.all_units if not u.alive and u.death_anim_time_ms < 0 and u.settle_pending
+               and not u.settle_batch and u.reaction_seq is None]
+    if not waiting or b.float_pending > 0 or b.dim_level > 0:
+        scene._death_gate_ms = 0
+        return
+    scene._death_gate_ms = getattr(scene, '_death_gate_ms', 0) + dt_ms
+    if scene._death_gate_ms < DEATH_RELEASE_TICKS * ATTACK_TICK_MS:
+        return
+    scene._death_gate_ms = 0
+    for u in waiting:
+        u.release_death_visual()
+        u.death_anim_time_ms = 0
 
 
 def _tick_damage_signals(scene: "BattleScene", now: int) -> None:

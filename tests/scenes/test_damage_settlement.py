@@ -1,17 +1,20 @@
 """伤害结算 (原版式: signal 触发 + working/committed 提交):
   - 受击反应**结束** → commit HP (工作缓冲→显示; 存活同步真值, 死亡保留旧值). 早于闪烁.
-  - 伤害数字进 flash → 自驱信号 → 触发死亡动画 + 放行视觉.
+  - 伤害数字进 flash → 自驱信号 → 放行存活单位的虚弱视觉.
+  - 致死单位: 全场飘字落定 + 暗化恢复后 2 tick 起倒 (原版实录 2026-10-30), 不等闪烁.
   - settle_batch (大金刚) 跳过, 等批量结算.
 """
 
 from core.battle.data import BattleUnit
 from core.sprites.base import TILE_W, TILE_H
-from scenes.battle.update import _tick_reactions, _tick_damage_signals
+from core.attack_seq import ATTACK_TICK_MS
+from scenes.battle.update import _tick_reactions, _tick_damage_signals, _tick_death_gate
 
 
 class _Scene:
     def __init__(self, units, events):
-        self.battle = type("B", (), {"all_units": units, "float_events": list(events)})()
+        self.battle = type("B", (), {"all_units": units, "float_events": list(events),
+                                     "float_pending": 0, "dim_level": 0.0})()
 
 
 def _enemy(x, y, hp=20):
@@ -46,16 +49,32 @@ def test_dying_enemy_keeps_old_hp_after_commit():
     assert d.display_hp == 10                     # 保留旧值
 
 
-def test_flash_signal_triggers_death():
-    """致死敌人: 数字闪烁信号 → 放行视觉 + 启动死亡动画."""
+def test_flash_signal_does_not_start_death():
+    """致死敌人: 闪烁信号不起倒 (原版死亡早于闪烁)."""
     d = _enemy(1, 1, hp=10); _hurt(d, 10, 0)
     sc = _Scene([d], [])
-    _tick_reactions(sc, 40)                       # 反应结束 (death 仍未启动, 等闪烁)
-    assert d.death_anim_time_ms < 0 and d.settle_pending is True
+    _tick_reactions(sc, 40)
     sc.battle.float_events = [('flash', d)]
-    _tick_damage_signals(sc, 0)                   # 闪烁信号
-    assert d.settle_pending is False
-    assert d.death_anim_time_ms == 0              # 死亡动画启动
+    _tick_damage_signals(sc, 0)
+    assert d.settle_pending is True and d.death_anim_time_ms < 0
+
+
+def test_death_gate_waits_for_floats_and_dim_then_two_ticks():
+    """致死敌人: 飘字未落定 / 暗化中不起倒; 都结束后满 2 tick 放行视觉 + 启动死亡动画."""
+    d = _enemy(1, 1, hp=10); _hurt(d, 10, 0)
+    sc = _Scene([d], [])
+    _tick_reactions(sc, 40)
+    sc.battle.float_pending = 1
+    _tick_death_gate(sc, 10 * ATTACK_TICK_MS)
+    assert d.death_anim_time_ms < 0
+    sc.battle.float_pending = 0; sc.battle.dim_level = 0.5
+    _tick_death_gate(sc, 10 * ATTACK_TICK_MS)
+    assert d.death_anim_time_ms < 0
+    sc.battle.dim_level = 0.0
+    _tick_death_gate(sc, ATTACK_TICK_MS)
+    assert d.death_anim_time_ms < 0               # 1 tick 还不够
+    _tick_death_gate(sc, ATTACK_TICK_MS)
+    assert d.settle_pending is False and d.death_anim_time_ms == 0
 
 
 def test_batch_unit_skips_reaction_commit_and_flash():
