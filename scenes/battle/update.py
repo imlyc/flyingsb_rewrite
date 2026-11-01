@@ -285,10 +285,29 @@ def _tick_flicker(battle) -> None:
                 battle.refresh_status_snapshot(working=False)   # exe 0xd/0xe 闪完 FUN_004a4e42(0)
 
 
+def _camera_focus(scene: "BattleScene"):
+    """镜头焦点 (原版录像 2026-11-01): 单位移动时跟单位; 一旦有瞄准光标 (玩家瞄准 / 敌人选定目标),
+    对准单位与光标的中点, 并停在那里直到换下一个单位 (出招期间不回单位). 玩家退回移动则回到单位."""
+    b = scene.battle
+    u = b.current
+    ux, uy = scene._unit_draw_pos(u)
+    if getattr(scene, '_focus_unit', None) is not u or b.phase == Phase.PLAYER_MOVE:
+        scene._focus_unit, scene._aim_focus = u, None
+    v = (u.render_x, u.render_y)
+    moving = abs(v[0] - u.x) > 1e-3 or abs(v[1] - u.y) > 1e-3 or bool(u.move_path)
+    cursor = None
+    if b.phase == Phase.PLAYER_AIM and b.aim_cursor is not None:
+        cursor = b.aim_cursor
+    elif b.phase == Phase.ENEMY_TURN and not u.is_player and not moving and b._pending_enemy_cursor is not None:
+        cursor = b._pending_enemy_cursor
+    if cursor is not None:
+        scene._aim_focus = ((u.x + cursor[0]) / 2, (u.y + cursor[1]) / 2)
+    return scene._aim_focus if scene._aim_focus is not None else (ux, uy)
+
+
 def _tick_camera(scene: "BattleScene") -> None:
-    """镜头 lerp 跟随当前单位的画面坐标 (连续值; 取整到格的话镜头每格才换一次目标, 角色在屏上每格一顿)."""
-    u = scene.battle.current
-    target_x, target_y = scene._compute_camera_offset(*scene._unit_draw_pos(u))
+    """镜头 lerp 跟随焦点 (_camera_focus) 的画面坐标 (连续值; 取整到格的话镜头每格才换一次目标, 角色在屏上每格一顿)."""
+    target_x, target_y = scene._compute_camera_offset(*_camera_focus(scene))
     scene._cam_x += (target_x - scene._cam_x) * scene.CAMERA_LERP
     scene._cam_y += (target_y - scene._cam_y) * scene.CAMERA_LERP
     # 发布可见屏幕中心 (世界 px) 给满屏特效 (超亂舞) 当框中心
