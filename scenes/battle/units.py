@@ -184,9 +184,8 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
     else:
         # 通用 locomotion: 原版姿态函数 (core.battle.locomotion, 每 tick 在 update 里算好) → 走路图 / 待机图 / 虚弱图
         frame, anchor = _locomotion_frame(u, cs)
-    # 攻击中不要变半透明 (会让玩家误以为已结束行动)
     holding = u.cast_hold and u.entity is not None
-    alpha = 140 if (u.has_acted and not u.is_attacking and not holding) else None
+    alpha = None                                    # 已行动单位不变半透明 (原版没有这种标记)
     # 攻击位移: entity.x/y 是 16.16 fixed point → 右移 16 拿像素.
     # 若当前在 MOVE 等待期 (move_total_ticks > 0), 从 move_start_x lerp 到 entity.x,
     # 进度 = (move_total - ticks_remaining + sub_t) / move_total, 平滑滑动.
