@@ -663,6 +663,7 @@ def golden(n: int = 400, unity: Path | None = None) -> dict:
     cases.extend(mine_trace_cases(unity))
     cases.extend(equip_cases())
     cases.extend(locomotion_cases())
+    cases.extend(draw_queue_cases())
     return {'cases': cases}
 
 
@@ -838,6 +839,33 @@ def locomotion_cases() -> list:
         out.append({'fn': 'locomotion', 'units': [], 'rng_after': 0, 'seed': 0,
                     'args': {'variant': variant, 'player': int(player), 'weak': int(weak), 'frozen': int(frozen),
                              'period': period, 'walks': walks, 'faces': faces}, 'result': poses})
+    return out
+
+
+def draw_queue_cases() -> list:
+    """战斗绘制队列 (core.battle.draw_queue): 随机我方/敌方 (地面 y 16.16, 常同行等键) + 特效 (y + sort_dy, 含负值),
+    单位槽序 + 地面键 + 选择排序 (不稳定) 后的画序 (标签 p<i>/e<i>/f<i>)."""
+    import random
+    from types import SimpleNamespace
+    from core.battle import draw_queue as DQ
+    from core.sprites.base import TILE_H
+    r = random.Random(1102)
+    out = []
+    for _ in range(64):
+        rows = [r.randrange(-2, 8) for _ in range(3)]          # 少数几行 → 大量同键
+
+        def y16():
+            return (r.choice(rows) * TILE_H + TILE_H // 2) * 65536 + r.choice((0, 0, r.randrange(-0x30000, 0x30000)))
+        players = [y16() for _ in range(r.randrange(0, 6))]
+        enemies = [y16() for _ in range(r.randrange(0, 8))]
+        effects = [[y16() + r.choice((0, 0, r.randrange(-0x400000, 0x400000))), r.choice((0, 0, 400 << 16, 404 << 16, -(3 << 16)))]
+                   for _ in range(r.randrange(0, 10))]
+        units = DQ.unit_slot_order([('p%d' % i, y) for i, y in enumerate(players)], [('e%d' % i, y) for i, y in enumerate(enemies)])
+        ents = [SimpleNamespace(y=y, user_data={'sort_dy': d} if d else {}) for y, d in effects]
+        items = [(lab, DQ.ground_key(y)) for lab, y in units] + [('f%d' % i, DQ.entity_key(e)) for i, e in enumerate(ents)]
+        order = [lab for lab, _ in DQ.selection_sort(items, key=lambda it: it[1])]
+        out.append({'fn': 'draw_queue', 'units': [], 'rng_after': 0, 'seed': 0,
+                    'args': {'players': players, 'enemies': enemies, 'effects': effects}, 'result': order})
     return out
 
 
