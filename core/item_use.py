@@ -1,6 +1,6 @@
 """战斗中使用道具 (exe BTLdoPlayer case 3: 按道具表 0x695514 + id*0x4c 取控制器, 2026-11-01 逆向 + 原版实录).
 
-流程 (与技能同一入口): 十字菜单 ← 道具 → 选道具 → 瞄准 (动作模板 64: 自己 + 面前一格, 光标默认自己) → Enter.
+流程 (与技能同一入口): 十字菜单 ← 道具 → 选道具 → 瞄准 (动作模板按道具, item_template; 光标默认同技能) → Enter.
 确认时 (FUN_004a6efe act==3) 结算数值 (core.battle.energy.battle_item, 工作 HP/MP 当场改), 演出由控制器跑完后结束回合.
 
 控制器 (每个道具一个, 这里实现已录像的两类):
@@ -32,7 +32,16 @@ if TYPE_CHECKING:
     from core.anim_engine.engine import Engine
     from core.anim_engine.entity import Entity
 
-ITEM_TEMPLATE = 64                  # BattleRules.PatternId(item) / ACTION_TEMPLATES[64]: 瞄准 = 自己 + 面前一格, 作用 = 光标一格
+ITEM_TEMPLATE = 64                  # ACTION_TEMPLATES[64]: 瞄准 = 自己 + 面前一格, 作用 = 光标一格
+# exe FUN_004a4f94 菜单结果 5: 0x133 魔法的白粉 → 0x1a (光标只在自己, 作用 = 周围一大片); 0x134 強力針灸 / 0x137 鬧鐘 / 0x139 肌肉恢復膏
+# → 0 (只有面前一格); 其余 0x40
+ITEM_TEMPLATES = {0x133: 0x1A, 0x134: 0, 0x137: 0, 0x139: 0}
+
+
+def item_template(item: int) -> int:
+    """道具的瞄准动作模板 (exe FUN_004a4f94 case 5)."""
+    return ITEM_TEMPLATES.get(item, ITEM_TEMPLATE)
+
 REVIVE_ITEMS = (0x134,)             # 強力針灸 (说明「回復無法戰鬥的同伴」); 0x132 天桃 另有控制器, 未录
 ICON = 233                          # 道具图标 fm (帧 = 道具图标号)
 

@@ -53,15 +53,19 @@ def test_arena_item_menu_opens_and_uses_sandbox_item(arena_scene):
     assert sc.battle.current.is_player
     _key(sc, pygame.K_ESCAPE)
     assert sc._menu_open
-    _key(sc, pygame.K_LEFT)                 # 道具
-    assert sc._item_submenu                 # 菜单开着, draw 没崩
+    _key(sc, pygame.K_LEFT)                 # 道具: 图标收起 → 原版「战斗用道具」窗口
+    assert sc._item_menu is not None        # 菜单开着, draw 没崩
+    from scenes.team_info import W_DESC, W_LIST
+    lst = sc._item_menu.wins[W_LIST]
+    assert lst.title == "　战斗用道具" and W_DESC in sc._item_menu.wins
+    assert [it for it, _ in lst.entries] == sorted(i for i, _ in sc.inventory.consumables())
     items = sc.inventory.consumables()
     assert items
     u = sc.battle.current
     u.hp = 1
     from core.battle.data import Phase
     _key(sc, pygame.K_RETURN)               # 选第一个消耗品 → 道具瞄准 (自己 + 面前一格, 光标默认自己)
-    assert not sc._item_submenu
+    assert sc._item_menu is None
     assert sc.battle.phase == Phase.PLAYER_AIM and sc.battle.aim_cursor == (u.x, u.y)
     _key(sc, pygame.K_RETURN)               # 确认: 当场结算, 扣背包
     assert u.hp > 1
@@ -79,22 +83,38 @@ def test_item_menu_without_inventory_shows_empty(arena_scene):
     _until_player_turn(sc)
     _key(sc, pygame.K_ESCAPE)
     _key(sc, pygame.K_LEFT)
-    assert sc._item_submenu
+    assert sc._item_menu is not None and sc._item_menu.wins
     _key(sc, pygame.K_RETURN)               # 无物可用, 不崩
-    _key(sc, pygame.K_ESCAPE)               # 回一级
-    assert sc._menu_open and not sc._item_submenu
+    _key(sc, pygame.K_ESCAPE)               # 收起 → 重开十字菜单
+    assert sc._menu_open and sc._item_menu is None
 
 
 def test_item_submenu_left_key_does_not_walk(arena_scene, monkeypatch):
-    """ESC → ← 打开道具子菜单时, 按住的 ← 不能让角色走动 (回归)."""
+    """ESC → ← 打开道具窗口时, 按住的 ← 不能让角色走动 (回归)."""
     sc = arena_scene
     _until_player_turn(sc)
     u = sc.battle.current
     pos = (u.x, u.y)
     _key(sc, pygame.K_ESCAPE)
     sc.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_LEFT, mod=0, unicode="", scancode=0))
-    assert sc._item_submenu
+    _step(sc, 10)
+    assert sc._item_menu is not None
     held = {pygame.K_LEFT}
     monkeypatch.setattr(pygame.key, "get_pressed", lambda: type("K", (), {"__getitem__": lambda s, k: k in held})())
     _step(sc, 60)                                  # 按住 ← 一阵
     assert (u.x, u.y) == pos and u.facing is not None
+
+
+def test_item_list_cursor_remembered_and_cancel_reopens_cross_menu(arena_scene):
+    """exe 0x7b8f20: 战斗道具列表光标全局记忆; Esc 收起后重开十字菜单."""
+    sc = arena_scene
+    _until_player_turn(sc)
+    _key(sc, pygame.K_ESCAPE)
+    _key(sc, pygame.K_LEFT)
+    from scenes.team_info import W_LIST
+    _key(sc, pygame.K_DOWN)
+    assert sc._item_menu.wins[W_LIST].cursor == 1
+    _key(sc, pygame.K_ESCAPE)
+    assert sc._item_menu is None and sc._menu_open
+    _key(sc, pygame.K_LEFT)
+    assert sc._item_menu.wins[W_LIST].cursor == 1

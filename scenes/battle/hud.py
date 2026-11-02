@@ -58,6 +58,14 @@ def draw_beveled_panel(surface: pygame.Surface, rect: pygame.Rect,
     pygame.draw.line(surface, shadow, (x + w - 1, y), (x + w - 1, y + h - 1), border_w)
 
 
+def menu_center(scene: "BattleScene", cam_x: int | None = None, cam_y: int | None = None) -> tuple[int, int]:
+    """十字菜单中心 (画面坐标): 当前单位格中线, y 落在格顶边 (= 上一格底边), 让九宫格跨这条边居中."""
+    if cam_x is None:
+        cam_x, cam_y = int(scene._cam_x), int(scene._cam_y)
+    u = scene.battle.current
+    return u.x * TILE_W - cam_x + TILE_W // 2, u.y * TILE_H - cam_y
+
+
 def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
     """十字 4 选项 + 二级菜单 + 全部过渡动画.
     状态机:
@@ -74,10 +82,7 @@ def draw_action_menu(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
         SMENU_END, SMENU_ITEM, SMENU_SETTINGS, SMENU_SKILL, load_smenu_icon,
     )
 
-    u = scene.battle.current
-    ucx = u.x * TILE_W - cam_x + TILE_W // 2
-    # ucy 落在当前 tile 顶边 (= 上一 tile 底边), 让九宫格跨这条边居中.
-    ucy = u.y * TILE_H - cam_y
+    ucx, ucy = menu_center(scene, cam_x, cam_y)
     offset = 32
     # icon 最终位置 + 极角. 极角约定: 0=右, π/2=下, π=左, -π/2=上.
     placements = [

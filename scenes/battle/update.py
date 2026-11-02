@@ -127,6 +127,19 @@ def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
             scene._menu_dismiss_action = None
             if action == 'end_turn':
                 scene.battle.player_end_turn()
+            elif action == 'items':
+                scene.open_item_menu()
+
+    if scene._item_menu is not None:
+        scene._item_menu.update(dt_ms)
+        if scene._item_menu.done:
+            item = scene._item_menu.result
+            scene._item_menu = None
+            if item is None:                         # Esc: 重开十字菜单 (exe 窗口 4 mode 0xf 收起 → 开窗口 0xf)
+                scene._menu_open = True
+                scene._menu_anim_t = 0
+            else:
+                scene.use_consumable(item)
 
 
 LOCO_TICK_MS = ATTACK_TICK_MS       # 战斗 1 tick (与引擎同)

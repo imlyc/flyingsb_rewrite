@@ -29,7 +29,7 @@ from core.movement_input import DirectionalHold
 from core.sprites.base import TILE_W, TILE_H, load_shadow
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
-from core.items import get_item_name, item_effect
+from core.items import get_item_name
 from scenes.battle import hud as hud_mod
 from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
@@ -141,9 +141,8 @@ class BattleScene(Scene):
         self._submenu: str | None = None
         # 技能二级菜单的选中 idx (0..len(current.known_skills)-1). 每次打开二级菜单从 0 起.
         self._skill_cursor: int = 0
-        # 道具二级菜单 (左→消耗品列表): 选中消耗品对当前单位回血/回蓝
-        self._item_submenu: bool = False
-        self._item_cursor: int = 0
+        # 十字菜单 ← 道具: 原版「战斗用道具」窗口 (scenes.battle.item_menu); None = 没开
+        self._item_menu = None
         # 打开一级菜单的动画计时 (ms 累加; None = 已完成静态显示).
         # phase 1: 白方框收缩, phase 2: 4 icon 旋转放大入位. 见 scenes.battle.hud.
         self._menu_anim_t: int | None = None
@@ -221,8 +220,8 @@ class BattleScene(Scene):
             hud_mod.draw_skill_desc_bar(self)
         else:
             hud_mod.draw_log(self)
-        if self._item_submenu:
-            self._draw_item_menu()
+        if self._item_menu is not None:
+            self._item_menu.draw(self.surface)
         # 8) 胜负 (等死亡动画跑完再出 banner, 否则技能秒杀最后一个敌人会跳过死亡演出)
         if (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
                 and not update_mod.death_animations_pending(self)):
@@ -255,53 +254,26 @@ class BattleScene(Scene):
             else:
                 draw_effect(self, obj, *cam_of(obj))
 
-    # ------- 道具子菜单 -------
+    # ------- 战斗用道具 -------
+    def open_item_menu(self) -> None:
+        """十字菜单 ← 收起完毕: 开原版道具列表 (光标从道具图标框出发)."""
+        from scenes.battle.item_menu import BattleItemMenu, item_icon_box
+        from scenes.battle.hud import menu_center
+        inv = self.inventory if self.inventory is not None else _EmptyInventory()
+        self._item_menu = BattleItemMenu(self.audio, inv, item_icon_box(*menu_center(self)))
+
     def use_consumable(self, item_id: int) -> None:
-        """道具子菜单选中: 进道具瞄准 (自己 + 面前一格), Enter 确认后才使用并扣背包 (原版: 用完结束该角色回合)."""
+        """道具窗口选中: 进道具瞄准 (模板按道具, core.item_use.item_template), Enter 确认后才使用并扣背包 (原版: 用完结束该角色回合)."""
         u = self.battle.current
         if u is None or not u.is_player or self.inventory is None:
-            self._item_submenu = False
             return
         from core.battle import energy
         if item_id not in energy.HP_ITEMS + energy.MP_ITEMS + energy.REVIVE_ITEMS + (energy.ITEM_SG_FULL,):
             self.battle._log(f"{get_item_name(item_id)} 无法使用")
             return
         if self.battle.enter_item_aim(item_id):
-            self._item_submenu = False
             self._menu_open = False
             self._input_gated = False
-
-    def _draw_item_menu(self) -> None:
-        items = self.inventory.consumables() if self.inventory is not None else []
-        w, h = self.surface.get_size()
-        pw, ph = 380, 320
-        x, y = 30, h - ph - 30
-        pygame.draw.rect(self.surface, (20, 20, 40), (x, y, pw, ph))
-        pygame.draw.rect(self.surface, (120, 120, 200), (x, y, pw, ph), 2)
-        self.surface.blit(
-            self.font.render("消耗品  Enter使用 / Esc取消", True, (255, 215, 90)),
-            (x + 10, y + 8))
-        if not items:
-            self.surface.blit(self.small.render("无消耗品", True, (200, 200, 200)),
-                              (x + 10, y + 44))
-            return
-        yy = y + 44
-        for i, (iid, cnt) in enumerate(items):
-            color = (255, 255, 255) if i == self._item_cursor else (180, 180, 180)
-            if i == self._item_cursor:
-                pygame.draw.rect(self.surface, (70, 60, 30),
-                                 (x + 6, yy - 2, pw - 12, 26), border_radius=4)
-            hp, mp = item_effect(iid)
-            eff = []
-            if hp:
-                eff.append(f"+{hp}HP")
-            if mp:
-                eff.append(f"+{mp}MP")
-            txt = f"{get_item_name(iid)} x{cnt}   {' '.join(eff)}"
-            self.surface.blit(self.small.render(txt, True, color), (x + 12, yy))
-            yy += 28
-            if yy > y + ph - 10:
-                break
 
     def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
         u = self.battle.current
@@ -438,3 +410,10 @@ class BattleScene(Scene):
         else:
             # 瞬移: 不 lerp, 直接显示 entity.x
             ent.user_data['_move_total_ticks'] = 0
+
+
+class _EmptyInventory:
+    """竞技场等无存档背包: 道具列表为空."""
+
+    def count(self, item_id: int) -> int:
+        return 0

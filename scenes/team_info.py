@@ -26,9 +26,11 @@ from scenes.battle.status_bar import _text_width, draw_text
 TICK_MS = 17
 SCREEN_W, SCREEN_H = 800, 600
 
-# ---- 调色板 (原版菜单调色板实值, 原生截图读出; 菜单色 = FlyingSB.INI menu_color_*) ----
-WIN = (69, 107, 88)            # idx 1
-SHADE = (34, 53, 44)           # idx 2 = 菜单色 / 2
+# ---- 调色板 (原版菜单调色板实值, 原生截图读出) ----
+# 菜单色 (idx 1) = 系统环境设定 红/绿/蓝 (FlyingSB.INI menu_color_*), 道具/技能/世界地图 Esc 菜单共用; 这里暂定 = 战斗技能菜单色
+# (scenes.battle.hud.PANEL_FILL, 原版截图采样; 当初核对的原生截图设成了 69,107,88). Unity 版跟随设定 (BattleUiFrame.MenuColor).
+WIN = (93, 90, 55)             # idx 1
+SHADE = (46, 45, 27)           # idx 2 = 菜单色 / 2 (整数)
 WHITE, BLACK = (255, 255, 255), (0, 0, 0)
 CURSOR_GRAYS = [(v, v, v) for v in (219, 179, 143, 107, 71, 35, 0, 255)]   # 0xf8..0xff
 # (主色, 描边色) = exe 0x53c734.. PALETTEINDEX 对
@@ -51,6 +53,8 @@ _REPEATABLE = (K_UP, K_DOWN, K_LEFT, K_RIGHT, K_PGUP, K_PGDN)
 
 # ---- 音效 (exe sound id) ----
 SND_CURSOR, SND_OK, SND_CANCEL, SND_OPEN, SND_BUZZ, SND_HEAL = 0x144, 0x142, 0x143, 0x10E, 0x141, 0xCA
+
+MODE_BATTLE = 0xF                                         # 道具列表由战斗十字菜单 (窗口 0xf) 打开
 
 # 窗口号 (exe 0x7b8eb0[n])
 W_NAME, W_SUB, W_TEAM, W_LIST, W_SKILL, W_EQUIP, W_STATS, W_DESC, W_MONEY = 1, 2, 3, 4, 5, 6, 12, 13, 14
@@ -273,7 +277,7 @@ class Cursor:
 class Win:
     W = H = 0
 
-    def __init__(self, sc: "TeamInfoScene", idx: int) -> None:
+    def __init__(self, sc: "WindowHost", idx: int) -> None:
         self.sc = sc
         self.idx = idx
         self.state = 1
@@ -788,7 +792,7 @@ class DescWin(Win):
             self.remove()
 
 
-# ---------------- 4: 道具列表 (mode 6 换装 / mode 2 道具) ----------------
+# ---------------- 4: 道具列表 (mode 6 换装 / mode 2 道具 / mode 0xf 战斗用道具) ----------------
 class ListWin(Win):
     W, H = 256, 410
     VIS = 15
@@ -810,10 +814,11 @@ class ListWin(Win):
         sc = self.sc
         if self.mode == 6:
             self.entries = EQ.candidates(sc.member.ch, sc.member.record, sc.slot_sel, sc.inv)
-        else:                                            # FUN_00423e2d(5): 分类 0 且 效果类型 & 4 (回复/药丸)
+        else:                                            # FUN_00423e2d(5 / 4): 分类 0 且 效果类型 & 4 (场外回复/药丸) / & 8 (战斗可用)
+            bit = 8 if self.mode == MODE_BATTLE else 4
             self.entries = [(i, True) for i in range(EQ.ITEM_COUNT)
                             if sc.inv.count(i) > 0 and item_table_entry(i) is not None
-                            and EQ.item_class(i) == 0 and (item_effect_type(i) & 4)]
+                            and EQ.item_class(i) == 0 and (item_effect_type(i) & bit)]
         self.count = len(self.entries)
 
     def _item(self) -> int:
@@ -897,6 +902,9 @@ class ListWin(Win):
                     self.count = -1
                 else:
                     self._preview()
+            elif self.mode == MODE_BATTLE:
+                self.cursor = max(0, min(self.count - 1, WindowHost._battle_item_mem))
+                self.title = "　战斗用道具"
             else:
                 self.cursor = max(0, min(self.count - 1, sc.item_mem))
                 self.title = "　道具"
@@ -926,7 +934,7 @@ class ListWin(Win):
             elif k == K_OK:
                 if self.count > 0 and self.entries[self.cursor][1]:
                     self.picked = self.cursor
-                    if self.mode == 6:
+                    if self.mode in (6, MODE_BATTLE):
                         self.state = 100
                         sc.sound(SND_OK)
                     else:
@@ -975,6 +983,10 @@ class ListWin(Win):
             else:
                 sc.open(W_EQUIP)
             sc.focus = sc.wins.get(W_EQUIP)
+        elif self.mode == MODE_BATTLE:
+            WindowHost._battle_item_mem = self.cursor
+            sc.close(W_DESC)
+            sc.item_chosen(None if self.picked < 0 else self.entries[self.picked][0])
         else:
             sc.item_mem = self.cursor
             sc.open(W_SUB)
@@ -1104,28 +1116,14 @@ _WIN_CLASSES = {W_NAME: NameWin, W_SUB: SubWin, W_TEAM: TeamWin, W_LIST: ListWin
                 W_EQUIP: EquipWin, W_STATS: StatsWin, W_DESC: DescWin, W_MONEY: MoneyWin}
 
 
-# ---------------- 场景 ----------------
-class TeamInfoScene:
-    """隊伍情報. members = [Member]; inv = 背包 (count/add/remove); 装备直接改 members[i].ch.
-    on_change(member) 在换装/用道具后回调 (竞技场记忆装备用). 关闭后切回 return_scene."""
+# ---------------- 窗口宿主 (FUN_0041d429 菜单系统: 窗口表 + 光标实体 + 键) ----------------
+class WindowHost:
+    """一组窗口实体 + 光标 + 键盘 (exe 菜单系统). 隊伍情報与战斗道具菜单共用; 子类给 inv / 各窗口用到的字段."""
+    _battle_item_mem = 0                  # exe 0x7b8f20: 战斗道具列表光标 (全局, 不分角色)
 
-    # 跨次打开保留的光标记忆 (exe 全局: 0x7b8f0c 子菜单, 0x7b8f28[4] 各槽列表, 0x7b8f24 道具列表)
-    _sub_row = 0
-    _list_mem = [0, 0, 0, 0]
-    _item_mem = 0
-
-    def __init__(self, surface: pygame.Surface, audio, members: list[Member], inv, money: int,
-                 return_scene, backdrop: pygame.Surface | None = None, start_index: int = 0,
-                 on_change=None) -> None:
-        self.surface = surface
+    def __init__(self, audio, inv) -> None:
         self.audio = audio
-        self.members = members
         self.inv = inv
-        self.money = int(money)
-        self.return_scene = return_scene
-        self.on_change = on_change
-        self.next_scene = None
-        self.cur = max(0, min(len(members) - 1, start_index))
         self.mode = -1                        # exe 0x54ca20
         self.wins: dict[int, Win] = {}
         self.order: list[Win] = []
@@ -1134,34 +1132,9 @@ class TeamInfoScene:
         self.key = 0
         self._keys: list[int] = []
         self._held: dict[int, int] = {}
-        self.slot_sel = 0
-        self.equip_result = None
-        self.compare = None
         self.desc_pending: str | None = None
-        self.sub_row = TeamInfoScene._sub_row
-        self.list_mem = TeamInfoScene._list_mem
-        self.item_mem = TeamInfoScene._item_mem
-        self.skill_mem: dict[int, int] = {}
-        self.finished = False
+        self.tick_ms = TICK_MS
         self._acc = 0
-        self._frames: dict[int, tuple] = {}
-        self.backdrop = self._dim(backdrop)
-        if members:
-            self.open(W_TEAM)
-        else:                                   # 没人可看 → 直接返回
-            self.finished = True
-
-    # --- 生命周期 ---
-    def on_enter(self) -> None:
-        pass
-
-    def on_exit(self) -> None:
-        TeamInfoScene._sub_row = self.sub_row
-        TeamInfoScene._item_mem = self.item_mem
-
-    @property
-    def member(self) -> Member:
-        return self.members[self.cur]
 
     # --- 窗口管理 (FUN_0041da1b) ---
     def open(self, idx: int, **kw) -> None:
@@ -1190,6 +1163,102 @@ class TeamInfoScene:
                 self.audio.play_sfx_id(sid)
             except Exception:
                 pass
+
+    # --- 输入 ---
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if event.type == pygame.QUIT:
+            return False
+        if event.type == pygame.KEYDOWN:
+            k = _KEYMAP.get(event.key)
+            if k:
+                self._keys.append(k)
+                if k in _REPEATABLE:
+                    self._held[event.key] = pygame.time.get_ticks() + REPEAT_DELAY_MS
+        elif event.type == pygame.KEYUP:
+            self._held.pop(event.key, None)
+        return True
+
+    def _poll_repeat(self) -> None:
+        now = pygame.time.get_ticks()
+        for key, due in list(self._held.items()):
+            if now >= due:
+                self._keys.append(_KEYMAP[key])
+                self._held[key] = due + REPEAT_MS
+
+    # --- 更新 ---
+    def update(self, dt_ms: int) -> None:
+        self._poll_repeat()
+        self._acc += dt_ms
+        n = 0
+        while self._acc >= self.tick_ms and n < 4:
+            self._acc -= self.tick_ms
+            n += 1
+            self.step()
+        if self._acc > self.tick_ms * 4:
+            self._acc = 0
+
+    def step(self) -> None:
+        """一个原版 tick: 光标实体先走, 再按创建顺序跑各窗口."""
+        self.key = self._keys.pop(0) if self._keys else 0
+        self.cursor.tick()
+        for w in list(self.order):
+            if not w.dead:
+                w.tick()
+        self.order = [w for w in self.order if not w.dead]
+
+    def draw_windows(self, surface: pygame.Surface) -> None:
+        for w in self.order:
+            w.draw(surface)
+        self.cursor.draw(surface)
+
+
+# ---------------- 场景 ----------------
+class TeamInfoScene(WindowHost):
+    """隊伍情報. members = [Member]; inv = 背包 (count/add/remove); 装备直接改 members[i].ch.
+    on_change(member) 在换装/用道具后回调 (竞技场记忆装备用). 关闭后切回 return_scene."""
+
+    # 跨次打开保留的光标记忆 (exe 全局: 0x7b8f0c 子菜单, 0x7b8f28[4] 各槽列表, 0x7b8f24 道具列表)
+    _sub_row = 0
+    _list_mem = [0, 0, 0, 0]
+    _item_mem = 0
+
+    def __init__(self, surface: pygame.Surface, audio, members: list[Member], inv, money: int,
+                 return_scene, backdrop: pygame.Surface | None = None, start_index: int = 0,
+                 on_change=None) -> None:
+        super().__init__(audio, inv)
+        self.surface = surface
+        self.members = members
+        self.money = int(money)
+        self.return_scene = return_scene
+        self.on_change = on_change
+        self.next_scene = None
+        self.cur = max(0, min(len(members) - 1, start_index))
+        self.slot_sel = 0
+        self.equip_result = None
+        self.compare = None
+        self.sub_row = TeamInfoScene._sub_row
+        self.list_mem = TeamInfoScene._list_mem
+        self.item_mem = TeamInfoScene._item_mem
+        self.skill_mem: dict[int, int] = {}
+        self.finished = False
+        self._frames: dict[int, tuple] = {}
+        self.backdrop = self._dim(backdrop)
+        if members:
+            self.open(W_TEAM)
+        else:                                   # 没人可看 → 直接返回
+            self.finished = True
+
+    # --- 生命周期 ---
+    def on_enter(self) -> None:
+        pass
+
+    def on_exit(self) -> None:
+        TeamInfoScene._sub_row = self.sub_row
+        TeamInfoScene._item_mem = self.item_mem
+
+    @property
+    def member(self) -> Member:
+        return self.members[self.cur]
 
     def changed(self, m: Member) -> None:
         if self.on_change is not None:
@@ -1248,56 +1317,15 @@ class TeamInfoScene:
             pass
         return out
 
-    # --- 输入 ---
-    def handle_event(self, event: pygame.event.Event) -> bool:
-        if event.type == pygame.QUIT:
-            return False
-        if event.type == pygame.KEYDOWN:
-            k = _KEYMAP.get(event.key)
-            if k:
-                self._keys.append(k)
-                if k in _REPEATABLE:
-                    self._held[event.key] = pygame.time.get_ticks() + REPEAT_DELAY_MS
-        elif event.type == pygame.KEYUP:
-            self._held.pop(event.key, None)
-        return True
-
-    def _poll_repeat(self) -> None:
-        now = pygame.time.get_ticks()
-        for key, due in list(self._held.items()):
-            if now >= due:
-                self._keys.append(_KEYMAP[key])
-                self._held[key] = due + REPEAT_MS
-
-    # --- 更新 ---
-    def update(self, dt_ms: int) -> None:
-        self._poll_repeat()
-        self._acc += dt_ms
-        n = 0
-        while self._acc >= TICK_MS and n < 4:
-            self._acc -= TICK_MS
-            n += 1
-            self.step()
-        if self._acc > TICK_MS * 4:
-            self._acc = 0
-
     def step(self) -> None:
-        """一个原版 tick: 光标实体先走, 再按创建顺序跑各窗口."""
-        self.key = self._keys.pop(0) if self._keys else 0
-        self.cursor.tick()
-        for w in list(self.order):
-            if not w.dead:
-                w.tick()
-        self.order = [w for w in self.order if not w.dead]
+        super().step()
         if self.finished and self.next_scene is None:
             self.next_scene = self.return_scene
 
     # --- 渲染 ---
     def draw(self) -> None:
         self.surface.blit(self.backdrop, (0, 0))
-        for w in self.order:
-            w.draw(self.surface)
-        self.cursor.draw(self.surface)
+        self.draw_windows(self.surface)
 
 
 # ---------------- 入口: 世界地图 / 竞技场 ----------------

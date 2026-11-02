@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
     if event.type == pygame.QUIT:
         return False
+    if scene._item_menu is not None:                 # 原版菜单系统窗口 (战斗用道具): 键全归它
+        scene._item_menu.handle_event(event)
+        return True
     if event.type != pygame.KEYDOWN:
         return True
     if scene.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
@@ -35,7 +38,7 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
         return True
 
     # 菜单 / 二级 / 各种过渡 / 关闭动画 期间: 走菜单键路由, 不让方向键漏给角色移动
-    if (scene._menu_open or scene._submenu is not None or scene._item_submenu
+    if (scene._menu_open or scene._submenu is not None
             or scene._menu_transition_t is not None
             or scene._menu_close_t is not None
             or scene._menu_dismiss_t is not None):
@@ -144,25 +147,6 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
             return
         return
 
-    # 道具二级菜单: ↑↓ 选消耗品 / Enter 使用 / ESC 回退到一级
-    if scene._item_submenu:
-        items = scene.inventory.consumables() if scene.inventory is not None else []
-        if key in (pygame.K_ESCAPE, pygame.K_x):
-            scene._item_submenu = False
-            scene._menu_open = True
-            scene._menu_anim_t = 0
-            return
-        if not items:
-            return
-        if key in (pygame.K_UP, pygame.K_w):
-            scene._item_cursor = (scene._item_cursor - 1) % len(items)
-        elif key in (pygame.K_DOWN, pygame.K_s):
-            scene._item_cursor = (scene._item_cursor + 1) % len(items)
-        elif key in (pygame.K_RETURN, pygame.K_SPACE):
-            item_id, _ = items[scene._item_cursor]
-            scene.use_consumable(item_id)
-        return
-
     # 一级菜单 — 全部通过 dismiss 动画收掉
     if key in (pygame.K_ESCAPE, pygame.K_x):
         # ESC: 白点直接消失 (target=None), icons 转出
@@ -175,12 +159,10 @@ def _handle_menu_key(scene: "BattleScene", key: int) -> None:
         scene._menu_transition_t = 0
         scene._menu_transition_target = SMENU_SKILL
     elif key in (pygame.K_LEFT, pygame.K_a):
-        # 道具 → 打开消耗品二级菜单
-        scene._item_submenu = True
-        scene._item_cursor = 0
-        scene._menu_open = False
-        scene._input_gated = False
-        return
+        # 道具 → 图标收起后开原版「战斗用道具」窗口 (scenes.battle.item_menu)
+        scene._menu_dismiss_t = 0
+        scene._menu_dismiss_target = SMENU_ITEM
+        scene._menu_dismiss_action = 'items'
     elif key in (pygame.K_RIGHT, pygame.K_d):
         # 设置 → 同上, 暂无实际效果
         scene._menu_dismiss_t = 0
@@ -226,7 +208,7 @@ def poll_player_hold(scene: "BattleScene", dt_ms: int) -> None:
         scene._hold.reset()
     if (scene.battle.phase != Phase.PLAYER_MOVE
             or scene._menu_open
-            or scene._item_submenu                   # 道具子菜单 (ESC → ←): 方向键是选道具, 不能走
+            or scene._item_menu is not None          # 道具窗口: 方向键是选道具, 不能走
             or scene._submenu is not None
             or scene._menu_transition_t is not None
             or scene._menu_close_t is not None
