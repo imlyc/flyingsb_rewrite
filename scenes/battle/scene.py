@@ -34,7 +34,7 @@ from scenes.battle import hud as hud_mod
 from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
 from scenes.battle import update as update_mod
-from scenes.battle.hit_effect import draw_hit_effects
+from scenes.battle.hit_effect import draw_effect, draw_effect_shadow, effect_drawn
 
 if TYPE_CHECKING:
     from scenes.world_map.scene import WorldMapScene
@@ -208,14 +208,10 @@ class BattleScene(Scene):
             self.surface.blit(shade, (0, 0))
         # 2) 移动 / 攻击高亮
         self._draw_overlays(cam_x, cam_y)
-        # 2.5) 敌人身后的命中特效 (分身上方那只 = 站敌人身后, 应被敌人挡) → 单位之前画
-        draw_hit_effects(self, cam_x, cam_y, behind=True)
-        # 3) 单位 (含影子, HP 数字)
-        units_mod.draw_units(self, cam_x, cam_y)
+        # 3) 单位与特效 (含飘字): 原版统一精灵队列 — 影子全部先画, 其余按地面 y 选择排序 (core.battle.draw_queue)
+        self._draw_world(cam_x, cam_y)
         # 4) 行动菜单 (ESC 弹出)
         hud_mod.draw_action_menu(self, cam_x, cam_y)
-        # 5) 命中特效 (hit-spark anim_engine entity, 单位之上, 飘字之下)
-        draw_hit_effects(self, cam_x, cam_y)
         # 6) 浮动伤害
         # 6) HUD (不滚动)
         hud_mod.draw_hud(self)
@@ -232,9 +228,29 @@ class BattleScene(Scene):
                 and not update_mod.death_animations_pending(self)):
             hud_mod.draw_end_banner(self)
 
+    def _draw_world(self, cam_x: int, cam_y: int) -> None:
+        """exe FUN_004c8184: 单位 (槽序在前) + 可见特效 (池序) 进队列, 键 = 地面 y; 影子项键 0 先画; 选择排序后依次画."""
+        from core.battle import draw_queue
+        b = self.battle
+        unit_ents = {id(u.entity) for u in b.all_units if u.entity is not None}
+        units = [u for u in draw_queue.unit_slot_order(b.players, b.enemies)
+                 if units_mod.unit_drawn(self, u, cam_x, cam_y)]
+        effects = [e for e in b.engine.entities if id(e) not in unit_ents and effect_drawn(e)]
+        for u in units:
+            units_mod.draw_unit_shadow(self, u, cam_x, cam_y)
+        for e in effects:
+            draw_effect_shadow(self, e, cam_x, cam_y)
+        items = [(True, u, units_mod.unit_ground_y(self, u)) for u in units] + \
+                [(False, e, draw_queue.entity_key(e)) for e in effects]
+        for is_unit, obj, _ in draw_queue.selection_sort(items, key=lambda it: it[2]):
+            if is_unit:
+                units_mod.draw_unit(self, obj, cam_x, cam_y)
+            else:
+                draw_effect(self, obj, cam_x, cam_y)
+
     # ------- 道具子菜单 -------
     def use_consumable(self, item_id: int) -> None:
-        """对当前单位使用消耗品 (回血/回蓝), 关闭菜单."""
+        """道具子菜单选中: 进道具瞄准 (自己 + 面前一格), Enter 确认后才使用并扣背包 (原版: 用完结束该角色回合)."""
         u = self.battle.current
         if u is None or not u.is_player or self.inventory is None:
             self._item_submenu = False
@@ -243,19 +259,10 @@ class BattleScene(Scene):
         if item_id not in energy.HP_ITEMS + energy.MP_ITEMS + energy.REVIVE_ITEMS + (energy.ITEM_SG_FULL,):
             self.battle._log(f"{get_item_name(item_id)} 无法使用")
             return
-        res = energy.battle_item(self.battle, u, u, item_id)   # exe FUN_004a6efe act==3 (目标暂为使用者自己)
-        self.inventory.remove(item_id, 1)
-        self._item_submenu = False
-        self._menu_open = False
-        self._input_gated = False
-        bits = []
-        if res.get('hp'):
-            bits.append(f"+{res['hp']} HP")
-        if res.get('mp'):
-            bits.append(f"+{res['mp']} MP")
-        if res.get('sg'):
-            bits.append(f"SG +{res['sg']}")
-        self.battle._log(f"{u.name} 使用 {get_item_name(item_id)} {' '.join(bits)}")
+        if self.battle.enter_item_aim(item_id):
+            self._item_submenu = False
+            self._menu_open = False
+            self._input_gated = False
 
     def _draw_item_menu(self) -> None:
         items = self.inventory.consumables() if self.inventory is not None else []

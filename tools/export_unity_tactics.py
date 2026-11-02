@@ -190,7 +190,7 @@ def ranged_seq_tables() -> dict:
 
 
 PLAYER_SKILL_MODULES = ('skill_seq', 'sam_skills', 'pig_skills', 'pao_skills', 'bosan_skills', 'jet_skills', 'mina_skills',
-                        'jah_skills', 'projectile', 'son_transform', 'fenshen_seqs', 'ranged_attack')
+                        'jah_skills', 'projectile', 'son_transform', 'fenshen_seqs', 'ranged_attack', 'item_use')
 
 
 def skill_seq_tables() -> dict:
@@ -397,6 +397,29 @@ def skill_trace_cases(unity: Path | None = None) -> list:
             out.append({'fn': 'skill_trace', 'units': [], 'rng_after': 0, 'seed': 0,
                         'args': {'skill': sid, 'caster': name, 'facing': tag, 'argv': argv[2:]},
                         'result': hashlib.md5(text.encode()).hexdigest()})
+    # 道具 (skill_trace --item): 回复药 3 种 × {自己, 正前方队友} + 強力針灸 复活正前方倒地队友, 各 × 4 朝向; skill = 道具 id
+    for item, variants in ((0x12b, ('self', 'ally')), (0x12c, ('self', 'ally')), (0x12d, ('self', 'ally')), (0x134, ('ally',))):
+        for facing, (fx, fy) in skill_trace.FACING.items():
+            for variant in variants:
+                d = (fx, fy) if variant == 'ally' else (0, 0)
+                extra = (['--ally-dx', str(fx), '--ally-dy', str(fy)] if variant == 'ally' else []) + \
+                        ['--cursor-dx', str(d[0]), '--cursor-dy', str(d[1])]
+                argv = ['skill_trace', '0', '--item', str(item), '--caster', '三藏', '--facing', facing] + extra
+                buf = io.StringIO()
+                old = sys.argv
+                sys.argv = argv
+                try:
+                    with contextlib.redirect_stdout(buf):
+                        skill_trace.main()
+                finally:
+                    sys.argv = old
+                text = buf.getvalue()
+                tag = f'{facing}_{variant}'
+                if local:
+                    (local / f'skill_{item}_{tag}.txt').write_text(text)
+                out.append({'fn': 'skill_trace', 'units': [], 'rng_after': 0, 'seed': 0,
+                            'args': {'skill': item, 'caster': '三藏', 'facing': tag, 'argv': argv[2:]},
+                            'result': hashlib.md5(text.encode()).hexdigest()})
     return out
 
 

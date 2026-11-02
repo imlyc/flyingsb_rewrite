@@ -87,7 +87,11 @@ def _handle_aim_key(scene: "BattleScene", key: int, mod: int) -> None:
         return
     if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
         if not scene.battle.confirm_attack_aim():
-            scene.battle._log(f"{scene.battle.current.name} 目标格无敌人, 无法攻击")
+            scene.battle._log(f"{scene.battle.current.name} 目标格无可作用的对象")
+        elif scene.battle.last_item_used is not None:      # 道具确认: 扣背包
+            if scene.inventory is not None:
+                scene.inventory.remove(scene.battle.last_item_used, 1)
+            scene.battle.last_item_used = None
         return
     if key in (pygame.K_ESCAPE, pygame.K_x):
         scene.battle.cancel_attack_aim()

@@ -503,7 +503,6 @@ def spawn_eson01_attack(battle, caster, coord: "Entity") -> None:
     e.vz = 0
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
-    e.user_data['draw_order'] = 10            # 神兽本体盖在命中特效之上
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
@@ -734,7 +733,6 @@ def spawn_sweep_beast(battle, caster, coord: "Entity", atlas: int, frame_count: 
     e.vz = 0
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
-    e.user_data['draw_order'] = 10            # 神兽本体盖在命中特效之上
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
@@ -774,13 +772,13 @@ def _beast_step(e: "Entity") -> None:
     e.z = -(ud['ez'] << 16)
 
 
-def _beast_spawn(battle, caster, coord, atlas: int, think_fn, draw_order: int = 10) -> "Entity":
+def _beast_spawn(battle, caster, coord, atlas: int, think_fn) -> "Entity":
     coord.user_data['eson_done'] = False
     e = battle.engine.spawn(think_fn=think_fn)
     e.atlas_slot = atlas
     e.frame_idx = 0
     e.flags |= 0x40
-    e.user_data.update(kind='hit_effect', projectile=True, draw_order=draw_order, battle=battle, caster=caster,
+    e.user_data.update(kind='hit_effect', projectile=True, battle=battle, caster=caster,
                        coord=coord, victims=_eson_collect_victims(battle, caster),
                        ez=BEAST_SPAWN_Z, vz=BEAST_VZ0, age=0)
     cx, cy = _screen_center(battle, caster)
@@ -933,7 +931,6 @@ def spawn_qinglong_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.flags |= 0x40
     e.user_data['kind'] = 'hit_effect'
     e.user_data['projectile'] = True
-    e.user_data['draw_order'] = 10            # 青龙本体盖在冰锥之上 (exe y+1000 排序最前)
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
     e.user_data['coord'] = coord
@@ -1119,7 +1116,7 @@ def spawn_baihu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     e.atlas_slot = atlas
     e.frame_idx = 0
     e.flags |= 0x40
-    e.user_data.update(kind='hit_effect', projectile=True, draw_order=10, battle=battle, caster=caster,
+    e.user_data.update(kind='hit_effect', projectile=True, battle=battle, caster=caster,
                        coord=coord, victims=victims, ez=QL_SPAWN_Z, vz=QL_VZ0, age=QL_SPAWN_AGE)
     cx, cy = _screen_center(battle, caster)
     e.x, e.y = cx, cy + (QL_SPAWN_Y_OFF << 16)
@@ -1360,7 +1357,7 @@ def _spawn_yuetu_sparkles(battle, victim) -> None:
         e.frame_idx = 8
         e.flags |= 0x40
         e.x, e.y = vx, vy
-        e.user_data.update(kind='hit_effect', projectile=True, sparkle=True, draw_order=20,
+        e.user_data.update(kind='hit_effect', projectile=True, sparkle=True,
                            vx=(-1 if i == 0 else 1) << 16, vz=YT_SPARKLE_VZ, ez=YT_SPARKLE_Z << 16)
         e.z = -e.user_data['ez']
         battle.engine.attach_seq(e, tuple_to_bytecode(YT_SPARKLE_SEQ))
@@ -1403,7 +1400,7 @@ def spawn_yuetu_beast(battle, caster, coord: "Entity", atlas: int) -> None:
     _sfx(battle, SFX_YT_BEAST)
     coord.user_data['beast_sound'] = SFX_YT_BEAST    # 返程 0x1e 切断
     coord.user_data['return_waits_floats'] = True
-    _beast_spawn(battle, caster, coord, atlas, yuetu_beast_think, draw_order=0)
+    _beast_spawn(battle, caster, coord, atlas, yuetu_beast_think)
 
 
 # ============ M凤凰: 复活术 (exe 2026-10-23 实录 son_09_F10548 + reverse_engineering/mfeng_decomp.txt) ============
@@ -1474,7 +1471,7 @@ def _spawn_mfeng_feather(battle, ally) -> None:
     e.atlas_slot = MF_FEATHER_ATLAS
     e.flags |= 0x40
     e.x, e.y = vx, vy
-    e.user_data.update(kind='hit_effect', projectile=True, feather=True, draw_order=20,
+    e.user_data.update(kind='hit_effect', projectile=True, feather=True,
                        vx=((rng.randrange(32) - 16) << 16) >> 4, vy=((rng.randrange(32) - 16) << 16) >> 4,
                        vz=(rng.randrange(64) << 16) >> 4, az=MF_FEATHER_ACCEL, ez=MF_FEATHER_Z, age=0)
     e.z = -e.user_data['ez']
@@ -1544,7 +1541,7 @@ def _spawn_mfeng_clouds(battle, caster, coord) -> None:
             e.frame_idx = 2 + rng.randrange(2)
         e.y = cy + ((MF_CLOUD_Y_OFF + rng.randrange(MF_CLOUD_Y_RAND)) << 16)
         e.z = -(MF_CLOUD_Z << 16)
-        e.user_data.update(kind='hit_effect', projectile=True, cloud=True, draw_order=12, coord=coord, vx=vx, ax=ax)
+        e.user_data.update(kind='hit_effect', projectile=True, cloud=True, coord=coord, vx=vx, ax=ax)
         e.state_code = _MFC_IN
         mfeng_cloud_think(e, battle.engine)          # 出生 tick 先走一步 (实录首帧已位移 60)
 
@@ -1640,7 +1637,6 @@ def spawn_kukumao_beast(battle, caster, coord: "Entity") -> None:
     e.z = -(KUKUMAO_Z << 16)
     coord.user_data['return_sound'] = SFX_KUKUMAO_RETURN
     e.user_data['kind'] = 'hit_effect'
-    e.user_data['draw_order'] = 10
     e.user_data['kukumao'] = True
     e.user_data['battle'] = battle
     e.user_data['caster'] = caster
@@ -1722,7 +1718,7 @@ def _spawn_skateboard(battle, caster, coord, rect) -> None:
     e.x = (x0 + rng.randint(0, w - 1)) << 16
     e.y = (y0 + rng.randint(0, h - 1)) << 16
     e.z = -(LUANWU_HEIGHT << 16)
-    e.user_data.update(kind='hit_effect', projectile=True, skate=True, draw_order=10, battle=battle, coord=coord,
+    e.user_data.update(kind='hit_effect', projectile=True, skate=True, battle=battle, coord=coord,
                        vx=int(math.sin(ang) * LUANWU_SPEED * 65536), vy=int(math.cos(ang) * LUANWU_SPEED * 65536), rect=rect)
 
 
@@ -1858,7 +1854,7 @@ def _spawn_clone(battle, caster, coord, victim, idx: int, primary: bool = False)
     e.flags |= 0x40
     e.x = vx + (ox << 16)
     e.y = vy + (oy << 16)
-    e.user_data.update(kind='hit_effect', projectile=True, clone=True, shadow=True, behind_units=(oy < 0), draw_order=8,
+    e.user_data.update(kind='hit_effect', projectile=True, clone=True, shadow=True,
                        dir=d, is_last=(idx == 3), primary=primary, battle=battle, caster=caster, coord=coord,
                        victim=victim, ez=FENSHEN_DROP_HEIGHT, vz=0)
     e.z = -(FENSHEN_DROP_HEIGHT << 16)

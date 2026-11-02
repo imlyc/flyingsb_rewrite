@@ -69,6 +69,7 @@ def main():
     ap.add_argument('--cursor-dx', type=int); ap.add_argument('--cursor-dy', type=int, help='光标相对施法者格 (默认敌人格, 失败回施法者)')
     ap.add_argument('--attack', type=int, default=None, help='普攻表 idx (普攻实录; skill 参数忽略)')
     ap.add_argument('--sg', type=int, default=0, help='施法者兴奋值 (SG 型角色要够门槛才放得出)')
+    ap.add_argument('--item', type=lambda v: int(v, 0), default=None, help='道具 id (道具使用; skill 参数忽略, 队友 = 目标, 复活药时队友倒下)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
     a = ap.parse_args()
     p = _unit(a.caster, 15, 53, is_player=True, agile=99)
@@ -77,7 +78,8 @@ def main():
     players = [p]
     if a.ally_dx is not None and (a.ally_dx, a.ally_dy) != (0, 0):      # (0,0) = 目标就是施法者自己
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
-        if a.skill in (0x09, 0x2b, 0x0f):       # M凤凰 复活术 / 回生舞步 / 甦生: 队友得是倒下的才是目标
+        from core.item_use import REVIVE_ITEMS
+        if a.skill in (0x09, 0x2b, 0x0f) if a.item is None else a.item in REVIVE_ITEMS:   # 复活技能 / 复活药: 队友得是倒下的才是目标
             ally.hp = 0; ally.death_anim_time_ms = 0
     es = [e] + [_unit(f'enemy{i}', 15 + int(t.split(',')[0]), 53 + int(t.split(',')[1]), is_player=False, agile=1)
                 for i, t in enumerate(x for x in a.more_enemies.split(';') if x)]
@@ -103,9 +105,14 @@ def main():
             NA.zihe_switch(p, to_beast=True)
             p.flicker = None
             p.attack_normal = p.attack_melee = a.attack
-    assert b.enter_attack_aim(skill_id=None if a.attack is not None else a.skill), 'aim failed'
-    b.aim_cursor = (15 + a.cursor_dx, 53 + a.cursor_dy) if a.cursor_dx is not None else (e.x, e.y)
-    if not b.confirm_attack_aim():                 # 我方/自身目标技能 (生命之火/斗轉/返荷/化精為氣): 光标放施法者
+    if a.item is not None:                         # 道具: 光标默认自己, --cursor 指向队友
+        assert b.enter_item_aim(a.item), 'item aim failed'
+        b.aim_cursor = (15 + a.cursor_dx, 53 + a.cursor_dy) if a.cursor_dx is not None else (p.x, p.y)
+        assert b.confirm_attack_aim(), 'item confirm failed'
+    else:
+        assert b.enter_attack_aim(skill_id=None if a.attack is not None else a.skill), 'aim failed'
+        b.aim_cursor = (15 + a.cursor_dx, 53 + a.cursor_dy) if a.cursor_dx is not None else (e.x, e.y)
+    if a.item is None and not b.confirm_attack_aim():                 # 我方/自身目标技能 (生命之火/斗轉/返荷/化精為氣): 光标放施法者
         b.aim_cursor = (p.x, p.y)
         assert b.confirm_attack_aim(), 'confirm failed (敌人不在范围?)'
     born = {}
@@ -118,9 +125,11 @@ def main():
         _CUR_TICK[0] = b.engine._tick_id
         _tick_reactions(scene_stub, ATTACK_TICK_MS)    # 受击 seq 也推进 (dispatcher 收尾要等它播完, 如猪八戒 0x14)
         out.append(f"F {t} {t * 24}")
-        out.append(f"G cam={a.enemy_dx},{a.enemy_dy} skill={a.attack if a.attack is not None else a.skill} move=0 nvict=1")
+        out.append(f"G cam={a.enemy_dx},{a.enemy_dy} skill={a.item if a.item is not None else a.attack if a.attack is not None else a.skill} move=0 nvict=1")
         out.append(f"B caster={0x86b618 + a.caster_idx * 0x1ac:x} n=1 {0x86b618 + 60 * 0x1ac:x}")
         out.append(unit_line(a.caster_idx, p, True)); out.append(unit_line(60, e, False))
+        if a.item is not None and len(players) > 1:
+            out.append(unit_line(3, players[1], False))   # 道具目标队友
         idx = 90
         for ent in b.engine.entities:
             if not (ent.flags & 0x800) or any(ent is u.entity for u in b.all_units):

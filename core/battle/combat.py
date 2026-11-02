@@ -156,7 +156,7 @@ def hit_effect_specs(defender: BattleUnit, attacker_name: str | None, style: str
 
 
 def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, spec,
-                         *, think_fn=None, persist: bool = False, draw_order: int = 0):
+                         *, think_fn=None, persist: bool = False):
     """通用 effect entity spawn: 跟原版 FUN_004d0c90 blood_spawn 同套路.
     spawn anim_engine entity → 设世界坐标 → attach_seq 跑 FM op 字节码. 返回 entity.
     EXIT op 自然结束后 playing flag 自动落下, render 端跳过该 entity (= 一次性, engine 回收).
@@ -169,8 +169,6 @@ def _spawn_effect_entity(battle: "TacticsBattle", world_x: int, world_y: int, sp
     e.user_data['atlas_key'] = spec.atlas_key
     if persist:
         e.user_data['projectile'] = True     # 播完定格仍渲染
-    if draw_order:
-        e.user_data['draw_order'] = draw_order
     battle.engine.attach_seq(e, spec.to_bytecode())
     return e
 

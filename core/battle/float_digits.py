@@ -8,7 +8,8 @@
   (末位此刻给受击单位发 -20 = dispatcher 的飘字计数 -1) 停 32 tick → state 3 每 tick XOR 可见 32 tick → 消失. 共 ≈ 20+10+32+32.
 回复 FUN_004d074e(单位, 值): 全部位**一起**生成 (FUN_004d06b0), 帧 = 字符-0x30 (白行 0..9 / MISS 10,11,12,12), y = 单位 y + 404,
   z = 488, vz = -0.5px/t **无加速度** (+0x180 未设) → z<460 (56t) 进 state 1 (末位发 -20) → 每 tick 闪, z<448 (再 24t) 消失.
-我们: z 取负为高 (渲染 sy = y + z - ay), 内部按 exe 数值算 ez 再换算. battle.float_pending = exe dispatcher +0x3e 计数
+我们: z 取负为高 (渲染 sy = y + z - ay), 内部按 exe 数值算 ez 再换算; y 不含 exe 的 +400/+404, 记在 sort_dy 供绘制排序
+(core.battle.draw_queue: 原版靠这个偏移让数字排在所有单位之后). battle.float_pending = exe dispatcher +0x3e 计数
 (每发 +1, 末位到 state 2 时 -1); battle.float_events 收 ('flash', unit) (首位进闪烁, 场景用来触发死亡动画) / ('settled', unit).
 """
 from __future__ import annotations
@@ -109,7 +110,7 @@ def _spawn_digit(battle, frame: int, x: int, y: int, unit, first: bool, last: bo
     e.flags |= 0x40
     e.x, e.y = x, y
     e.vx = e.vy = e.vz = 0
-    e.user_data.update(kind='hit_effect', draw_order=100, digit=True, float=True,
+    e.user_data.update(kind='hit_effect', digit=True, float=True, sort_dy=DMG_Y_OFF,
                        battle=battle, unit=unit, first=first, last=last, counts=counts, tick=0,
                        ez=DMG_Z0, vz=DMG_VZ0, settle_state=2)
     _digit_think(e, battle.engine)        # exe 池序: 数字下标 > spawner, 出生当 tick 就 think 一次 (实录首帧 z=442, state 0 共 20 帧)
@@ -178,7 +179,7 @@ def spawn_float(battle, unit, value: int | None, heal: bool = False, counts: boo
             e.flags |= 0x40
             e.x, e.y = x0 + i * DIGIT_STRIDE_PX * FP, cy
             e.vx = e.vy = e.vz = 0
-            e.user_data.update(kind='hit_effect', draw_order=100, heal_digit=True, float=True,
+            e.user_data.update(kind='hit_effect', heal_digit=True, float=True, sort_dy=HEAL_Y_OFF,
                                battle=battle, unit=unit, first=(i == 0), last=(i == len(chars) - 1),
                                counts=counts, tick=0, ez=HEAL_Z0, settle_state=1)
             _heal_digit_think(e, eng)     # 出生当 tick 先走一步 (实录首帧 z=487, state 0 共 56 帧)

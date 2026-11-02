@@ -109,6 +109,8 @@ class TacticsBattle:
         self.aim_cursor: tuple[int, int] | None = None
         self.aim_attack_range: set[tuple[int, int]] = set()
         self.aim_skill_id: int | None = None
+        self.aim_item_id: int | None = None          # 道具瞄准 (core.item_use): 模板 64, 确认后用该道具
+        self.last_item_used: int | None = None       # 最近一次确认使用的道具 (场景据此扣背包)
         # AoE 攻击 (孙悟空横扫等) 确认时存的伤害范围. IMPACT 时一次性对其内所有敌人造伤.
         # None = 单点攻击, IMPACT 走 combat.apply_pending_attack 的默认 pending_attack_target 路径.
         self._pending_damage_range: set[tuple[int, int]] | None = None
@@ -532,6 +534,11 @@ class TacticsBattle:
         普攻按角色 profile (孙悟空 3 格垂直线 / 蒙面人 / 默认 单格);
         技能按 exe pattern. skill_id=None 时若处于 PLAYER_AIM 自动取 aim_skill_id."""
         u = u or self.current
+        if skill_id is None and self.phase == Phase.PLAYER_AIM and self.aim_item_id is not None:
+            from core.item_use import ITEM_TEMPLATE
+            from core.skill_patterns import compute_template_strike
+            return {(x, y) for (x, y) in compute_template_strike(u, cursor, ITEM_TEMPLATE, self.map)
+                    if self.map.in_bounds(x, y)}
         if skill_id is None and self.phase == Phase.PLAYER_AIM:
             skill_id = self.aim_skill_id
         if skill_id is not None:
@@ -583,6 +590,57 @@ class TacticsBattle:
             return (-forward, side, t)
         return min(rng, key=key)
 
+    def enter_item_aim(self, item_id: int) -> bool:
+        """十字菜单 ← 道具 → 选中道具: 进瞄准 (动作模板 64 = 自己 + 面前一格), 光标默认自己 (原版实录)."""
+        u = self.current
+        if self.phase != Phase.PLAYER_MOVE or not u.is_player:
+            return False
+        from core.item_use import ITEM_TEMPLATE
+        from core.skill_patterns import compute_template_pattern
+        rng = compute_template_pattern(u, self.map, ITEM_TEMPLATE)
+        if not rng:
+            return False
+        self.aim_skill_id = None
+        self.aim_item_id = item_id
+        self.phase = Phase.PLAYER_AIM
+        self.aim_attack_range = rng
+        self.aim_cursor = (u.x, u.y)
+        return True
+
+    def _confirm_item_aim(self) -> bool:
+        """道具确认 (FUN_004a6efe act==3): 光标格的我方 (复活药 = 倒地者, 其余 = 存活者), 当场结算, 演出 (core.item_use) 后结束回合."""
+        from core.battle import energy
+        from core.item_use import REVIVE_ITEMS, start
+        u = self.current
+        item = self.aim_item_id
+        revive = item in REVIVE_ITEMS
+        targets = []
+        for (x, y) in sorted(self.damage_range(self.aim_cursor), key=row_major):
+            occ = self.q.occupant(x, y)
+            if occ is None or occ.is_player != u.is_player or occ.alive == revive:
+                continue
+            targets.append(occ)
+        values = {}
+        for t in targets:
+            was_dead = not t.alive
+            res = energy.battle_item(self, u, t, item)
+            if res:
+                values[id(t)] = res
+                if was_dead and t.alive:            # 复活: 清死亡演出状态 (同 jet_skills._revive)
+                    t.settle_pending = False
+                    t.death_anim_time_ms = -1
+                    t.reaction_seq = None
+                    t.shown_hp_override = None
+        targets = [t for t in targets if id(t) in values]
+        if not targets:
+            return False
+        self.last_item_used = item
+        self.aim_item_id = None
+        self._clear_aim_overlay()
+        start(self, u, item, targets, values)
+        self._log(f"{u.name} 使用道具 #{item} → " + ", ".join(t.name for t in targets))
+        return True
+
     def enter_attack_aim(self, skill_id: int | None = None) -> bool:
         """从 PLAYER_MOVE 进入 PLAYER_AIM (= 选攻击目标阶段).
         计算攻击范围, cursor 初始 = facing 前一格 (若在范围中) 或范围第一格.
@@ -628,6 +686,12 @@ class TacticsBattle:
         if self.phase != Phase.PLAYER_AIM or not u.is_player:
             return False
         u.facing = (dx, dy)
+        if self.aim_item_id is not None:
+            from core.item_use import ITEM_TEMPLATE
+            from core.skill_patterns import compute_template_pattern
+            self.aim_attack_range = compute_template_pattern(u, self.map, ITEM_TEMPLATE)
+            self.aim_cursor = (u.x, u.y)
+            return True
         rng = self.attack_range(u, self.aim_skill_id)
         if not rng:
             return False
@@ -644,6 +708,8 @@ class TacticsBattle:
         """
         if self.phase != Phase.PLAYER_AIM or self.aim_cursor is None:
             return False
+        if self.aim_item_id is not None:
+            return self._confirm_item_aim()
         u = self.current
         from core.skill_seq import is_heal_skill
         from core.skill_table import skill_targets_allies
@@ -714,6 +780,7 @@ class TacticsBattle:
         self.aim_cursor = None
         self.aim_attack_range = set()
         self.aim_skill_id = None
+        self.aim_item_id = None
         return True
 
     def post_attack_anim(self, attacker: BattleUnit) -> None:

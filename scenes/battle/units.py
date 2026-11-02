@@ -29,77 +29,82 @@ if TYPE_CHECKING:
 CAST_INTRO_MS = 0
 
 
-def draw_units(scene: "BattleScene", cam_x: int, cam_y: int) -> None:
-    """主单位渲染. Y-排序 + 视椎裁剪 + (shadow + sprite) blit.
+def unit_drawn(scene: "BattleScene", u, cam_x: int, cam_y: int) -> bool:
+    """这一帧是否画这个单位 (含影子): 玩家留尸, 敌人闪完消失; 视椎裁剪; 敌尸闪烁 off 帧 / 孙悟空召唤隐身不画."""
+    if not u.alive and not u.is_player and u.death_anim_time_ms >= scene.ENEMY_DEATH_TOTAL_MS:
+        return False
+    rect = scene._unit_rect(u, cam_x, cam_y)
+    if rect.right < 0 or rect.left > scene.surface.get_width():
+        return False
+    if rect.bottom < 0 or rect.top > scene.surface.get_height():
+        return False
+    if dead_blink_off(scene, u):
+        return False
+    return not getattr(u, 'cast_hidden', False)
+
+
+def unit_ground_y(scene: "BattleScene", u) -> int:
+    """单位实体的地面 y 像素 (= 原版排序键 +0xc >> 16): 格中心 + 演出 seq 位移 (同 tools.skill_trace unit_line)."""
+    from core.battle.draw_queue import ground_key
+    _, ry = scene._unit_draw_pos(u)
+    y16 = int(round(ry * TILE_H)) * 65536 + TILE_H * 32768
+    e = u.entity
+    if e is not None and (e.is_playing() or u.cast_hold):
+        y16 += e.y
+    return ground_key(y16)
+
+
+def draw_unit_shadow(scene: "BattleScene", u, cam_x: int, cam_y: int) -> None:
+    """影子: 活/死单位都画, 跟随单位一起出现/消失 (敌人 blink 期跟着闪). 原版影子项键恒 0 = 全部最先画."""
+    rect = scene._unit_rect(u, cam_x, cam_y)
+    blit_shadow(scene.surface, scene._shadow_surf, rect.centerx, rect.centery)
+
+
+def draw_unit(scene: "BattleScene", u, cam_x: int, cam_y: int) -> None:
+    """单位主体 (不含影子; 由 scene 按 core.battle.draw_queue 与特效统一排序后调).
 
     分支:
-      blink-off    敌人闪烁消失的 off 半周期, 整个单位不画
       dead corpse  死亡动画 (fall + corpse), 玩家永久, 敌人闪烁掉
       dying pose   HP=0 + 数字 flash 未到, 显示虚弱半蹲
       attacking    fm 逐帧 BBox + anchor (per-character 路径 + enemy global atlas 路径)
       reaction     ps_*06 row 2/3/4 + 像素位移
       idle/walk    通用 locomotion (含 weakened ping-pong + flying flap)
     """
-    # Y-排序: render_y 大的 (屏幕下方) 后画 → 在前. 同 y 时把当前行动单位放最后, 防被遮.
-    # 死单位: 玩家永远显示 (尸体可被复活), 敌人完成闪烁后跳过 (= 视觉消失但仍在 list).
-    def _should_render(u):
-        if u.alive: return True
-        if u.is_player: return True   # 留尸
-        return u.death_anim_time_ms < scene.ENEMY_DEATH_TOTAL_MS
-    units = sorted(
-        (u for u in scene.battle.all_units if _should_render(u)),
-        key=lambda u: (u.render_y, u is scene.battle.current),
-    )
-    for u in units:
-        rect = scene._unit_rect(u, cam_x, cam_y)
-        cx, cy = rect.centerx, rect.centery
-        # 视椎裁剪 (大致)
-        if rect.right < 0 or rect.left > scene.surface.get_width():
-            continue
-        if rect.bottom < 0 or rect.top > scene.surface.get_height():
-            continue
-        # 敌人尸体闪烁阶段: blink-off 那帧整个单位 (shadow + 尸体) 都不画.
-        if dead_blink_off(scene, u):
-            continue
-        # 孙悟空召唤隐身阶段: caster 完全不画 (神兽攻击时孙悟空已翻跟头消失).
-        if getattr(u, 'cast_hidden', False):
-            continue
-        # 影子: 活/死单位都画, 跟随单位一起出现/消失 (敌人 blink 期跟着闪).
-        blit_shadow(scene.surface, scene._shadow_surf, cx, cy)
-        # 死亡分支 (settle_pending 时抑制: AOE 延迟结算, 保持站立直到统一释放)
-        if not u.alive and not u.settle_pending:
-            if u.death_anim_time_ms >= 0:
-                draw_dead_unit(scene, u, cx, cy)
-            else:
-                draw_dying_pose(scene, u, cx, cy)
-            # 原版: 敌人死亡闪烁时 HP/MP 与尸体门控在同一可见位 → 一起闪烁.
-            # dead_blink_off 已在 blink-off 帧 continue 跳过整个单位, 故这里照画即同步闪.
-            _draw_enemy_hp_mp(scene, u, cx, cy)
-            continue
-        # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块. 旋风吹起时本体上移 (影子留地面).
-        r = rect.inflate(-8, -8)
-        body_cy = cy - int(round(u.wind_lift))
-        if u.sprite_key:
-            from core.normal_attack import flicker_sprite
-            fk = flicker_sprite(u)                  # 紫河变身闪烁: 这一 tick 显示新/旧形态
-            if fk is not None and fk != u.sprite_key:
-                saved, u.sprite_key = u.sprite_key, fk
-                try:
-                    _draw_live_sprite(scene, u, cx, body_cy)
-                finally:
-                    u.sprite_key = saved
-            else:
-                _draw_live_sprite(scene, u, cx, body_cy)
+    rect = scene._unit_rect(u, cam_x, cam_y)
+    cx, cy = rect.centerx, rect.centery
+    # 死亡分支 (settle_pending 时抑制: AOE 延迟结算, 保持站立直到统一释放)
+    if not u.alive and not u.settle_pending:
+        if u.death_anim_time_ms >= 0:
+            draw_dead_unit(scene, u, cx, cy)
         else:
-            color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
-            pygame.draw.rect(scene.surface, color, r)
-            pygame.draw.rect(scene.surface, (0, 0, 0), r, 2)
-        if u is scene.battle.current:
-            pygame.draw.rect(scene.surface, scene.HIGHLIGHT, rect.inflate(-2, -2), 2)
-            # 朝向小三角 (黄)
-            draw_facing_arrow(scene, u, rect)
-        # HP / MP 持久标签: 仅敌人显示 (己方状态后续移到屏幕顶部 HUD).
+            draw_dying_pose(scene, u, cx, cy)
+        # 原版: 敌人死亡闪烁时 HP/MP 与尸体门控在同一可见位 → 一起闪烁 (blink-off 帧整个单位不进队列).
         _draw_enemy_hp_mp(scene, u, cx, cy)
+        return
+    # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块. 旋风吹起时本体上移 (影子留地面).
+    r = rect.inflate(-8, -8)
+    body_cy = cy - int(round(u.wind_lift))
+    if u.sprite_key:
+        from core.normal_attack import flicker_sprite
+        fk = flicker_sprite(u)                  # 紫河变身闪烁: 这一 tick 显示新/旧形态
+        if fk is not None and fk != u.sprite_key:
+            saved, u.sprite_key = u.sprite_key, fk
+            try:
+                _draw_live_sprite(scene, u, cx, body_cy)
+            finally:
+                u.sprite_key = saved
+        else:
+            _draw_live_sprite(scene, u, cx, body_cy)
+    else:
+        color = u.color if not u.has_acted else tuple(c // 2 for c in u.color)
+        pygame.draw.rect(scene.surface, color, r)
+        pygame.draw.rect(scene.surface, (0, 0, 0), r, 2)
+    if u is scene.battle.current:
+        pygame.draw.rect(scene.surface, scene.HIGHLIGHT, rect.inflate(-2, -2), 2)
+        # 朝向小三角 (黄)
+        draw_facing_arrow(scene, u, rect)
+    # HP / MP 持久标签: 仅敌人显示 (己方状态后续移到屏幕顶部 HUD).
+    _draw_enemy_hp_mp(scene, u, cx, cy)
 
 
 def _draw_enemy_hp_mp(scene: "BattleScene", u, cx: int, cy: int) -> None:

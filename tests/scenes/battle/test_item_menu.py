@@ -59,10 +59,18 @@ def test_arena_item_menu_opens_and_uses_sandbox_item(arena_scene):
     assert items
     u = sc.battle.current
     u.hp = 1
-    _key(sc, pygame.K_RETURN)               # 用第一个消耗品
-    assert u.hp > 1
+    from core.battle.data import Phase
+    _key(sc, pygame.K_RETURN)               # 选第一个消耗品 → 道具瞄准 (自己 + 面前一格, 光标默认自己)
     assert not sc._item_submenu
+    assert sc.battle.phase == Phase.PLAYER_AIM and sc.battle.aim_cursor == (u.x, u.y)
+    _key(sc, pygame.K_RETURN)               # 确认: 当场结算, 扣背包
+    assert u.hp > 1
     assert sum(c for _, c in sc.inventory.consumables()) == sum(c for _, c in items) - 1
+    for _ in range(600):                    # 演出 (起手 → 图标 → 光点 → 白字) 跑完后结束该角色回合
+        if sc.battle.current is not u:
+            break
+        sc.update(33)
+    assert sc.battle.current is not u
 
 
 def test_item_menu_without_inventory_shows_empty(arena_scene):

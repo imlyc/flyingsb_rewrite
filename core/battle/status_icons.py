@@ -76,7 +76,7 @@ def _icon(bt, think_fn, x, y, z, seq=None, /, atlas=None, frame=0, **ud) -> "Ent
     e.flags |= 0x40
     e.x, e.y, e.z = x, y, -z
     e.state_code = DONE
-    e.user_data.update(kind='hit_effect', projectile=True, status_icon=True, ez=z, draw_order=15, **ud)
+    e.user_data.update(kind='hit_effect', projectile=True, status_icon=True, ez=z, **ud)
     if seq is not None:
         e.atlas_slot, e.frame_idx = seq[0][1], seq[0][2]
         battle.engine.attach_seq(e, tuple_to_bytecode(seq))
