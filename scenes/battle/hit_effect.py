@@ -71,7 +71,8 @@ def draw_effect(scene: "BattleScene", ent, cam_x: int, cam_y: int) -> None:
     if ent.user_data.get('flip_x'):          # 水平翻转 (祥云朝向): 镜像图 + 镜像锚点
         sub = pygame.transform.flip(sub, True, False)
         ax = fw - ax
-    sx = (ent.x >> 16) - cam_x - ax
+    # jx / jy: exe 实体 +0x20 / +0x24 绘制偏移 (16.16, 不进排序键; 鬧鐘抖动)
+    sx = ((ent.x + ent.user_data.get('jx', 0)) >> 16) - cam_x - ax
     # z 表示离地面高度 (< 0 = 上空): 加到 screen y 上让飞行物显示在 world_y 上方.
-    sy = (ent.y >> 16) + (ent.z >> 16) - cam_y - ay
+    sy = ((ent.y + ent.user_data.get('jy', 0)) >> 16) + (ent.z >> 16) - cam_y - ay
     scene.surface.blit(sub, (sx, sy))

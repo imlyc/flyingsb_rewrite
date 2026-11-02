@@ -29,7 +29,6 @@ from core.movement_input import DirectionalHold
 from core.sprites.base import TILE_W, TILE_H, load_shadow
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
-from core.items import get_item_name
 from scenes.battle import hud as hud_mod
 from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
@@ -263,13 +262,10 @@ class BattleScene(Scene):
         self._item_menu = BattleItemMenu(self.audio, inv, item_icon_box(*menu_center(self)))
 
     def use_consumable(self, item_id: int) -> None:
-        """道具窗口选中: 进道具瞄准 (模板按道具, core.item_use.item_template), Enter 确认后才使用并扣背包 (原版: 用完结束该角色回合)."""
+        """道具窗口选中: 进道具瞄准 (模板按道具, core.item_use.item_template), Enter 确认后才使用并扣背包 (原版: 用完结束该角色回合).
+        没有一个目标生效 (如煙霧彈 / 雙光, 或对象没有该异常) 时确认不成立, 留在瞄准 (exe FUN_004a6efe 返回 0)."""
         u = self.battle.current
         if u is None or not u.is_player or self.inventory is None:
-            return
-        from core.battle import energy
-        if item_id not in energy.HP_ITEMS + energy.MP_ITEMS + energy.REVIVE_ITEMS + (energy.ITEM_SG_FULL,):
-            self.battle._log(f"{get_item_name(item_id)} 无法使用")
             return
         if self.battle.enter_item_aim(item_id):
             self._menu_open = False

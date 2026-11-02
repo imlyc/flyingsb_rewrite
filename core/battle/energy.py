@@ -38,6 +38,9 @@ NO_SG_STATUS = (0x200, 0x800)            # 睡眠 / 痲痺 (倒地 = not alive)
 HP_ITEMS = (0x12b, 0x12c, 0x12d, 0x131, 0x132, 0x133)
 MP_ITEMS = (0x12e, 0x12f, 0x130, 0x131, 0x132, 0x133)
 REVIVE_ITEMS = (0x132, 0x134)
+# 解状态道具 → 清的状态位 (连同计数 nibble): 解毒剂 中毒 / 鬧鐘 睡眠 / 法式親吻 沉默 / 肌肉恢復膏 痲痺 / 夢夢777 咀咒 / 萬靈丹 五种
+CURE_ITEMS = {0x136: 0x100, 0x137: 0x200, 0x138: 0x400, 0x139: 0x800, 0x13c: 0x1000, 0x13d: 0x1f00}
+BATTLE_ITEMS = HP_ITEMS + MP_ITEMS + REVIVE_ITEMS + (ITEM_SG_FULL,) + tuple(CURE_ITEMS)   # 有结算的战斗道具 (煙霧彈/雙光 无)
 
 
 def energy_type(u: "BattleUnit") -> int:
@@ -122,14 +125,15 @@ def on_hit(attacker: "BattleUnit", defender: "BattleUnit") -> None:
 
 
 def battle_item(battle, user: "BattleUnit", target: "BattleUnit", item_id: int, falloff: int = 8) -> dict:
-    """FUN_004a6efe act==3: 返回 {'hp': 回复量, 'mp': 回复量, 'sg': 增量, 'revived': bool}; 空 dict = 无效果."""
+    """FUN_004a6efe act==3: 返回 {'hp': 回复量, 'mp': 回复量, 'sg': 增量, 'revived': bool, 'cured': 清掉的位}; 空 dict = 无效果.
+    复活 (天桃 / 強力針灸) 先把倒地者拉到 最大 HP / 5, 之后按存活者照常结算 (天桃再 HP/MP 全回复; 強力針灸 'hp' = 复活后 HP)."""
     from core.items import item_power
+    from core.battle.status import clear_status
     out: dict = {}
     if item_id in REVIVE_ITEMS and not target.alive:
         target.hp = target.max_hp // 5
         out['revived'] = True
         out['hp'] = target.hp
-        return out
     if not target.alive:
         return out
     power = item_power(item_id)
@@ -150,6 +154,12 @@ def battle_item(battle, user: "BattleUnit", target: "BattleUnit", item_id: int, 
     if item_id == ITEM_SG_FULL and uses_sg(target):
         out['sg'] = SG_MAX - target.sg
         target.sg = SG_MAX
+    mask = CURE_ITEMS.get(item_id, 0)
+    if target.status_bits & mask:
+        out['cured'] = target.status_bits & mask
+        for bit in (0x100, 0x200, 0x400, 0x800, 0x1000):
+            if mask & bit:
+                clear_status(target, bit)
     return out
 
 

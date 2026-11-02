@@ -608,16 +608,16 @@ class TacticsBattle:
         return True
 
     def _confirm_item_aim(self) -> bool:
-        """道具确认 (FUN_004a6efe act==3): 光标格的我方 (复活药 = 倒地者, 其余 = 存活者), 当场结算, 演出 (core.item_use) 后结束回合."""
+        """道具确认 (FUN_004a6efe act==3): 作用格的我方 (倒地者只有复活药生效), 当场结算, 演出 (core.item_use) 后结束回合.
+        没有一个目标生效 (满血以外的: 无该异常 / 无 SG / 煙霧彈 雙光) → 不用 (exe 返回 0, 道具不扣)."""
         from core.battle import energy
-        from core.item_use import REVIVE_ITEMS, start
+        from core.item_use import start
         u = self.current
         item = self.aim_item_id
-        revive = item in REVIVE_ITEMS
         targets = []
         for (x, y) in sorted(self.damage_range(self.aim_cursor), key=row_major):
             occ = self.q.occupant(x, y)
-            if occ is None or occ.is_player != u.is_player or occ.alive == revive:
+            if occ is None or occ.is_player != u.is_player:
                 continue
             targets.append(occ)
         values = {}

@@ -70,6 +70,8 @@ def main():
     ap.add_argument('--attack', type=int, default=None, help='普攻表 idx (普攻实录; skill 参数忽略)')
     ap.add_argument('--sg', type=int, default=0, help='施法者兴奋值 (SG 型角色要够门槛才放得出)')
     ap.add_argument('--item', type=lambda v: int(v, 0), default=None, help='道具 id (道具使用; skill 参数忽略, 队友 = 目标, 复活药时队友倒下)')
+    ap.add_argument('--ally-dead', type=int, default=0, help='1 = 队友倒下 (天桃复活)')
+    ap.add_argument('--target-status', type=lambda v: int(v, 0), default=0, help='目标 (有队友时队友, 否则施法者) 带的异常状态位 (解状态道具)')
     ap.add_argument('--max-ticks', type=int, default=900); ap.add_argument('--out', default='-')
     a = ap.parse_args()
     p = _unit(a.caster, 15, 53, is_player=True, agile=99)
@@ -79,13 +81,18 @@ def main():
     if a.ally_dx is not None and (a.ally_dx, a.ally_dy) != (0, 0):      # (0,0) = 目标就是施法者自己
         ally = _unit('ally', 15 + a.ally_dx, 53 + a.ally_dy, is_player=True, agile=50); players.append(ally)
         from core.item_use import REVIVE_ITEMS
-        if a.skill in (0x09, 0x2b, 0x0f) if a.item is None else a.item in REVIVE_ITEMS:   # 复活技能 / 复活药: 队友得是倒下的才是目标
+        if a.ally_dead or (a.skill in (0x09, 0x2b, 0x0f) if a.item is None else a.item in REVIVE_ITEMS):   # 复活技能 / 复活药: 队友得是倒下的才是目标
             ally.hp = 0; ally.death_anim_time_ms = 0
     es = [e] + [_unit(f'enemy{i}', 15 + int(t.split(',')[0]), 53 + int(t.split(',')[1]), is_player=False, agile=1)
                 for i, t in enumerate(x for x in a.more_enemies.split(';') if x)]
     b = TacticsBattle(players=players, enemies=es, battle_map=BattleMap(32, 64), rng=ExeRng(a.seed),
                       player_positions=[(u.x, u.y) for u in players], enemy_positions=[(u.x, u.y) for u in es])
     p.facing = FACING[a.facing]
+    if a.target_status:
+        from core.battle.status import apply_status
+        for bit in (0x100, 0x200, 0x400, 0x800, 0x1000):
+            if a.target_status & bit:
+                apply_status(players[-1], bit, 3)
     if a.ally_facing and len(players) > 1:
         players[1].facing = FACING[a.ally_facing]
     if a.skill == 0x13:                         # 召喚精靈: 实录目标是自己/队友 → 回血精灵, 否则攻击精灵

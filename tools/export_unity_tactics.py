@@ -397,14 +397,24 @@ def skill_trace_cases(unity: Path | None = None) -> list:
             out.append({'fn': 'skill_trace', 'units': [], 'rng_after': 0, 'seed': 0,
                         'args': {'skill': sid, 'caster': name, 'facing': tag, 'argv': argv[2:]},
                         'result': hashlib.md5(text.encode()).hexdigest()})
-    # 道具 (skill_trace --item): 回复药 3 种 × {自己, 正前方队友} + 強力針灸 复活正前方倒地队友, 各 × 4 朝向; skill = 道具 id
-    for item, variants in ((0x12b, ('self', 'ally')), (0x12c, ('self', 'ally')), (0x12d, ('self', 'ally')), (0x134, ('ally',))):
+    from core.battle import energy as energy_mod
+    # 道具 (skill_trace --item): 各战斗道具 × {自己, 正前方队友 (dead = 倒地)} × 4 朝向; 解状态道具目标带对应异常; skill = 道具 id
+    sa = ('self', 'ally')
+    item_cases = [(0x12b, sa), (0x12c, sa), (0x12d, sa), (0x134, ('ally',)), (0x12e, sa), (0x12f, sa), (0x130, sa),
+                  (0x131, sa), (0x132, ('self', 'ally', 'dead')), (0x133, ('self',)), (0x136, sa), (0x137, ('ally',)),
+                  (0x138, sa), (0x139, ('ally',)), (0x13a, ('self',)), (0x13c, sa), (0x13d, sa)]
+    for item, variants in item_cases:
         for facing, (fx, fy) in skill_trace.FACING.items():
             for variant in variants:
-                d = (fx, fy) if variant == 'ally' else (0, 0)
-                extra = (['--ally-dx', str(fx), '--ally-dy', str(fy)] if variant == 'ally' else []) + \
+                d = (fx, fy) if variant != 'self' else (0, 0)
+                extra = (['--ally-dx', str(fx), '--ally-dy', str(fy)] if variant != 'self' else []) + \
                         ['--cursor-dx', str(d[0]), '--cursor-dy', str(d[1])]
-                argv = ['skill_trace', '0', '--item', str(item), '--caster', '三藏', '--facing', facing] + extra
+                if variant == 'dead':
+                    extra += ['--ally-dead', '1']
+                if item in energy_mod.CURE_ITEMS:
+                    extra += ['--target-status', str(energy_mod.CURE_ITEMS[item])]
+                caster = '三藏法师' if item == energy_mod.ITEM_SG_FULL else '三藏'      # 興奮劑: SG 型才生效
+                argv = ['skill_trace', '0', '--item', str(item), '--caster', caster, '--facing', facing] + extra
                 buf = io.StringIO()
                 old = sys.argv
                 sys.argv = argv
@@ -418,7 +428,7 @@ def skill_trace_cases(unity: Path | None = None) -> list:
                 if local:
                     (local / f'skill_{item}_{tag}.txt').write_text(text)
                 out.append({'fn': 'skill_trace', 'units': [], 'rng_after': 0, 'seed': 0,
-                            'args': {'skill': item, 'caster': '三藏', 'facing': tag, 'argv': argv[2:]},
+                            'args': {'skill': item, 'caster': caster, 'facing': tag, 'argv': argv[2:]},
                             'result': hashlib.md5(text.encode()).hexdigest()})
     return out
 
@@ -638,12 +648,19 @@ def golden(n: int = 400, unity: Path | None = None) -> dict:
         energy.pay(q, sk)
         add('energy_pay', rng(seed), [qpre], {'sid': sk}, [q.mp, q.sg])
         b = rng(seed)
-        it = g.r.choice(energy.HP_ITEMS + energy.MP_ITEMS + energy.REVIVE_ITEMS + (energy.ITEM_SG_FULL,))
+        it = g.r.choice(energy.BATTLE_ITEMS)
         q = g.player()
+        from core.battle.status import apply_status
+        for bit in (0x100, 0x200, 0x400, 0x800, 0x1000):
+            if g.r.random() < 0.3:
+                apply_status(q, bit, g.r.randrange(1, 4))
+        if g.r.random() < 0.2:
+            q.hp = 0
         qpre = snap(q)
         r = energy.battle_item(b, p, q, it, fo)
         add('battle_item', b, [pre[0], qpre], {'item': it, 'falloff': fo},
-            [r.get('hp', -1), r.get('mp', -1), r.get('sg', -1), int(r.get('revived', False)), q.hp, q.mp, q.sg])
+            [r.get('hp', -1), r.get('mp', -1), r.get('sg', -1), int(r.get('revived', False)), q.hp, q.mp, q.sg,
+             r.get('cured', -1), q.status_bits, sorted(q.status_turns)])
         # 普攻表
         name, ch = g.character()
         weapon = None if ch.Hand in (0xFFFFFFFF, -1) else ch.Hand
