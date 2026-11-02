@@ -57,10 +57,10 @@ def _cos(a: int) -> int:
 
 
 def _upos(u) -> tuple[int, int, int]:
-    """角色当前世界坐标 (含 seq / 受击位移) + z (exe 正向)."""
+    """角色当前世界坐标 (含走格 / seq / 受击位移) + z (exe 正向). 走格用 render_x/y (逻辑格 x/y 出发即跳到终点)."""
     ent = u.entity
-    x = (u.x * TILE_W + TILE_W // 2) * FP
-    y = (u.y * TILE_H + TILE_H // 2) * FP
+    x = int((u.render_x * TILE_W + TILE_W // 2) * FP)
+    y = int((u.render_y * TILE_H + TILE_H // 2) * FP)
     z = 0
     if ent is not None:
         x += ent.x

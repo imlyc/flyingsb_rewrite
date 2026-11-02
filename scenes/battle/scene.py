@@ -238,15 +238,22 @@ class BattleScene(Scene):
         effects = [e for e in b.engine.entities if id(e) not in unit_ents and effect_drawn(e)]
         for u in units:
             units_mod.draw_unit_shadow(self, u, cam_x, cam_y)
+        def cam_of(e):
+            """跟随单位的特效 (状态图标) 随单位一起做 tick 间插值, 否则走格时比单位早一 tick."""
+            u = e.user_data.get('unit') if e.user_data.get('status_icon') else None
+            if u is None or u.loco_prev is None:
+                return cam_x, cam_y
+            rx, ry = self._unit_draw_pos(u)
+            return cam_x - round((rx - u.render_x) * TILE_W), cam_y - round((ry - u.render_y) * TILE_H)
         for e in effects:
-            draw_effect_shadow(self, e, cam_x, cam_y)
+            draw_effect_shadow(self, e, *cam_of(e))
         items = [(True, u, units_mod.unit_ground_y(self, u)) for u in units] + \
                 [(False, e, draw_queue.entity_key(e)) for e in effects]
         for is_unit, obj, _ in draw_queue.selection_sort(items, key=lambda it: it[2]):
             if is_unit:
                 units_mod.draw_unit(self, obj, cam_x, cam_y)
             else:
-                draw_effect(self, obj, cam_x, cam_y)
+                draw_effect(self, obj, *cam_of(obj))
 
     # ------- 道具子菜单 -------
     def use_consumable(self, item_id: int) -> None:
