@@ -6,6 +6,7 @@
    6 FUN_0042a9ae 装备栏 (頭部/身體/手部/飾品/飾品; 获焦点时 ↑↓ 选槽, Enter 开列表)
   14 FUN_00434b30 金钱;  1 FUN_00420e32 名字;  2 FUN_004211de 子菜单 道具/特殊能力/裝備
    4 FUN_0042534d 道具列表 (mode 6 = 换装候选, mode 2 = 可用道具);  5 FUN_00429169 特殊能力;  13 FUN_004347a3 说明栏
+  0xf FUN_00434eff 战斗十字菜单 (战斗菜单 scenes.battle.battle_menu 用; 道具列表 / 特殊能力 mode 0xf 由它打开)
   光标 FUN_0043854a: 矩形 16.16 定点插值 (步长 = 差/6, 剩余 ≤ 2 步改半步收敛, 期间不收键), 灰阶调色板 0xf8..0xff 轮转描两圈.
 窗口: FUN_0041e3ec 纯色底 (菜单色 69,107,88) + 1px 高光/暗边; 弹出缩放 0x1999 → +0x7ef9/t 过冲 → -0x28f/t 回 1.0, 关闭 -0x4f5c/t.
 文字: 新細明體 16px (scenes.battle.status_bar.draw_text, y = 垂直中线, 先描边后主色); 界面文字统一简体.
@@ -27,8 +28,8 @@ TICK_MS = 17
 SCREEN_W, SCREEN_H = 800, 600
 
 # ---- 调色板 (原版菜单调色板实值, 原生截图读出) ----
-# 菜单色 (idx 1) = 系统环境设定 红/绿/蓝 (FlyingSB.INI menu_color_*), 道具/技能/世界地图 Esc 菜单共用; 这里暂定 = 战斗技能菜单色
-# (scenes.battle.hud.PANEL_FILL, 原版截图采样; 当初核对的原生截图设成了 69,107,88). Unity 版跟随设定 (BattleUiFrame.MenuColor).
+# 菜单色 (idx 1) = 系统环境设定 红/绿/蓝 (FlyingSB.INI menu_color_*), 道具/技能/世界地图 Esc 菜单共用; 这里暂定 93,90,55
+# (原版技能菜单截图采样; 当初核对的原生截图设成了 69,107,88). Unity 版跟随设定 (BattleUiFrame.MenuColor).
 WIN = (93, 90, 55)             # idx 1
 SHADE = (46, 45, 27)           # idx 2 = 菜单色 / 2 (整数)
 WHITE, BLACK = (255, 255, 255), (0, 0, 0)
@@ -54,12 +55,13 @@ _REPEATABLE = (K_UP, K_DOWN, K_LEFT, K_RIGHT, K_PGUP, K_PGDN)
 # ---- 音效 (exe sound id) ----
 SND_CURSOR, SND_OK, SND_CANCEL, SND_OPEN, SND_BUZZ, SND_HEAL = 0x144, 0x142, 0x143, 0x10E, 0x141, 0xCA
 
-MODE_BATTLE = 0xF                                         # 道具列表由战斗十字菜单 (窗口 0xf) 打开
+MODE_BATTLE = 0xF                                         # 由战斗十字菜单 (窗口 0xf) 打开的道具列表 / 特殊能力
 
 # 窗口号 (exe 0x7b8eb0[n])
 W_NAME, W_SUB, W_TEAM, W_LIST, W_SKILL, W_EQUIP, W_STATS, W_DESC, W_MONEY = 1, 2, 3, 4, 5, 6, 12, 13, 14
-_FOCUSABLE = {W_SUB, W_LIST, W_SKILL, W_EQUIP}          # 0x54cad4 标志
-_OPEN_SOUND = {W_SUB, W_TEAM, W_LIST, W_SKILL}          # 0x54cad8 标志
+W_CROSS = 0xF                                             # 战斗十字菜单 (FUN_00434eff)
+_FOCUSABLE = {W_SUB, W_LIST, W_SKILL, W_EQUIP, W_CROSS}  # 0x54cad4 标志
+_OPEN_SOUND = {W_SUB, W_TEAM, W_LIST, W_SKILL, W_CROSS}  # 0x54cad8 标志
 
 SLOT_LABELS = ("头部：", "身体：", "手部：", "饰品：", "饰品：")
 LIST_TITLES = ("　头部防具", "　身体防具", "　武　　器", "　饰　　品 ", "　饰　　品 ")
@@ -228,8 +230,10 @@ class Cursor:
         self.dst = [l << 16, t << 16, r << 16, b << 16]
         self.state = 0x14
 
-    def reset_full(self) -> None:
-        self.cur = [1 << 16, 1 << 16, (SCREEN_W - 1) << 16, (SCREEN_H - 1) << 16]
+    def reset_full(self, view: tuple[int, int, int, int] = (0, 0, SCREEN_W, SCREEN_H)) -> None:
+        """光标当前 = 目标 = 画面框内缩 1px (exe 0x745548 / 0x7af550 / 0x7af590 / 0x7af7a8 ±1)."""
+        l, t, r, b = view
+        self.cur = [(l + 1) << 16, (t + 1) << 16, (r - 1) << 16, (b - 1) << 16]
         self.dst = list(self.cur)
 
     def tick(self) -> None:
@@ -996,7 +1000,7 @@ class ListWin(Win):
         self.remove()
 
 
-# ---------------- 5: 特殊能力 (列表 + 说明; 场外施法未做) ----------------
+# ---------------- 5: 特殊能力 (列表 + 说明; 场外施法未做; mode 0xf = 战斗十字菜单 ↑) ----------------
 class SkillWin(Win):
     W, H = 256, 410
 
@@ -1005,6 +1009,7 @@ class SkillWin(Win):
         self.mode = mode
         self.skills: list[int] = []
         self.enabled: list[bool] = []
+        self.picked = -1                                 # exe +0xe8: 选中的行 (-1 = 取消)
 
     def row_rect(self, r: int):
         return (self.W // 2 - 0x78, 0x24 + 0x18 * r, self.W // 2 + 0x78, 0x40 + 0x18 * r)
@@ -1012,6 +1017,10 @@ class SkillWin(Win):
     def _build(self) -> None:
         """FUN_0042878a: 角色表 +0x94 的 10 个已学技能; 场外只有 pattern&1 (回复类) 可用; MP/SG 够才亮."""
         from core.skill_table import SKILL_TABLE
+        u = getattr(self.sc, "battle_unit", None)
+        if u is not None:
+            self._build_battle(u)
+            return
         m = self.sc.member
         ch = m.ch
         sk = list(getattr(ch, "skills", []) or [])
@@ -1040,6 +1049,20 @@ class SkillWin(Win):
                     ok = EQ._i32(ch.CurrentMP) >= _fx(row[5] * scale)
             self.skills.append(s)
             self.enabled.append(ok)
+
+    def _build_battle(self, u) -> None:
+        """战斗 (mode 0xf): 同一套规则, 读战斗单位的实时 MP / SG (exe 战斗就写在角色表上) — core.battle.energy.can_cast
+        (MP 型按 消耗×装备倍率, SG 型按位置门槛, 紫河兽形不可用)."""
+        from core.battle import energy
+        eq = set(getattr(u, "equipment", ()) or ())
+        scale = 0x10000
+        if 0xFA in eq:
+            scale = 0x20000
+        if 0xFB in eq:
+            scale = 0x8000
+        self.scale = scale
+        self.skills = (list(u.known_skills) + [-1] * 10)[:10]
+        self.enabled = [s >= 0 and energy.can_cast(u, s) for s in self.skills]
 
     def _desc(self) -> None:
         from core.skills import get_skill_desc
@@ -1082,10 +1105,19 @@ class SkillWin(Win):
         elif st == 0x14:
             k = self.key()
             if k == K_CANCEL:
+                self.picked = -1
                 self.state = 100
                 sc.sound(SND_CANCEL)
             elif k == K_OK:
-                sc.sound(SND_BUZZ)                       # TODO 场外施法 (FUN_00428cf4 + 转盘选目标) 未做
+                if self.mode != MODE_BATTLE:
+                    sc.sound(SND_BUZZ)                   # TODO 场外施法 (FUN_00428cf4 + 转盘选目标) 未做
+                elif any(s >= 0 for s in self.skills):   # exe 0x7b787c 已学数 > 0
+                    if not self.enabled[self.row]:
+                        sc.sound(SND_BUZZ)
+                    else:
+                        sc.sound(SND_OK)
+                        self.picked = self.row
+                        self.state = 100
             elif k in (K_UP, K_DOWN):
                 d = -1 if k == K_UP else 1
                 r = self.row + d
@@ -1105,6 +1137,18 @@ class SkillWin(Win):
             self.state = 0x14
         if self.state == 0x6E:
             sc.skill_mem[sc.member.record] = self.row
+            if self.mode == MODE_BATTLE:
+                if self.picked < 0:                      # Esc: 重开十字菜单
+                    self.remove()
+                    sc.open(W_CROSS)
+                else:                                    # 选中: 光标扩回画面框, 菜单系统结果 4 (技能)
+                    l, t, r, b = sc.view
+                    sc.cursor.move_to(l + 1, t + 1, r - 1, b - 1)
+                    sc.skill_chosen(self.skills[self.picked])
+                    self.remove()
+                sc.close(W_DESC)
+                sc.mode = self.mode_prev
+                return
             sc.open(W_SUB)
             sc.focus = sc.wins.get(W_SUB)
             sc.close(W_DESC)
@@ -1112,14 +1156,148 @@ class SkillWin(Win):
             self.remove()
 
 
+# ---------------- 0xf: 战斗十字菜单 ----------------
+class CrossWin(Win):
+    """FUN_00434eff: 行动单位头顶 4 个 SMENU 图标 (技能 上 / OP. 右 / END 下 / 道具 左) 绕中心转出 / 转入.
+    中心 = 单位实体 (x, y - z) 的画面坐标上移 0x20. 开 (state 1): 光标从画面框缩到中心 ±1; 半径每 tick +0x20/N、角度从 0xc000
+    每 tick +0x4000/N (N = menu_cursor_move_frame), 角度过 0xffff 定格半径 0x20.
+    ← / ↑ / → = 光标移到该图标框, 转入后开窗口 4 (道具) / 5 (特殊能力) / 0x10 (OP.); ↓ 两段式: 先选中 END (光标框到 END),
+    再 ↓ / Enter 结束回合, ↑←→Esc 退选中; Esc = 关 (菜单系统结果 1)."""
+    ICONS = (0, 2, 3, 1)                         # exe 栈上 {0,2,3,1}: SMENU 图标号, 依次角度 +0x4000
+
+    def __init__(self, sc, idx) -> None:
+        super().__init__(sc, idx)
+        self.angle = 0                           # +0x14c
+        self.speed = 0                           # +0x150
+        self.rx = self.ry = 0                    # +0x158 / +0x15c (像素)
+        self.armed = 0                           # +0xe8: 0 / 1 选中 END / 2 刚按 ↓ / 3 退选中
+        self.result = -1                         # +0x1a0
+
+    def _box(self, l: int, t: int, r: int, b: int) -> None:
+        self.sc.cursor.move_to(self.cx + l, self.cy + t, self.cx + r, self.cy + b)
+
+    def tick(self) -> None:
+        sc = self.sc
+        n = sc.cursor.STEPS
+        st = self.state
+        if st == 1:
+            self.angle = 0xC000
+            self.speed = _tdiv(0x4000, n)
+            self.rx = self.ry = 0
+            self.cx, self.cy = sc.cross_center
+            self.result = -1
+            sc.cursor.reset_full(sc.view)        # 光标当前 = 目标 = 画面框 (内缩 1px)
+            sc.cursor.state = 10
+            self._box(-1, -1, 1, 1)
+            self.state = 10
+        elif st == 10:
+            self.rx += _tdiv(0x20, n)
+            self.ry += _tdiv(0x20, n)
+            self.angle += self.speed
+            if self.angle > 0xFFFF:
+                self.angle = 0
+                self.rx = self.ry = 0x20
+                self.state = 0x14
+        elif st == 0x14:
+            if self.focused():
+                k = self.key()
+                if k == K_CANCEL:
+                    if self.armed == 1:
+                        self.armed = 3
+                    else:
+                        sc.sound(SND_CANCEL)
+                        self.result = -1
+                        self.state = 100
+                elif k == K_OK:
+                    if self.armed == 1:
+                        self.result = 0x12
+                elif k == K_UP:
+                    if self.armed == 1:
+                        self.armed = 3
+                    else:
+                        self.result = 5
+                        self._box(-0x12, -0x32, 0x12, -0xE)
+                elif k == K_DOWN:
+                    if self.armed == 1:
+                        self.result = 0x12
+                    else:
+                        self.armed = 2
+                elif k == K_LEFT:
+                    if self.armed == 1:
+                        self.armed = 3
+                    else:
+                        self.result = 4
+                        self._box(-0x32, -0x12, -0xE, 0x12)
+                elif k == K_RIGHT:
+                    if self.armed == 1:
+                        self.armed = 3
+                    else:
+                        self.result = 0x10
+                        self._box(0xE, -0x12, 0x32, 0x12)
+                if self.result < 0:
+                    if self.armed == 2:
+                        sc.sound(SND_CURSOR)
+                        self._box(-0x12, -0x12 + 0x20, 0x12, 0x12 + 0x20)
+                        self.armed = 1
+                    if self.armed == 3:
+                        sc.sound(SND_CURSOR)
+                        self._box(-1, -1, 1, 1)
+                        self.armed = 0
+                else:
+                    sc.sound(SND_OK)
+                    self.state = 100
+        elif st == 100:
+            self.rx -= _tdiv(0x20, n)
+            self.ry -= _tdiv(0x20, n)
+            self.angle = (self.angle + 0x10000 + self.speed) % 0x10000
+            if self.angle > 0x3FFF:
+                self.angle = 0x4000
+                self.rx = self.ry = 0
+                self.state = 0x6E
+        elif st == 0x6E:
+            r = self.result
+            self.remove()
+            if r == 4:
+                sc.mode = MODE_BATTLE
+                sc.open(W_LIST, mode=MODE_BATTLE)
+            elif r == 5:
+                sc.mode = MODE_BATTLE
+                sc.open(W_SKILL, mode=MODE_BATTLE)
+            elif r == 0x10:                      # TODO 窗口 0x10 (FUN_00435af5 战斗设定) 未做: 当它立即关掉 → 重开 0xf
+                sc.open(W_CROSS)
+            elif r == 0x12:
+                sc.cross_result(6)
+            else:
+                sc.cross_result(1)
+
+    def draw(self, dst: pygame.Surface) -> None:
+        """每个图标: 中心 (cx + sin(a)·rx, cy - cos(a)·ry), 源 28×28, 目标边长 trunc(28·rx/32) (左上 = 中心 - trunc(14·rx/32))."""
+        if self.dead or self.rx <= 0:
+            return
+        f = self.rx / 32.0
+        half, size = int(f * 14.0), int(f * 28.0)
+        if size < 1:
+            return
+        sheet = _smenu_sheet()
+        a = self.angle
+        for idx in self.ICONS:
+            x = self.cx + _fx(fsin(a) * self.rx)
+            y = self.cy - _fx(fcos(a) * self.ry)
+            img = pygame.transform.scale(sheet.subsurface((idx * 32, 0, 28, 28)), (size, size))
+            img.set_colorkey(sheet.get_colorkey())
+            dst.blit(img, (x - half, y - half))
+            a = (a + 0x4000) & 0xFFFF
+
+
 _WIN_CLASSES = {W_NAME: NameWin, W_SUB: SubWin, W_TEAM: TeamWin, W_LIST: ListWin, W_SKILL: SkillWin,
-                W_EQUIP: EquipWin, W_STATS: StatsWin, W_DESC: DescWin, W_MONEY: MoneyWin}
+                W_EQUIP: EquipWin, W_STATS: StatsWin, W_DESC: DescWin, W_MONEY: MoneyWin, W_CROSS: CrossWin}
 
 
 # ---------------- 窗口宿主 (FUN_0041d429 菜单系统: 窗口表 + 光标实体 + 键) ----------------
 class WindowHost:
     """一组窗口实体 + 光标 + 键盘 (exe 菜单系统). 隊伍情報与战斗道具菜单共用; 子类给 inv / 各窗口用到的字段."""
     _battle_item_mem = 0                  # exe 0x7b8f20: 战斗道具列表光标 (全局, 不分角色)
+    skill_mem: dict[int, int] = {}        # exe 0x7b82bc[角色记录号]: 特殊能力光标 (场外 / 战斗共用)
 
     def __init__(self, audio, inv) -> None:
         self.audio = audio
@@ -1133,6 +1311,7 @@ class WindowHost:
         self._keys: list[int] = []
         self._held: dict[int, int] = {}
         self.desc_pending: str | None = None
+        self.view = (0, 0, SCREEN_W, SCREEN_H)    # 画面框 (战斗 = 战斗视口)
         self.tick_ms = TICK_MS
         self._acc = 0
 
@@ -1239,7 +1418,6 @@ class TeamInfoScene(WindowHost):
         self.sub_row = TeamInfoScene._sub_row
         self.list_mem = TeamInfoScene._list_mem
         self.item_mem = TeamInfoScene._item_mem
-        self.skill_mem: dict[int, int] = {}
         self.finished = False
         self._frames: dict[int, tuple] = {}
         self.backdrop = self._dim(backdrop)

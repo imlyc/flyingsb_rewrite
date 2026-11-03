@@ -47,7 +47,7 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
 
     _tick_camera(scene)
     _tick_phase_transitions(scene, now)
-    _tick_menu_anim(scene, dt_ms)
+    _tick_menu(scene, dt_ms)
 
 
 def _watchdog_animating(scene: "BattleScene", now: int) -> None:
@@ -87,59 +87,29 @@ def _watchdog_animating(scene: "BattleScene", now: int) -> None:
                   f" ud_keys={list(e.user_data.keys())[:10]}")
 
 
-def _tick_menu_anim(scene: "BattleScene", dt_ms: int) -> None:
-    """菜单动画推进:
-       - _menu_anim_t: 一级菜单打开 (白方框收缩 + 4 icon 旋转放大)
-       - _menu_transition_t: 一级 → 二级 过渡 (3 phase)
-    """
-    if scene._menu_anim_t is not None:
-        scene._menu_anim_t += dt_ms
-        if scene._menu_anim_t >= scene.MENU_ANIM_TOTAL_MS:
-            scene._menu_anim_t = None
-
-    if scene._menu_transition_t is not None:
-        scene._menu_transition_t += dt_ms
-        # phase B 开始: 提升 _submenu 状态让二级菜单 panel 开始 draw
-        if scene._menu_transition_t >= scene.MENU_TRANSITION_A_MS and scene._submenu is None:
-            scene._submenu = 'skill'
-            scene._skill_cursor = 0    # 进 L2 总从首项起
-        if scene._menu_transition_t >= scene.MENU_TRANSITION_TOTAL_MS:
-            scene._menu_transition_t = None
-            scene._menu_open = False    # 一级菜单收掉, 只剩二级
-
-    if scene._menu_close_t is not None:
-        scene._menu_close_t += dt_ms
-        if scene._menu_close_t >= scene.MENU_CLOSE_MS:
-            scene._menu_close_t = None
-            scene._submenu = None
-            scene._menu_open = True
-            # 接着播一级 open 动画 (跟 ESC 触发的相同)
-            scene._menu_anim_t = 0
-
-    if scene._menu_dismiss_t is not None:
-        scene._menu_dismiss_t += dt_ms
-        if scene._menu_dismiss_t >= scene.MENU_DISMISS_MS:
-            scene._menu_dismiss_t = None
-            scene._menu_open = False
-            scene._input_gated = True
-            action = scene._menu_dismiss_action
-            scene._menu_dismiss_target = None
-            scene._menu_dismiss_action = None
-            if action == 'end_turn':
-                scene.battle.player_end_turn()
-            elif action == 'items':
-                scene.open_item_menu()
-
-    if scene._item_menu is not None:
-        scene._item_menu.update(dt_ms)
-        if scene._item_menu.done:
-            item = scene._item_menu.result
-            scene._item_menu = None
-            if item is None:                         # Esc: 重开十字菜单 (exe 窗口 4 mode 0xf 收起 → 开窗口 0xf)
-                scene._menu_open = True
-                scene._menu_anim_t = 0
-            else:
-                scene.use_consumable(item)
+def _tick_menu(scene: "BattleScene", dt_ms: int) -> None:
+    """原版菜单系统 (scenes.battle.battle_menu) 推进; 全部窗口关掉后按结果走 (exe FUN_004a4f94 0x7e2ddc == 1 分支)."""
+    from scenes.battle import battle_menu as bm
+    menu = scene._menu
+    if menu is None:
+        return
+    menu.update(dt_ms)
+    if not menu.done:
+        return
+    scene._menu = None
+    code, val = menu.result
+    if code == bm.RESULT_SKILL:
+        scene._input_gated = False
+        if not scene.battle.enter_attack_aim(val):
+            from core.skills import get_skill_name
+            scene.battle._log(f"{scene.battle.current.name} 无法使用 {get_skill_name(val)} (范围内无目标)")
+    elif code == bm.RESULT_ITEM:
+        scene.use_consumable(val)
+    elif code == bm.RESULT_END:
+        scene._input_gated = True
+        scene.battle.player_end_turn()
+    else:
+        scene._input_gated = True
 
 
 LOCO_TICK_MS = ATTACK_TICK_MS       # 战斗 1 tick (与引擎同)

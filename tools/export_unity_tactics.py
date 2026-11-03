@@ -56,7 +56,7 @@ def export_data() -> dict:
         'skill_descs': {str(k): d for k in __import__('core.skills', fromlist=['SKILLS']).SKILLS
                         if (d := __import__('core.skills', fromlist=['get_skill_desc']).get_skill_desc(k))},
         'consumables': {str(i): [IT.get_item_name(i), *IT.item_effect(i)] for i in sorted(IT.ITEMS)
-                        if IT.get_item_category(i) is IT.ItemCategory.CONSUMABLE},   # 战斗道具菜单 (scene._draw_item_menu)
+                        if IT.get_item_category(i) is IT.ItemCategory.CONSUMABLE},   # 战斗道具菜单 (scenes.battle.battle_menu)
         'arena_enemy_roster': [int(k[1:]) for k in ARENA_ROSTER if k.startswith('#')],   # scenes.arena.roster.ENEMY_ROSTER
         'arena_player_roster': list(ARENA_PLAYERS),   # scenes.arena.roster.PLAYER_ROSTER
         'arena_map': export_arena_map(),

@@ -72,20 +72,6 @@ class BattleScene(Scene):
 
     # 死亡动画时长 (ms). exe FUN_004399c5/9b42 等 +0x124=0x14 = 20 ticks/帧 = 800ms.
     # 只 2 帧: row 4 col 0 (倒下中) + col 1 (躺平 corpse).
-    # 一级菜单打开动画 (同步进行): 白方框收缩 + 4 icon 顺时针旋转放大入位.
-    MENU_ANIM_TOTAL_MS = 200
-    # 一级 → 二级 过渡: A icons 再转 90° 消失 + 白点扩成白框移到所选 icon 位置;
-    # B 二级菜单 panel 缩放出现 (白框保持); C 白框移动 + 变形到二级菜单首行选项.
-    MENU_TRANSITION_A_MS = 120
-    MENU_TRANSITION_B_MS = 100
-    MENU_TRANSITION_C_MS = 100
-    MENU_TRANSITION_TOTAL_MS = MENU_TRANSITION_A_MS + MENU_TRANSITION_B_MS + MENU_TRANSITION_C_MS
-    # 二级 → 一级 反向动画: 二级 panel 缩小消失. 完成后立即接 _menu_anim_t (= 一级打开动画).
-    MENU_CLOSE_MS = 120
-    # 一级菜单关闭回战斗的动画 (跟 L1→L2 phase A 同形): icons 转 90° 淡出 + 选中 icon 的
-    # 白框形成. ESC 路径不画白框; End/Item/Settings 走完白框成型后整体消失.
-    MENU_DISMISS_MS = 120
-
     DEATH_FRAME_MS = 800
     DEATH_FALL_TOTAL_MS = DEATH_FRAME_MS * 2            # 2 帧 = 1600ms 完整 fall
     ENEMY_DEATH_FLASH_MS = 1000
@@ -133,29 +119,8 @@ class BattleScene(Scene):
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False
-        # 行动菜单: ESC 弹出十字 4 选项 (上=技能, 左=道具, 右=设置, 下=回合结束)
-        self._menu_open = False
-        self._menu_font = load_chinese_font(16)
-        # 二级菜单: None / 'skill' (上→技能列表). 在二级菜单按 ESC 回退到一级.
-        self._submenu: str | None = None
-        # 技能二级菜单的选中 idx (0..len(current.known_skills)-1). 每次打开二级菜单从 0 起.
-        self._skill_cursor: int = 0
-        # 十字菜单 ← 道具: 原版「战斗用道具」窗口 (scenes.battle.item_menu); None = 没开
-        self._item_menu = None
-        # 打开一级菜单的动画计时 (ms 累加; None = 已完成静态显示).
-        # phase 1: 白方框收缩, phase 2: 4 icon 旋转放大入位. 见 scenes.battle.hud.
-        self._menu_anim_t: int | None = None
-        # 一级 → 二级 过渡动画计时. None = 不在过渡中.
-        self._menu_transition_t: int | None = None
-        # 过渡选中的 icon (= 白框终点 / 二级菜单类型). 仅 SMENU_SKILL 实装.
-        self._menu_transition_target: int = 0
-        # 二级 → 一级 反向动画 (panel 缩小消失). 完成后会自动接 _menu_anim_t 重播打开动画.
-        self._menu_close_t: int | None = None
-        # 一级 → 战斗 关闭动画. target = 选中 icon idx (None = ESC 路径, 无白框).
-        # action = 完成时执行的回合动作 ('end_turn' 或 None).
-        self._menu_dismiss_t: int | None = None
-        self._menu_dismiss_target: int | None = None
-        self._menu_dismiss_action: str | None = None
+        # 行动菜单: 移动态 ESC 开原版菜单系统 (scenes.battle.battle_menu: 十字窗口 0xf → 道具 / 特殊能力); None = 没开
+        self._menu = None
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None
@@ -208,19 +173,12 @@ class BattleScene(Scene):
         self._draw_overlays(cam_x, cam_y)
         # 3) 单位与特效 (含飘字): 原版统一精灵队列 — 影子全部先画, 其余按地面 y 选择排序 (core.battle.draw_queue)
         self._draw_world(cam_x, cam_y)
-        # 4) 行动菜单 (ESC 弹出)
-        hud_mod.draw_action_menu(self, cam_x, cam_y)
-        # 6) 浮动伤害
-        # 6) HUD (不滚动)
+        # 4) HUD (不滚动) + 日志
         hud_mod.draw_hud(self)
-        # 7) 日志 (L2 静态时让位给技能描述长条)
-        if self._submenu == 'skill' and self._menu_transition_t is None \
-                and self._menu_close_t is None:
-            hud_mod.draw_skill_desc_bar(self)
-        else:
-            hud_mod.draw_log(self)
-        if self._item_menu is not None:
-            self._item_menu.draw(self.surface)
+        hud_mod.draw_log(self)
+        # 5) 行动菜单 (原版菜单系统窗口 + 光标)
+        if self._menu is not None:
+            self._menu.draw(self.surface)
         # 8) 胜负 (等死亡动画跑完再出 banner, 否则技能秒杀最后一个敌人会跳过死亡演出)
         if (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
                 and not update_mod.death_animations_pending(self)):
@@ -253,13 +211,13 @@ class BattleScene(Scene):
             else:
                 draw_effect(self, obj, *cam_of(obj))
 
-    # ------- 战斗用道具 -------
-    def open_item_menu(self) -> None:
-        """十字菜单 ← 收起完毕: 开原版道具列表 (光标从道具图标框出发)."""
-        from scenes.battle.item_menu import BattleItemMenu, item_icon_box
-        from scenes.battle.hud import menu_center
+    # ------- 行动菜单 -------
+    def open_menu(self) -> None:
+        """移动态 Esc: 开菜单系统 + 十字窗口 0xf (exe 0x7e2ddc = 1)."""
+        from scenes.battle.battle_menu import BattleMenu, cross_center
+        u = self.battle.current
         inv = self.inventory if self.inventory is not None else _EmptyInventory()
-        self._item_menu = BattleItemMenu(self.audio, inv, item_icon_box(*menu_center(self)))
+        self._menu = BattleMenu(self.audio, inv, u, cross_center(self, u))
 
     def use_consumable(self, item_id: int) -> None:
         """道具窗口选中: 进道具瞄准 (模板按道具, core.item_use.item_template), Enter 确认后才使用并扣背包 (原版: 用完结束该角色回合).
@@ -268,7 +226,6 @@ class BattleScene(Scene):
         if u is None or not u.is_player or self.inventory is None:
             return
         if self.battle.enter_item_aim(item_id):
-            self._menu_open = False
             self._input_gated = False
 
     def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
@@ -306,6 +263,8 @@ class BattleScene(Scene):
             return
 
         if phase == Phase.PLAYER_MOVE:
+            if self._menu is not None:           # exe: 菜单系统开着 (0x7e2ddc = 1) 不画移动 / 攻击范围
+                return
             # 蓝 = 移动范围 (move range, 含 lerp 中)
             for (x, y) in self.battle.turn_move_range:
                 self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
