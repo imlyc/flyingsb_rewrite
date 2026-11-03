@@ -252,6 +252,29 @@ def test_player_status_off_slides_bar_out(arena_scene, temp_settings):
     assert sc._status_bar_h == 0
 
 
+def test_enemy_status_panel(arena_scene, temp_settings):
+    """敌军状态: 面板 56×32 贴在 (实体 x - 16, y - 23 - h), 高度每 tick 2px; 关掉收起; 隐藏属性敌人显示 "?"."""
+    from scenes.battle import enemy_panel
+    sc = arena_scene
+    _until_player_turn(sc)
+    assert sc._enemy_panel_h == 32
+    e = sc.battle.enemies[0]
+    x, y = e._panel_anchor
+    sc.surface.fill((0, 0, 0))
+    enemy_panel.draw(sc, [e])
+    m = pygame.mask.from_threshold(sc.surface, (0, 0, 0), (1, 1, 1, 255))
+    m.invert()
+    box = m.get_bounding_rects()[0].unionall(m.get_bounding_rects())
+    assert box.left >= x - 16 and box.right <= x + 40 and box.top >= y - 55 and box.bottom <= y - 23
+    e.type_flags |= 0x20
+    assert enemy_panel.cell(e) is enemy_panel.cell(sc.battle.enemies[0])     # 只看 "?", 与数值无关
+    temp_settings.set("battle_enemy_status", 0)
+    _step(sc, 4)
+    assert 0 < sc._enemy_panel_h < 32
+    _step(sc, 30)
+    assert sc._enemy_panel_h == 0
+
+
 def test_enemy_move_banner_before_action(temp_settings):
     """攻击技术 看得到: 敌人出招前横幅 1 + 15 + 8 + 15 tick, 销毁后下一 tick 才出招 (一桶水 #42 会走过来猛撞)."""
     from core.battle.data import Phase

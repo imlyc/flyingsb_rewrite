@@ -78,12 +78,13 @@ def draw_unit(scene: "BattleScene", u, cam_x: int, cam_y: int) -> None:
             draw_dead_unit(scene, u, cx, cy)
         else:
             draw_dying_pose(scene, u, cx, cy)
-        # 原版: 敌人死亡闪烁时 HP/MP 与尸体门控在同一可见位 → 一起闪烁 (blink-off 帧整个单位不进队列).
-        _draw_enemy_hp_mp(scene, u, cx, cy)
+        # 原版: 敌人死亡闪烁时 HP/MP 面板与尸体门控在同一可见位 → 一起闪烁 (blink-off 帧整个单位不进队列).
+        u._panel_anchor = (cx, cy)
         return
     # 主体: 有 sprite_key 的用真实 atlas, 否则保留色块. 旋风吹起时本体上移 (影子留地面).
     r = rect.inflate(-8, -8)
     body_cy = cy - int(round(u.wind_lift))
+    u._panel_anchor = (cx, body_cy)             # 敌人状态面板锚点 (实体 x, y - z); 有位移的姿态由 _draw_live_sprite 改写
     if u.sprite_key:
         from core.normal_attack import flicker_sprite
         fk = flicker_sprite(u)                  # 紫河变身闪烁: 这一 tick 显示新/旧形态
@@ -103,27 +104,6 @@ def draw_unit(scene: "BattleScene", u, cam_x: int, cam_y: int) -> None:
         pygame.draw.rect(scene.surface, scene.HIGHLIGHT, rect.inflate(-2, -2), 2)
         # 朝向小三角 (黄)
         draw_facing_arrow(scene, u, rect)
-    # HP / MP 持久标签: 仅敌人显示 (己方状态后续移到屏幕顶部 HUD).
-    _draw_enemy_hp_mp(scene, u, cx, cy)
-
-
-def _draw_enemy_hp_mp(scene: "BattleScene", u, cx: int, cy: int) -> None:
-    """敌人头顶 HP/MP 标签 (己方在屏幕顶部 HUD). 活/死单位都画 — 死亡时随尸体一起闪烁
-    (原版: HP/MP 与精灵门控同一可见位).
-    字号 ≈ float text (sbtlfont 14px); 用普通像素字 scene.small (13). 居中堆叠在头顶.
-    颜色: HP 绿(健康) / 黄(虚弱 <40% 或已死) / MP 蓝. 显示用 display_hp/display_weakened
-    (受击后滞后到结算 = 数字闪烁时才掉血变色)."""
-    from core import game_settings
-    if u.is_player or not game_settings.get("battle_enemy_status"):     # 战斗设定「敌军状态 看不到」(exe 0x7b88e0)
-        return
-    weakened = u.display_weakened or u.display_hp <= 0
-    hp_color = scene.HP_WEAKENED_COLOR if weakened else scene.HP_NUM_COLOR
-    label_cx = cx + 8        # 中间偏右
-    mp = scene.small.render(str(u.mp), True, scene.MP_NUM_COLOR)
-    mp_rect = mp.get_rect(midbottom=(label_cx, cy - 25))
-    scene.surface.blit(mp, mp_rect)
-    hp = scene.small.render(str(u.display_hp), True, hp_color)
-    scene.surface.blit(hp, hp.get_rect(midbottom=(label_cx, mp_rect.top - 1)))
 
 
 def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
@@ -215,11 +195,13 @@ def _draw_live_sprite(scene: "BattleScene", u, cx: int, cy: int) -> None:
         # 兜底: bottom-center 当 anchor (frame 底中心)
         fw, fh = frame.get_size()
         anchor = (fw // 2, fh)
+    ox, oy = react_off[0] + int(round(ax)), react_off[1] + int(round(ay))
+    u._panel_anchor = (cx + ox, cy + oy)
     blit_unit(
         scene.surface, frame, anchor,
         tile_center_x=cx, tile_center_y=cy,
-        offset_x=react_off[0] + int(round(ax)),
-        offset_y=react_off[1] + int(round(ay)),
+        offset_x=ox,
+        offset_y=oy,
         alpha=alpha,
     )
 

@@ -275,6 +275,8 @@ def _tick_anim_engine(scene: "BattleScene", dt_ms: int) -> None:
         _tick_flicker(scene.battle)
         from scenes.battle import status_bar
         status_bar.tick(scene)                   # 状态栏滑入/滑出 (exe FUN_004cf1ed, 每 tick 4px)
+        from scenes.battle import enemy_panel
+        enemy_panel.tick(scene)                  # 敌人状态面板展开/收起 (exe FUN_004cf98d, 每 tick 2px)
 
 
 def _tick_flicker(battle) -> None:

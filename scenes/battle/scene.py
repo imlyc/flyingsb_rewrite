@@ -29,6 +29,7 @@ from core.movement_input import DirectionalHold
 from core.sprites.base import TILE_W, TILE_H, load_shadow
 from scenes.base import Scene
 from scenes.menu import load_chinese_font
+from scenes.battle import enemy_panel
 from scenes.battle import hud as hud_mod
 from scenes.battle import input as input_mod
 from scenes.battle import units as units_mod
@@ -53,10 +54,6 @@ class BattleScene(Scene):
     ATTACK_RANGE_TINT = (255, 255, 255, 128)  # 白 = 攻击范围 (= cursor 可游走范围)
     FOCUS_TINT = (255, 255, 255, 80)          # 浅白 = cursor 焦点 overlay
     CURSOR_COLOR = (255, 240, 120)
-    HP_NUM_COLOR = (140, 240, 140)         # 绿色, 健康
-    HP_WEAKENED_COLOR = (255, 220, 80)     # 黄色, HP < 40% (虚弱)
-    HP_CRITICAL_COLOR = (240, 80, 80)      # 红色, 待挖具体触发条件 (毒/濒死?)
-    MP_NUM_COLOR = (130, 170, 255)         # 蓝色
     MOVE_NUM_COLOR = (140, 200, 255)
     SHADOW = (0, 0, 0, 110)
 
@@ -175,7 +172,9 @@ class BattleScene(Scene):
         # 2) 移动 / 攻击高亮
         self._draw_overlays(cam_x, cam_y)
         # 3) 单位与特效 (含飘字): 原版统一精灵队列 — 影子全部先画, 其余按地面 y 选择排序 (core.battle.draw_queue)
-        self._draw_world(cam_x, cam_y)
+        drawn = self._draw_world(cam_x, cam_y)
+        # 3.2) 敌人状态面板 (精灵之上, exe FUN_004cf98d)
+        enemy_panel.draw(self, drawn)
         # 3.5) 敌招名横幅 (画面框中心)
         if self._technique is not None:
             sw, sh = self.surface.get_size()
@@ -191,7 +190,7 @@ class BattleScene(Scene):
                 and not update_mod.death_animations_pending(self)):
             hud_mod.draw_end_banner(self)
 
-    def _draw_world(self, cam_x: int, cam_y: int) -> None:
+    def _draw_world(self, cam_x: int, cam_y: int) -> list:
         """exe FUN_004c8184: 单位 (槽序在前) + 可见特效 (池序) 进队列, 键 = 地面 y; 影子项键 0 先画; 选择排序后依次画."""
         from core.battle import draw_queue
         b = self.battle
@@ -217,6 +216,7 @@ class BattleScene(Scene):
                 units_mod.draw_unit(self, obj, cam_x, cam_y)
             else:
                 draw_effect(self, obj, *cam_of(obj))
+        return units
 
     # ------- 行动菜单 -------
     def open_menu(self) -> None:
