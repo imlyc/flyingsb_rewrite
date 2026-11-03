@@ -259,7 +259,8 @@ def test_enemy_status_panel(arena_scene, temp_settings):
     _until_player_turn(sc)
     assert sc._enemy_panel_h == 32
     e = sc.battle.enemies[0]
-    x, y = e._panel_anchor
+    assert e._panel_anchor is not None
+    x, y = e._panel_anchor = (200, 200)                  # 摆阵随机, 锚点可能在画面外: 固定到画面内
     sc.surface.fill((0, 0, 0))
     enemy_panel.draw(sc, [e])
     m = pygame.mask.from_threshold(sc.surface, (0, 0, 0), (1, 1, 1, 255))
