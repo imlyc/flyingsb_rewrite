@@ -207,3 +207,74 @@ def test_skill_window_battle_mode(arena_scene):
     assert sw.enabled[sw.row]
     _key(sc, pygame.K_RETURN)
     assert sc._menu is None and sc.battle.phase in (Phase.PLAYER_AIM, Phase.PLAYER_MOVE)
+
+
+@pytest.fixture
+def temp_settings(tmp_path, monkeypatch):
+    from core import game_settings
+    monkeypatch.setattr(game_settings, "_PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(game_settings, "_values", None)
+    return game_settings
+
+
+def test_battle_settings_window(arena_scene, temp_settings):
+    """→: 窗口 0x10 战斗环境设定; ↓↓← 攻击技术 看不到 (写设定); 音效 ←10; Esc 重开十字."""
+    from scenes.team_info import W_OPT
+    G = temp_settings
+    sc = arena_scene
+    _until_player_turn(sc)
+    _key(sc, pygame.K_ESCAPE)
+    _key(sc, pygame.K_RIGHT)
+    w = sc._menu.wins[W_OPT]
+    assert _cross(sc) is None and (w.cx, w.cy) == (400, 300)
+    _key(sc, pygame.K_DOWN)
+    _key(sc, pygame.K_DOWN)
+    assert w.row == 2 and G.get("battle_enemy_skill") == 1
+    _key(sc, pygame.K_LEFT)
+    assert G.get("battle_enemy_skill") == 0
+    import json
+    assert json.loads(G._PATH.read_text(encoding="utf-8"))["battle_enemy_skill"] == 0
+    for _ in range(3):
+        _key(sc, pygame.K_DOWN)
+    assert w.row == 4
+    _key(sc, pygame.K_LEFT)
+    assert G.get("volume_soundeffect") == 90
+    _key(sc, pygame.K_ESCAPE)
+    assert W_OPT not in sc._menu.wins and _cross(sc) is not None
+
+
+def test_player_status_off_slides_bar_out(arena_scene, temp_settings):
+    sc = arena_scene
+    _until_player_turn(sc)
+    assert sc._status_bar_h == 80
+    temp_settings.set("battle_player_status", 0)
+    _step(sc, 30)
+    assert sc._status_bar_h == 0
+
+
+def test_enemy_move_banner_before_action(temp_settings):
+    """攻击技术 看得到: 敌人出招前横幅 1 + 15 + 8 + 15 tick, 销毁后下一 tick 才出招 (一桶水 #42 会走过来猛撞)."""
+    from core.battle.data import Phase
+    from core.audio_manager import AudioManager
+    from scenes.arena.battle_scene import ArenaBattleScene
+    temp_settings.set("battle_enemy_skill", 1)
+    pygame.init()
+    surf = pygame.display.set_mode((800, 600))
+    sc = ArenaBattleScene(surf, AudioManager(), player_names=["孙悟空"], enemy_names=["#42"], return_scene=None)
+    sc.on_enter()
+    for p in sc.battle.players:
+        p.hp = p.max_hp = 999999
+    seen = []
+    for _ in range(4000):
+        if sc.battle.current.is_player and sc.battle.phase == Phase.PLAYER_MOVE:
+            sc.battle.player_end_turn()
+        sc.update(30)
+        sc.draw()
+        t = sc._technique
+        if t is not None:
+            seen.append(t)
+            assert not sc.battle.current.is_attacking
+        elif seen:
+            break
+    assert seen and seen[-1].done
+    assert sum(1 for _ in seen) >= 39

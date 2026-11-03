@@ -690,7 +690,8 @@ class PrologueScene(Scene, EventHost):
                 pass
 
     def _base_volume(self) -> float:
-        return float(getattr(self.audio, "_volume", 1.0) or 1.0)
+        bv = getattr(self.audio, "bgm_volume", None)
+        return float(bv()) if bv is not None else 1.0
 
     def bgm(self, n, fade_frames: int = 0) -> None:
         """换曲. 之前的 bgm_volume 淡出会把 mixer 音量压到 0, 新曲开始前必须把音量还原,

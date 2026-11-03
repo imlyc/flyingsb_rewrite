@@ -48,6 +48,7 @@ def tick(scene: "BattleScene", dt_ms: int) -> None:
     _tick_camera(scene)
     _tick_phase_transitions(scene, now)
     _tick_menu(scene, dt_ms)
+    _tick_technique(scene, dt_ms)
 
 
 def _watchdog_animating(scene: "BattleScene", now: int) -> None:
@@ -85,6 +86,26 @@ def _watchdog_animating(scene: "BattleScene", now: int) -> None:
             print(f"  - projectile ent id={e.id} state={e.state_code}"
                   f" think={getattr(e.think_fn, '__name__', None)} kind={e.user_data.get('kind')}"
                   f" ud_keys={list(e.user_data.keys())[:10]}")
+
+
+def _tick_technique(scene: "BattleScene", dt_ms: int) -> None:
+    """敌招名横幅每战斗 tick 走一步; 销毁 (done) 后的下一 tick 开始出招."""
+    t = getattr(scene, '_technique', None)
+    if t is None:
+        return
+    if not getattr(t, 'started', False):          # 出生 tick = exe state 1 (建面), 下一 tick 才开始滑
+        t.started = True
+        scene._technique_acc = 0
+        return
+    scene._technique_acc += dt_ms
+    while scene._technique_acc >= ATTACK_TICK_MS:
+        scene._technique_acc -= ATTACK_TICK_MS
+        if t.done:
+            scene._technique = None
+            scene._technique_acc = 0
+            scene.battle.post_enemy_turn()
+            return
+        t.tick()
 
 
 def _tick_menu(scene: "BattleScene", dt_ms: int) -> None:
@@ -320,6 +341,9 @@ def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:
                 scene._enemy_pre_move_started_at = None
                 scene.battle.run_pending_enemy_ai()
             return
+        # (c) 敌招名横幅 (战斗设定「攻击技术」, scenes.battle.technique): 销毁后的下一 tick 才出招 (exe FUN_004cb62d)
+        if getattr(scene, '_technique', None) is not None:
+            return
         # (b) Pre-attack 暂停 (= 原有逻辑)
         if units_animating(scene):
             scene._enemy_turn_started_at = None  # 还在走, 重置计时
@@ -328,7 +352,10 @@ def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:
                 scene._enemy_turn_started_at = now
             if now - scene._enemy_turn_started_at >= scene.ENEMY_TURN_DELAY_MS:
                 scene._enemy_turn_started_at = None
-                scene.battle.post_enemy_turn()
+                from scenes.battle.technique import banner_for
+                scene._technique = banner_for(scene.battle)
+                if scene._technique is None:
+                    scene.battle.post_enemy_turn()
     elif (scene.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
           and not scene._battle_over_signaled
           and not death_animations_pending(scene)):

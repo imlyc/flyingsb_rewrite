@@ -52,11 +52,20 @@ _glyph_cache: dict = {}
 
 # 新細明體 16px 的字形: 半角大写/数字约 9px 高、全角约 12px 高 (原生截图量); 系统字体按字形高度挑字号
 FONT_SIZE_ASCII, FONT_SIZE_CJK = 12, 14
+# 版面字体类型 0xe (窗口标题 / 敌招名横幅): 全角字形约 17px 高、步进约 22px (原生截图量)
+BIG_FONT_SIZE_ASCII, BIG_FONT_SIZE_CJK, BIG_CELL = 17, 20, 22
+# 版面字体类型 4 (战斗设定各行): 12px 比例字体 — 全角步进 12, 半角按字形宽 (空格约 3px, 原生截图量)
+SMALL_FONT_SIZE, SMALL_CELL = 11, 12
 BAR_Y_OFFSET = 8          # FUN_004cf1ed 贴在画面框 (左, 上+8)
 
 
-def _get_font(cjk: bool) -> pygame.font.Font:
-    size = FONT_SIZE_CJK if cjk else FONT_SIZE_ASCII
+def _get_font(cjk: bool, big: bool = False, small: bool = False) -> pygame.font.Font:
+    if small:
+        size = SMALL_FONT_SIZE
+    elif big:
+        size = BIG_FONT_SIZE_CJK if cjk else BIG_FONT_SIZE_ASCII
+    else:
+        size = FONT_SIZE_CJK if cjk else FONT_SIZE_ASCII
     f = _fonts.get(size)
     if f is None:
         from scenes.menu import load_chinese_font
@@ -78,29 +87,37 @@ def _get_smenu() -> pygame.Surface:
     return _smenu
 
 
-def _glyph(ch: str, color) -> pygame.Surface:
-    key = (ch, color)
+def _glyph(ch: str, color, big: bool = False, small: bool = False) -> pygame.Surface:
+    key = (ch, color, big, small)
     g = _glyph_cache.get(key)
     if g is None:
-        g = _get_font(ord(ch) >= 0x80).render(ch, False, color)
+        g = _get_font(ord(ch) >= 0x80, big, small).render(ch, False, color)
         _glyph_cache[key] = g
     return g
 
 
-def _text_width(text: str) -> int:
-    return sum(8 if ord(c) < 0x80 else 16 for c in text)
+def _advance(c: str, big: bool = False, small: bool = False) -> int:
+    if small:
+        return SMALL_CELL if ord(c) >= 0x80 else max(3, _get_font(False, small=True).size(c)[0])
+    full = BIG_CELL if big else 16
+    return full // 2 if ord(c) < 0x80 else full
 
 
-def draw_text(surf: pygame.Surface, x: int, cy: int, text: str, pair) -> None:
-    """FUN_0041db29: 新細明體 16px 等宽 (半角 8 / 全角 16), y = 垂直中线; 先描边后主色."""
+def _text_width(text: str, big: bool = False, small: bool = False) -> int:
+    return sum(_advance(c, big, small) for c in text)
+
+
+def draw_text(surf: pygame.Surface, x: int, cy: int, text: str, pair, big: bool = False, small: bool = False) -> None:
+    """FUN_0041db29: 新細明體 16px 等宽 (半角 8 / 全角 16), y = 垂直中线; 先描边后主色.
+    big = 版面字体类型 0xe (标题), small = 类型 4 (12px 比例字)."""
     fg, sh = pair
 
     def put(ox: int, oy: int, color) -> None:
         cx = x + ox
         for c in text:
-            w = 8 if ord(c) < 0x80 else 16
+            w = _advance(c, big, small)
             if c != ' ':
-                g = _glyph(c, color)
+                g = _glyph(c, color, big, small)
                 surf.blit(g, (cx + (w - g.get_width()) // 2, cy + oy - g.get_height() // 2))
             cx += w
     for dx, dy in OUTLINE:
@@ -159,10 +176,11 @@ def render_bar(rows) -> pygame.Surface:
 
 
 def tick(scene: "BattleScene") -> None:
-    """FUN_004cf1ed: 战斗进行中可见高度每 tick +4 到 80; 结束 (胜负) 每 tick -4."""
+    """FUN_004cf1ed: 战斗进行中可见高度每 tick +4 到 80; 结束 (胜负) 或战斗设定「我军状态 看不到」(0x7b88dc) 每 tick -4."""
+    from core import game_settings
     from core.battle.tactics import Phase
     h = getattr(scene, '_status_bar_h', 0)
-    if scene.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
+    if scene.battle.phase in (Phase.VICTORY, Phase.DEFEAT) or not game_settings.get("battle_player_status"):
         h = max(0, h - SLIDE_STEP)
     else:
         h = min(BAR_H, h + SLIDE_STEP)

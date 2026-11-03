@@ -119,8 +119,11 @@ class BattleScene(Scene):
         # 升级流程: VICTORY 后, 玩家按键先看完所有升级框, 才返回地图
         self._levelup_idx = 0           # 当前显示的升级报告下标 (-1 表已结束)
         self._victory_acknowledged = False
-        # 行动菜单: 移动态 ESC 开原版菜单系统 (scenes.battle.battle_menu: 十字窗口 0xf → 道具 / 特殊能力); None = 没开
+        # 行动菜单: 移动态 ESC 开原版菜单系统 (scenes.battle.battle_menu: 十字窗口 0xf → 道具 / 特殊能力 / 战斗设定); None = 没开
         self._menu = None
+        # 敌招名横幅 (scenes.battle.technique, 战斗设定「攻击技术」); None = 没有
+        self._technique = None
+        self._technique_acc = 0
         # 输入门: 进战斗 / 换单位 / 关菜单后, 要求方向键先松开才接受新移动
         self._input_gated = True
         self._last_current: BattleUnit | None = None
@@ -173,6 +176,10 @@ class BattleScene(Scene):
         self._draw_overlays(cam_x, cam_y)
         # 3) 单位与特效 (含飘字): 原版统一精灵队列 — 影子全部先画, 其余按地面 y 选择排序 (core.battle.draw_queue)
         self._draw_world(cam_x, cam_y)
+        # 3.5) 敌招名横幅 (画面框中心)
+        if self._technique is not None:
+            sw, sh = self.surface.get_size()
+            self._technique.draw(self.surface, (0, 0, sw, sh))
         # 4) HUD (不滚动) + 日志
         hud_mod.draw_hud(self)
         hud_mod.draw_log(self)

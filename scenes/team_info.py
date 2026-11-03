@@ -39,6 +39,7 @@ P_NORMAL = ((255, 255, 255), (35, 35, 35))
 P_GRAY = ((0, 0, 0), (71, 71, 71))
 P_RED = ((255, 2, 2), (151, 54, 51))
 P_YELLOW = ((255, 255, 51), (153, 129, 118))
+P_GUIDE = ((255, 255, 51), (255, 90, 40))                 # 0xde / 0xe3 (战斗设定 0% 100% 刻度)
 
 # ---- 键 (exe: Z/ESC/小键盘0 取消, X/Enter/小键盘1 确定, 方向/小键盘 8246, PgUp/PgDn/小键盘 93) ----
 K_CANCEL, K_OK, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_PGUP, K_PGDN = range(1, 9)
@@ -59,9 +60,9 @@ MODE_BATTLE = 0xF                                         # 由战斗十字菜�
 
 # 窗口号 (exe 0x7b8eb0[n])
 W_NAME, W_SUB, W_TEAM, W_LIST, W_SKILL, W_EQUIP, W_STATS, W_DESC, W_MONEY = 1, 2, 3, 4, 5, 6, 12, 13, 14
-W_CROSS = 0xF                                             # 战斗十字菜单 (FUN_00434eff)
-_FOCUSABLE = {W_SUB, W_LIST, W_SKILL, W_EQUIP, W_CROSS}  # 0x54cad4 标志
-_OPEN_SOUND = {W_SUB, W_TEAM, W_LIST, W_SKILL, W_CROSS}  # 0x54cad8 标志
+W_CROSS, W_OPT = 0xF, 0x10                                # 战斗十字菜单 (FUN_00434eff) / 战斗环境设定 (FUN_00435af5)
+_FOCUSABLE = {W_SUB, W_LIST, W_SKILL, W_EQUIP, W_CROSS, W_OPT}  # 0x54cad4 标志
+_OPEN_SOUND = {W_SUB, W_TEAM, W_LIST, W_SKILL, W_CROSS, W_OPT}  # 0x54cad8 标志
 
 SLOT_LABELS = ("头部：", "身体：", "手部：", "饰品：", "饰品：")
 LIST_TITLES = ("　头部防具", "　身体防具", "　武　　器", "　饰　　品 ", "　饰　　品 ")
@@ -160,21 +161,30 @@ def _rect(surf, color, l, t, r, b) -> None:
         surf.fill(color, (l, t, r - l, b - t))
 
 
-def scrollbar(surf: pygame.Surface, cx: int, cy: int, length: int, n: int, pos: int) -> None:
-    """FUN_0041f239 (竖直): 凹槽 + 凸块, 块高 = max(14, 槽长 / n)."""
+def scrollbar(surf: pygame.Surface, cx: int, cy: int, length: int, n: int, pos: int, horizontal: bool = False) -> None:
+    """FUN_0041f239: 凹槽 + 凸块, 块长 = max(14, 槽长 / n). horizontal = 参数 4 为 0 (战斗设定的音量条)."""
     if n == 0 or length <= 15:
         return
-    l, t, r, b = cx - 2, cy - length // 2, cx + 2, cy - length // 2 + length
-    _rect(surf, WIN, cx - 9, t - 1, cx + 9, b + 1)
+    if horizontal:
+        l, t, r, b = cx - length // 2, cy - 2, cx - length // 2 + length, cy + 2
+        _rect(surf, WIN, l - 1, cy - 9, r + 1, cy + 9)
+    else:
+        l, t, r, b = cx - 2, cy - length // 2, cx + 2, cy - length // 2 + length
+        _rect(surf, WIN, cx - 9, t - 1, cx + 9, b + 1)
     _rect(surf, SHADE, l, t, r, b)
     _rect(surf, BLACK, l - 1, t - 1, r, t)
     _rect(surf, BLACK, l - 1, t - 1, l, b)
     _rect(surf, WHITE, r, t, r + 1, b + 1)
     _rect(surf, WHITE, l, b, r + 1, b + 1)
-    th = max(14, _tdiv(b - t, n))
-    tl, tr = l - 5, l + 9
-    tt = (t + th // 2 + _tdiv((length - th) * pos, n)) - th // 2
-    tb = tt + th
+    if horizontal:
+        th = max(14, _tdiv(r - l, n))
+        tl = (l + th // 2 + _tdiv((length - th) * pos, n)) - th // 2
+        tr, tt, tb = tl + th, t - 5, t + 9
+    else:
+        th = max(14, _tdiv(b - t, n))
+        tl, tr = l - 5, l + 9
+        tt = (t + th // 2 + _tdiv((length - th) * pos, n)) - th // 2
+        tb = tt + th
     _rect(surf, WIN, tl, tt, tr, tb)
     _rect(surf, WHITE, tl - 1, tt - 1, tr, tt)
     _rect(surf, WHITE, tl - 1, tt - 1, tl, tb)
@@ -1263,8 +1273,9 @@ class CrossWin(Win):
             elif r == 5:
                 sc.mode = MODE_BATTLE
                 sc.open(W_SKILL, mode=MODE_BATTLE)
-            elif r == 0x10:                      # TODO 窗口 0x10 (FUN_00435af5 战斗设定) 未做: 当它立即关掉 → 重开 0xf
-                sc.open(W_CROSS)
+            elif r == 0x10:
+                sc.mode = MODE_BATTLE
+                sc.open(W_OPT)
             elif r == 0x12:
                 sc.cross_result(6)
             else:
@@ -1289,8 +1300,92 @@ class CrossWin(Win):
             a = (a + 0x4000) & 0xFFFF
 
 
+# ---------------- 0x10: 战斗环境设定 ----------------
+class OptWin(Win):
+    """FUN_00435af5: 画面正中 240×190. 我軍狀態 / 敵軍狀態 / 攻擊技術 ←看不到 →看得到, 音樂 / 音效 ←→ 每次 ±10 (0..100);
+    ↑↓ 选行 (到头仍播 0x144), Enter 无效, Esc 收起 → 战斗里重开十字窗口 0xf. 改动当场生效并写设定 (core.game_settings)."""
+    W, H = 240, 190
+    ROWS = tuple((240 // 2 - 0x6E, t, 240 // 2 + 0x6E, b) for t, b in ((0x31, 0x47), (0x45, 0x5B), (0x59, 0x6F), (0x8B, 0xA1), (0x9F, 0xB5)))
+    SWITCHES = ("battle_player_status", "battle_enemy_status", "battle_enemy_skill")
+    VOLUMES = ("volume_bgm", "volume_soundeffect")
+
+    def render(self) -> None:
+        from core import game_settings as G
+        s = frame_surface(self.W, self.H)
+        draw_text(s, self.W // 2 - 0x60, 0x1E, "战斗环境设定", P_NORMAL, big=True)
+        for i, label in enumerate(("我军状态", "敌军状态", "攻击技术")):
+            draw_text(s, 0xC, 0x3C + 0x14 * i, label, P_NORMAL, small=True)
+            draw_text(s, self.W - 0x3C, 0x3C + 0x14 * i, "看得到" if G.get(self.SWITCHES[i]) else "看不到", P_NORMAL, small=True)
+        separator(s, 0x14, 0x73, 200)
+        draw_text(s, 0xC, 0x82, "             0%      100%", P_GUIDE, small=True)
+        for i, label in enumerate(("音  乐", "音  效")):
+            v = G.get(self.VOLUMES[i])
+            draw_text(s, 0xC, 0x96 + 0x14 * i, label, P_NORMAL, small=True)
+            draw_text(s, 0x4C, 0x96 + 0x14 * i, f"{v:3d}%", P_NORMAL, small=True)
+            scrollbar(s, 0xB4, 0x96 + 0x14 * i, 100, 100, v, horizontal=True)
+        self.surf = s
+
+    def _adjust(self, right: bool) -> None:
+        from core import game_settings as G
+        sc = self.sc
+        if self.row < 3:
+            key, v = self.SWITCHES[self.row], 1 if right else 0
+            if G.get(key) != v:
+                G.set(key, v)
+                sc.sound(SND_OK)
+        else:
+            key = self.VOLUMES[self.row - 3]
+            old = G.get(key)
+            v = max(0, min(100, old + (10 if right else -10)))
+            if v != old:
+                G.set(key, v)
+                if sc.audio is not None:
+                    (sc.audio.set_bgm_volume if self.row == 3 else sc.audio.set_sfx_volume)(v)
+                sc.sound(SND_OK)
+        self.render()
+
+    def tick(self) -> None:
+        sc = self.sc
+        st = self.state
+        if st == 1:
+            self.cx, self.cy = SCREEN_W // 2, SCREEN_H // 2
+            self.s = 0x1999
+            self.row = 0
+            self.render()
+            self.state = 10
+        elif st == 10:
+            if self._grow():
+                if self.mode_prev == -1:
+                    sc.cursor.reset_full(sc.view)
+                    sc.cursor.state = 10
+                self.cursor_to(self.ROWS[self.row])
+        elif _std_open(self):
+            pass
+        elif st == 0x14:
+            k = self.key()
+            if k == K_CANCEL:
+                self.state = 100
+                sc.sound(SND_CANCEL)
+            elif k in (K_UP, K_DOWN):
+                self.row = max(0, min(4, self.row + (-1 if k == K_UP else 1)))
+                self.cursor_to(self.ROWS[self.row])
+                sc.sound(SND_CURSOR)
+            elif k in (K_LEFT, K_RIGHT):
+                self._adjust(k == K_RIGHT)
+        elif st == 0x6E:
+            if self.mode_prev == MODE_BATTLE:
+                self.remove()
+                sc.open(W_CROSS)
+            else:
+                l, t, r, b = sc.view
+                sc.cursor.move_to(l + 1, t + 1, r - 1, b - 1)
+                self.remove()
+            sc.mode = self.mode_prev
+
+
 _WIN_CLASSES = {W_NAME: NameWin, W_SUB: SubWin, W_TEAM: TeamWin, W_LIST: ListWin, W_SKILL: SkillWin,
-                W_EQUIP: EquipWin, W_STATS: StatsWin, W_DESC: DescWin, W_MONEY: MoneyWin, W_CROSS: CrossWin}
+                W_EQUIP: EquipWin, W_STATS: StatsWin, W_DESC: DescWin, W_MONEY: MoneyWin, W_CROSS: CrossWin,
+                W_OPT: OptWin}
 
 
 # ---------------- 窗口宿主 (FUN_0041d429 菜单系统: 窗口表 + 光标实体 + 键) ----------------

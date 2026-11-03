@@ -29,7 +29,11 @@ class AudioManager:
         self._solo_channels: dict[int, list] = {}      # id → 本段占用的 channels
         self._solo_seg_start: dict[int, int] = {}      # id → 本段开始时刻 (ms)
         self._current_bgm: str | None = None
-        self._volume = 1.0
+        self._volume = 1.0                         # 总音量 (main 设定), 下面两个百分比乘在它上面
+        from core import game_settings
+        self._bgm_percent = game_settings.get("volume_bgm")
+        self._sfx_percent = game_settings.get("volume_soundeffect")
+        self._sfx_volume = self._sfx_percent / 100
 
     def _resolve(self, filename: str) -> Path:
         """支持大小写无关查找 (原版文件名混用大写/小写)."""
@@ -67,6 +71,7 @@ class AudioManager:
         try:
             if filename not in self._sfx_cache:
                 self._sfx_cache[filename] = pygame.mixer.Sound(str(self._resolve(filename)))
+                self._sfx_cache[filename].set_volume(self._sfx_volume)
             self._sfx_cache[filename].play()
         except Exception:
             pass
@@ -88,7 +93,7 @@ class AudioManager:
                 if p.exists():
                     try:
                         snd = pygame.mixer.Sound(str(p))
-                        snd.set_volume(self._volume)
+                        snd.set_volume(self._sfx_volume)
                     except (pygame.error, FileNotFoundError):
                         snd = None
             self._sfx_id_cache[sound_id] = snd
@@ -119,12 +124,29 @@ class AudioManager:
             snd.stop()
 
     def set_volume(self, volume: float) -> None:
-        """统一设置 BGM + SFX 音量, 0.0 ~ 1.0."""
-        volume = max(0.0, min(1.0, volume))
-        self._volume = volume
-        pygame.mixer.music.set_volume(volume)
+        """总音量 0.0 ~ 1.0 (BGM + SFX 再各乘 战斗环境设定 的百分比)."""
+        self._volume = max(0.0, min(1.0, volume))
+        self.set_bgm_volume(self._bgm_percent)
+        self.set_sfx_volume(self._sfx_percent)
+
+    def bgm_volume(self) -> float:
+        """当前 BGM 实际音量 (总音量 × 音乐百分比)."""
+        return self._volume * self._bgm_percent / 100
+
+    def set_bgm_volume(self, percent: int) -> None:
+        """音乐音量 0..100 (exe FUN_004156d1)."""
+        self._bgm_percent = max(0, min(100, percent))
+        try:
+            pygame.mixer.music.set_volume(self.bgm_volume())
+        except pygame.error:
+            pass
+
+    def set_sfx_volume(self, percent: int) -> None:
+        """音效音量 0..100 (exe FUN_00414f20)."""
+        self._sfx_percent = max(0, min(100, percent))
+        self._sfx_volume = self._volume * self._sfx_percent / 100
         for s in self._sfx_cache.values():
-            s.set_volume(volume)
+            s.set_volume(self._sfx_volume)
         for s in self._sfx_id_cache.values():
             if s is not None:
-                s.set_volume(volume)
+                s.set_volume(self._sfx_volume)

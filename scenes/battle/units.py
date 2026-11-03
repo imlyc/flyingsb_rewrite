@@ -113,7 +113,8 @@ def _draw_enemy_hp_mp(scene: "BattleScene", u, cx: int, cy: int) -> None:
     字号 ≈ float text (sbtlfont 14px); 用普通像素字 scene.small (13). 居中堆叠在头顶.
     颜色: HP 绿(健康) / 黄(虚弱 <40% 或已死) / MP 蓝. 显示用 display_hp/display_weakened
     (受击后滞后到结算 = 数字闪烁时才掉血变色)."""
-    if u.is_player:
+    from core import game_settings
+    if u.is_player or not game_settings.get("battle_enemy_status"):     # 战斗设定「敌军状态 看不到」(exe 0x7b88e0)
         return
     weakened = u.display_weakened or u.display_hp <= 0
     hp_color = scene.HP_WEAKENED_COLOR if weakened else scene.HP_NUM_COLOR
