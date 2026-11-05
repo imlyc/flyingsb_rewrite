@@ -47,12 +47,11 @@ class BattleScene(Scene):
     TEXT = (240, 240, 240)
     DIM = (160, 160, 160)
     HIGHLIGHT = (255, 240, 120)
-    # 颜色从原版截图反向 + 分层假设: 基底 (蓝=移动范围 / 红=攻击范围) + 白色焦点 overlay.
-    # target.png 那块"浅红"实际是 ATK 深红 + 白叠加, 不是单层 salmon. 改回深色饱和红.
-    MOVE_TINT = (65, 70, 220, 128)            # 蓝 = 移动范围
-    DAMAGE_TINT = (180, 55, 50, 200)          # 红 = 伤害范围
-    ATTACK_RANGE_TINT = (255, 255, 255, 128)  # 白 = 攻击范围 (= cursor 可游走范围)
-    FOCUS_TINT = (255, 255, 255, 80)          # 浅白 = cursor 焦点 overlay
+    # 范围格 (exe FUN_004b463c): 每格取 "格子标记 & 掩码 0x7e2d50" 的低 3 位 (1 移动 / 2 攻击 / 4 伤害), 用调色板 0xdf+值 隔像素画
+    # 棋盘格 (另一半像素露出地面). 颜色 = exe 0x654d7c 表 (FUN_004c8184 送到调色板 0xe0..0xe5), 两位重叠是表里单独的颜色.
+    RANGE_COLORS = {1: (50, 70, 180), 2: (140, 140, 150), 3: (100, 120, 195),
+                    4: (255, 90, 40), 5: (0, 0, 0), 6: (220, 110, 80)}
+    RANGE_MOVE, RANGE_ATTACK, RANGE_DAMAGE = 1, 2, 4
     CURSOR_COLOR = (255, 240, 120)
     MOVE_NUM_COLOR = (140, 200, 255)
     SHADOW = (0, 0, 0, 110)
@@ -133,10 +132,7 @@ class BattleScene(Scene):
         self._cam_y = float(wm_cam[1])
 
         # 缓存
-        self._move_tint = self._make_tint(self.MOVE_TINT)
-        self._damage_tint = self._make_tint(self.DAMAGE_TINT)
-        self._attack_range_tint = self._make_tint(self.ATTACK_RANGE_TINT)
-        self._focus_tint = self._make_tint(self.FOCUS_TINT)
+        self._range_tiles: dict = {}         # (格子值, 奇偶) → 棋盘格 tile
         self._shadow_surf = self._make_shadow()
 
     # ------- 生命周期 -------
@@ -235,72 +231,58 @@ class BattleScene(Scene):
         if self.battle.enter_item_aim(item_id):
             self._input_gated = False
 
-    def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
+    def _range_cells(self) -> dict:
+        """各格的范围位 (exe 掩码 0x7e2d50 只会是 0/1/3/6; FUN_004a4f94 第 4 步 + FUN_004af268/FUN_004b1286):
+        我方选位: 1 (移动), 站定后 |2 (攻击范围); 瞄准: 6 (攻击 + 伤害).
+        敌方走格: 只移动 = 1, 已选定招式 (FUN_004af268) = 3; 走到位后出招前 20 tick: 6. 菜单开着 (0x7e2ddc) 不画."""
         u = self.battle.current
         phase = self.battle.phase
         if phase not in (Phase.PLAYER_MOVE, Phase.PLAYER_AIM, Phase.ENEMY_TURN):
-            return
+            return {}
         moving = (abs(u.render_x - u.x) > self.ANIM_EPSILON
                   or abs(u.render_y - u.y) > self.ANIM_EPSILON)
+        cells: dict = {}
 
-        # ---- 敌方回合 (镜像玩家显示, 没有交互) ----
-        # 流程: ENEMY_TURN 进入 → pre-move pause (450ms 显移动范围) → AI 移动 lerp →
-        #   pre-attack pause (350ms 显攻击/伤害范围) → 攻击动画
+        def mark(tiles, bit):
+            for t in tiles:
+                cells[t] = cells.get(t, 0) | bit
+
+        M, A, D = self.RANGE_MOVE, self.RANGE_ATTACK, self.RANGE_DAMAGE
         if phase == Phase.ENEMY_TURN and not u.is_player:
-            # pre-move pause OR 正在 lerp 移动: 显移动范围
-            if self.battle._enemy_ai_pending or moving or u.move_path:
-                for (x, y) in self.battle.turn_move_range:
-                    self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
-                return
-            # pre-attack pause: 攻击未启动 (entity 未 attacking), 仍有 pending target
             pending = self.battle._pending_enemy_attack
-            if pending is not None and not u.is_attacking:
-                for (px, py) in self.battle.attack_range(u):
-                    self.surface.blit(self._attack_range_tint,
-                                      self._tile_rect(px, py, cam_x, cam_y))
-                # 招式的光标/伤害范围以 AI 出招时算出的为准 (群体招罩多格; 以前一律按普攻在目标脚下画单格)
+            if self.battle._enemy_ai_pending or moving or u.move_path:
+                mark(self.battle.turn_move_range, M)
+                if pending is not None:
+                    mark(self.battle.attack_range(u), A)
+            elif pending is not None and not u.is_attacking:
+                mark(self.battle.attack_range(u), A)
+                # 招式的光标/伤害范围以 AI 出招时算出的为准 (群体招罩多格)
                 cursor = self.battle._pending_enemy_cursor or (pending.x, pending.y)
                 strike = self.battle._pending_damage_range
                 if strike is None:
                     strike = {cursor} if self.battle._pending_enemy_move is not None else self.battle.damage_range(cursor, u)
-                for (sx, sy) in strike:
-                    self.surface.blit(self._damage_tint, self._tile_rect(sx, sy, cam_x, cam_y))
-                self.surface.blit(self._focus_tint,
-                                  self._tile_rect(cursor[0], cursor[1], cam_x, cam_y))
-            return
-
+                mark(strike, D)
+            return cells
         if phase == Phase.PLAYER_MOVE:
-            if self._menu is not None:           # exe: 菜单系统开着 (0x7e2ddc = 1) 不画移动 / 攻击范围
-                return
-            # 蓝 = 移动范围 (move range, 含 lerp 中)
-            for (x, y) in self.battle.turn_move_range:
-                self.surface.blit(self._move_tint, self._tile_rect(x, y, cam_x, cam_y))
-            # 白 = 攻击范围 preview (= AIM 阶段 cursor 可游走的格子集合).
-            # 孙悟空 1×3 / 蒙面人 3×2. lerp 中不画 (避免跟着角色漂).
+            if self._menu is not None:
+                return cells
+            mark(self.battle.turn_move_range, M)
             if not moving:
-                for (px, py) in self.battle.attack_range():
-                    self.surface.blit(self._attack_range_tint,
-                                      self._tile_rect(px, py, cam_x, cam_y))
-            return
-
-        # PLAYER_AIM: lerp 中不画 (AIM 阶段角色应已静止, 但保险一下)
+                mark(self.battle.attack_range(), A)
+            return cells
         if moving:
-            return
-
-        # PLAYER_AIM: 隐藏移动范围. 三层叠加:
-        #   Layer 1 (白): 攻击范围 = cursor 可游走的格子
-        #   Layer 2 (红): 伤害范围 = 当前 cursor 对应的命中格 (跟着 cursor 变)
-        #   Layer 3 (白焦点): cursor 自身 → 跟红叠加 = 浅红高亮
-        for (px, py) in self.battle.aim_attack_range:
-            self.surface.blit(self._attack_range_tint,
-                              self._tile_rect(px, py, cam_x, cam_y))
+            return cells
+        mark(self.battle.aim_attack_range, A)
         cur = self.battle.aim_cursor
-        if cur is None:
-            return
-        for (sx, sy) in self.battle.damage_range(cur):
-            self.surface.blit(self._damage_tint, self._tile_rect(sx, sy, cam_x, cam_y))
-        self.surface.blit(self._focus_tint,
-                          self._tile_rect(cur[0], cur[1], cam_x, cam_y))
+        if cur is not None:
+            mark(self.battle.damage_range(cur), D)
+        return cells
+
+    def _draw_overlays(self, cam_x: int, cam_y: int) -> None:
+        for (x, y), bits in self._range_cells().items():
+            if bits in self.RANGE_COLORS:
+                r = self._tile_rect(x, y, cam_x, cam_y)
+                self.surface.blit(self._range_tile(bits, (r.x + r.y) & 1), r)
 
     # ------- 几何工具 -------
     def _tile_rect(self, x: int, y: int, cam_x: int, cam_y: int) -> pygame.Rect:
@@ -345,9 +327,17 @@ class BattleScene(Scene):
         return cx, cy
 
     # ------- 缓存 surface 创建 -------
-    def _make_tint(self, rgba: tuple) -> pygame.Surface:
-        s = pygame.Surface((TILE_W, TILE_H), pygame.SRCALPHA)
-        s.fill(rgba)
+    def _range_tile(self, bits: int, parity: int) -> pygame.Surface:
+        """棋盘格 tile: 屏幕坐标 (x+y) 为偶数的像素画纯色 (原版连拍实测), parity = tile 左上角 (x+y) 的奇偶."""
+        key = (bits, parity)
+        s = self._range_tiles.get(key)
+        if s is None:
+            s = pygame.Surface((TILE_W, TILE_H), pygame.SRCALPHA)
+            c = self.RANGE_COLORS[bits]
+            for y in range(TILE_H):
+                for x in range((y + parity) & 1, TILE_W, 2):
+                    s.set_at((x, y), c)
+            self._range_tiles[key] = s
         return s
 
     def _make_shadow(self) -> pygame.Surface:
