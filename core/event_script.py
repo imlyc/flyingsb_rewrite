@@ -404,7 +404,7 @@ class EventHost:
 
     # 地图 / 画面
     def switch_map(self, map_id: int, reload: bool = False) -> None: self.log(f"[ev] switch_map {map_id}")
-    def viewport(self, w: int, h: int) -> None: self.log(f"[ev] viewport {w}x{h}")
+    def viewport(self, w: int, h: int, animated: bool = False) -> None: self.log(f"[ev] viewport {w}x{h}{' anim' if animated else ''}")
     def camera_busy(self) -> bool: return False
     def camera(self, x: int | None, y: int | None, frames: int, relative: bool, follow: int = -1) -> None:
         self.log(f"[ev] camera {x},{y} {frames}f rel={relative}" + (f" follow fc{follow}" if follow != -1 else ""))
@@ -1012,13 +1012,13 @@ class EventVM:
             elif sub in (1, 2) and o:
                 self._switch_map(R(o[0]), True)
         elif op == 0x90:                                 # 画面框 (FUN_0048cb40)
-            if sub in (6, 7) and len(o) >= 2:                # 6 = 30 帧渐变到 [w,h], 7 = 立刻 (FUN_0049bfd5)
-                h.viewport(R(o[0]), R(o[1]))
-            elif sub == 5:                                   # FUN_0040e271(800, 0x1c2): 800x450 宽银幕
-                h.viewport(800, 450)
-            elif sub == 4:                                   # FUN_0049bf9c: 30 帧渐变回 800x450 (DAT_0053ca38)
-                h.viewport(800, 450)
-            # 0/1/2/3 (FUN_0049bf31/be56: 640x480 的普通地图框, 战斗/切图相关) 先不管
+            # 偶数号 = 30 步动画 (FUN_0040e399), 奇数号 = 立刻 (FUN_0040e271)
+            if sub in (6, 7) and len(o) >= 2:                # FUN_0049bfd5: [w,h]
+                h.viewport(R(o[0]), R(o[1]), animated=sub == 6)
+            elif sub in (4, 5):                              # 800x450 宽银幕 (DAT_0053ca38)
+                h.viewport(800, 450, animated=sub == 4)
+            elif sub in (0, 1, 2, 3):                        # FUN_0049bf31/be56: 宽屏 (/ilovewide) 走 user viewport = 800x600 满屏
+                h.viewport(800, 600, animated=sub % 2 == 0)
         elif op == 0xB1:                                 # 镜头 [mode, frames, x|fc, y]
             mode = signed(R(o[0])) if o else -1
             if mode == 1 and self.local(0xCC) == 0xCA:        # 上一条 mode 1 的镜头还在跑 → 先等它

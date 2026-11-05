@@ -157,6 +157,8 @@ class PrologueScene(Scene, EventHost):
         self.fade_ticks = 0
         self.fade_total = 0
         self.fade_step = 0
+        self.fade_add = ""                # 步进量渐变的逐通道画法 (FUN_0040b169): add/sub = 场景往白/黑, min/max = 从黑/白回场景; "" = 整体线性混合
+        self.view_tween = None            # 画面框动画 [起点框, 终点框, 已走 tick, 总 tick] (框 = 左上右下)
         # 硬件调色板的"非渐变"状态 (ed.04 黑板 / ed.05 白板 / 1f.00 送工作板): 盖在地图和精灵上, 气泡仍可见
         self.pal_rgb = (0, 0, 0)
         self.pal_alpha = 0.0
@@ -232,6 +234,7 @@ class PrologueScene(Scene, EventHost):
             a.tick()
         self._tick_camera()
         self._tick_fade()
+        self._tick_view()
         if self.trans is not None:
             if self.trans["t"] < self.trans["n"]:
                 self.trans["t"] += 1
@@ -268,8 +271,29 @@ class PrologueScene(Scene, EventHost):
             a.visible = False
         self.cam_follow = -1
 
-    def viewport(self, w: int, h: int) -> None:
-        self.view = (w, h) if w > 0 and h > 0 else None
+    def viewport(self, w: int, h: int, animated: bool = False) -> None:
+        """画面框. animated = exe FUN_0040e399(0x1e, ..): 四边 30 步线性移到目标 (FUN_0040e3ec), 按 16ms 真实时间走;
+        否则 FUN_0040e271 立刻设好."""
+        target = (w, h) if w > 0 and h > 0 else None
+        if not animated:
+            self.view, self.view_tween = target, None
+            return
+        sw, sh = self.surface.get_size()
+        def rect(v):
+            vw, vh = (min(v[0], sw), min(v[1], sh)) if v else (sw, sh)
+            return ((sw - vw) // 2, (sh - vh) // 2, (sw - vw) // 2 + vw, (sh - vh) // 2 + vh)
+        self.view_tween = [rect(self.view), rect(target), 0, max(1, round(30 * FADE_STEP_MS / TICK_MS))]
+
+    def _tick_view(self) -> None:
+        t = self.view_tween
+        if t is None:
+            return
+        t[2] = t[3] if fast_forward() else t[2] + 1
+        a, b, k, n = t
+        r = [a[i] + (b[i] - a[i]) * k // n for i in range(4)]
+        self.view = (r[2] - r[0], r[3] - r[1])
+        if k >= n:
+            self.view_tween = None
 
     def camera(self, x, y, frames: int, relative: bool, follow: int = -1) -> None:
         if follow != -1:
@@ -323,6 +347,12 @@ class PrologueScene(Scene, EventHost):
         self.fade_from = self.fade_alpha
         self.fade_to = to
         self.fade_step = step
+        # 步进量渐变 (FUN_0040b169) 从场景出发: 每通道每步 ±step 到位为止 → 白 = 加法 (亮色先到 255), 黑 = 减法
+        self.fade_add = ""
+        if step > 0 and target != "scene" and self.fade_from <= 0:
+            self.fade_add = "add" if target == "white" else "sub"
+        elif step > 0 and target == "scene" and self.fade_from > 0:
+            self.fade_add = "max" if self.fade_rgb == (255, 255, 255) else "min" if self.fade_rgb == (0, 0, 0) else ""
         # 原版主循环每圈按 DAT_00540050 (= 这圈过了几个 16ms) 推进渐变 (FUN_0040b169(DAT_00540050)), 所以渐变是
         # **按 16ms 的真实时间**走的, 不随 tick 长度变慢: 我们 tick 25ms → 每 tick 走 25/16 步 (Wine 24.5ms 实测同理)
         if step > 0:
@@ -379,6 +409,7 @@ class PrologueScene(Scene, EventHost):
             steps = max(1, (spd * 3 // 50) + 1 if spd >= 0 else -spd)
             self.fade_ticks = self.fade_total = max(1, round(steps * FADE_STEP_MS / TICK_MS))
             self.fade_step = 0
+            self.fade_add = ""
 
     def caption(self, text: str | None) -> None:
         self.caption_text = text
@@ -871,10 +902,16 @@ class PrologueScene(Scene, EventHost):
         self._draw_bubbles()
         # 调色板渐变叠层
         if self.fade_alpha > 0:
-            ov = pygame.Surface(surf.get_size())
-            ov.fill(self.fade_rgb)
-            ov.set_alpha(int(max(0, min(255, self.fade_alpha))))
-            surf.blit(ov, (0, 0))
+            lv = int(max(0, min(255, self.fade_alpha)))
+            if self.fade_add and lv < 255:          # 逐通道 ±step: 每个颜色各自到位 (亮色先白 / 暗色先黑)
+                c, flag = {"add": (lv, pygame.BLEND_RGB_ADD), "sub": (lv, pygame.BLEND_RGB_SUB),
+                           "min": (255 - lv, pygame.BLEND_RGB_MIN), "max": (lv, pygame.BLEND_RGB_MAX)}[self.fade_add]
+                surf.fill((c, c, c), special_flags=flag)
+            else:
+                ov = pygame.Surface(surf.get_size())
+                ov.fill(self.fade_rgb)
+                ov.set_alpha(lv)
+                surf.blit(ov, (0, 0))
         # 视口黑边
         if self.view is not None:
             sw = surf.get_width()
