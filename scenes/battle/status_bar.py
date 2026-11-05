@@ -135,8 +135,13 @@ def hp_pair(hp: int, max_hp: int):
     return PAIR_LOW
 
 
-def render_bar(rows) -> pygame.Surface:
-    """整条状态栏 (len(rows) × 128 × 80, 透明底). rows = energy.status_snapshot() 列表 (或 BattleUnit, 现取)."""
+def _dimmed(pair, k: float):
+    return tuple(tuple(int(c * k) for c in col) for col in pair)
+
+
+def render_bar(rows, ui_dim: float = 1.0) -> pygame.Surface:
+    """整条状态栏 (len(rows) × 128 × 80, 透明底). rows = energy.status_snapshot() 列表 (或 BattleUnit, 现取).
+    ui_dim < 1: 调色板 248..255 (白字 0xff/0xfd, 倒地 0xfe/0xfc) 乘这个系数 (凤凰掌暗化, skill_dim.UI_DIM_SKILLS)."""
     from core.battle import energy
     rows = [r if isinstance(r, SimpleNamespace) else energy.status_snapshot(r) for r in rows]
     surf = pygame.Surface((max(1, len(rows)) * COL_W, BAR_H), pygame.SRCALPHA)
@@ -145,15 +150,17 @@ def render_bar(rows) -> pygame.Surface:
         x = i * COL_W
         hp = u.hp
         base = PAIR_DEAD if hp < 1 else PAIR_NORMAL
+        if ui_dim < 1.0:
+            base = _dimmed(base, ui_dim)
         draw_text(surf, x + 8, 10, u.name, base)          # 原版是繁体名; 重制版界面统一简体
         draw_text(surf, x + 80, 10, f"Lv{u.level:3d}", base)
         draw_text(surf, x + 8, 30, f"HP:     /{u.max_hp:4d}", base)
-        draw_text(surf, x + 40, 30, f"{max(0, hp):4d}", hp_pair(hp, u.max_hp))
+        draw_text(surf, x + 40, 30, f"{max(0, hp):4d}", base if hp < 1 else hp_pair(hp, u.max_hp))
         if u.max_mp < 1:
             draw_text(surf, x + 8, 50, "SG", base)
         else:
             draw_text(surf, x + 8, 50, f"MP:     /{u.max_mp:4d}", base)
-            draw_text(surf, x + 40, 50, f"{u.mp:4d}", PAIR_DEAD if hp < 1 else PAIR_MP)
+            draw_text(surf, x + 40, 50, f"{u.mp:4d}", base if hp < 1 else PAIR_MP)
         t = u.etype
         if t in (energy.ENERGY_SG, energy.ENERGY_SG2) and u.sg_ok:
             px_tab = energy.SG_GAUGE_PX[t]
@@ -192,6 +199,7 @@ def draw(scene: "BattleScene") -> None:
     if h <= 0:
         return
     snap = getattr(scene.battle, 'status_snapshot', None)
-    bar = render_bar(snap if snap is not None else scene.battle.players)
+    ui_dim = 1.0 - 0.5 * min(1.0, getattr(scene.battle, 'dim_level', 0.0)) if getattr(scene.battle, 'dim_ui', False) else 1.0
+    bar = render_bar(snap if snap is not None else scene.battle.players, ui_dim)
     ox, oy = getattr(scene, 'battle_view_origin', (0, 0))
     scene.surface.blit(bar, (ox, oy + BAR_Y_OFFSET), pygame.Rect(0, BAR_H - h, bar.get_width(), h))

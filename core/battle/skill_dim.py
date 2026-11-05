@@ -15,8 +15,10 @@ if TYPE_CHECKING:
 
 DIM_FADE_MS = 480                                   # exe 30 步 × 16ms
 DIM_TICKS = max(1, round(DIM_FADE_MS / ATTACK_TICK_MS))
-# 自定义调色板渐变的 dispatcher (FUN_0040b0c5 60 步): 凤凰掌 实录 渐暗 40 tick / 渐亮 38 tick (颜色是自定义表, 暂仍用黑)
+# 自定义调色板渐变的 dispatcher (FUN_0040b0c5 60 步): 凤凰掌 实录 渐暗 40 tick / 渐亮 38 tick
 SKILL_DIM_TICKS = {0x17: (40, 38)}
+# 凤凰掌 (FUN_004febad) 的目标板除地形 16..111 外, 248..255 也 ×50% → 状态栏白字/描边 (PALETTEINDEX 0xfc..0xff) 一起变暗
+UI_DIM_SKILLS = {0x17}
 
 
 def _dim_think(e: "Entity", eng: "Engine") -> None:
@@ -48,6 +50,7 @@ def _spawn(battle, direction: int, on_done: Callable | None, ticks: int) -> "Ent
 def start_skill_dim(battle, on_done: Callable, skill_id: int | None = None, ticks: int | None = None) -> "Entity":
     """渐暗 (默认 DIM_TICKS, 自定义调色板技能见 SKILL_DIM_TICKS; ticks 给定则用它) 后调 on_done (= 挂 cast seq).
     projectile=True 让回合/输入门控等它."""
+    battle.dim_ui = skill_id in UI_DIM_SKILLS
     return _spawn(battle, +1, on_done, ticks or SKILL_DIM_TICKS.get(skill_id, (DIM_TICKS, DIM_TICKS))[0])
 
 

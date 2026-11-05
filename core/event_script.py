@@ -37,6 +37,7 @@ from core.dialog_engine import DialogTask, MessageQueue, code_str, fast_forward 
 TALK_SCRIPT_VA = 0x73C192
 EVENT_FLAGS_VA = 0x7D72E8         # DAT_007d72e8[ev]: 事件触发次数 (92.02/03 自增, 91.00 读)
 G_EVENT_NOW, G_EVENT_PREV, G_EVENT_NEXT, G_EVENT_DEFER = 0x613060, 0x613064, 0x613068, 0x61306C
+G_EVENT_BATTLE = 0x7D76F8                       # 本事件开过剧情战 (98.04 置 1, 92.00 清 0; FUN_0048d9fe / FUN_0048d678)
 G_MAP_NOW = 0x654D98              # DAT_00654d98: 当前地图号         # 4f.09 给 FC 起的子任务跑的标准 "说话" 脚本
 FC_VAR_BASE = 0x73E235            # 对象句柄变量表 (dword), 值 = FC id
 G_PARTY_MASK = 0x7D8008           # DAT_007d8008: 队伍位掩码 (e8.08 写; bit i → PARTY_SLOT_FC[i])
@@ -1017,8 +1018,11 @@ class EventVM:
                 h.viewport(R(o[0]), R(o[1]), animated=sub == 6)
             elif sub in (4, 5):                              # 800x450 宽银幕 (DAT_0053ca38)
                 h.viewport(800, 450, animated=sub == 4)
-            elif sub in (0, 1, 2, 3):                        # FUN_0049bf31/be56: 宽屏 (/ilovewide) 走 user viewport = 800x600 满屏
-                h.viewport(800, 600, animated=sub % 2 == 0)
+            elif sub in (0, 1):                              # 只在本事件没开过剧情战且没排下一个事件时 (0x7d76f8 == 0 && 0x613068 == -1)
+                if self.globals.get(G_EVENT_BATTLE, 0) == 0 and self.globals.get(G_EVENT_NEXT, 0xFFFFFFFF) == 0xFFFFFFFF:
+                    h.viewport(800, 600, animated=sub == 0)      # FUN_0049bf31/be56: 宽屏 (/ilovewide) 走 user viewport = 800x600 满屏
+            elif sub in (2, 3):                              # FUN_0049bf31: 无条件
+                h.viewport(800, 600, animated=sub == 2)
         elif op == 0xB1:                                 # 镜头 [mode, frames, x|fc, y]
             mode = signed(R(o[0])) if o else -1
             if mode == 1 and self.local(0xCC) == 0xCA:        # 上一条 mode 1 的镜头还在跑 → 先等它
@@ -1217,6 +1221,7 @@ class EventVM:
                 self.globals[G_EVENT_NOW] = self.event_id & 0xFFFFFFFF
                 self.globals[G_EVENT_NEXT] = 0xFFFFFFFF
                 self.globals[G_EVENT_DEFER] = 0xFFFFFFFF
+                self.globals[G_EVENT_BATTLE] = 0
                 h.event_begin()
             elif sub == 1:                               # 事件结束: 清掉所有气泡/说话脚本/消息环 (DAT_007d7038=1, FUN_004071a6)
                 self.globals[G_EVENT_PREV] = self.globals.get(G_EVENT_NOW, 0xFFFFFFFF)
