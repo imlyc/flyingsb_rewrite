@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from pathlib import Path
 
 import pygame
@@ -265,7 +266,7 @@ class PrologueScene(Scene, EventHost):
         else:
             self.map = realm.load(row["map"])
         self.map_row = row
-        self.trans = None
+        # 收起的转场 (FUN_00403xxx 画法) 跨切图保留到下一次展开 (exe: 0x742874 只在展开结束时清)
         self.actors = {fc: a for fc, a in self.actors.items() if fc < 0x10000}
         for a in self.actors.values():
             a.visible = False
@@ -371,11 +372,24 @@ class PrologueScene(Scene, EventHost):
         return self.fade_ticks > 0 or (self.trans is not None and self.trans["t"] < self.trans["n"])
 
     def transition(self, kind: int, closing: bool, ms: int, fc: int) -> None:
+        """ef.xx (FUN_00498110): 按真实毫秒推进 (GetTickCount). 碎块 (02) 的飞散目标只在收起时重抽, 展开沿用上次的."""
         a = self.actors.get(fc)
         n = max(1, int(ms / TICK_MS))
+        old = self.trans
         self.trans = {"kind": kind, "closing": closing, "t": 0, "n": n, "fc": fc if a is not None else -1}
         if a is None:
             self.trans["cx"], self.trans["cy"] = self.surface.get_width() / 2, self.surface.get_height() / 2
+        if kind == 2:
+            x0, y0, x1, y1 = self._view_rect()
+            bw, bh = (x1 - x0) // 12, (y1 - y0) // 12
+            if closing or old is None or "targets" not in old:   # FUN_00403497: 每块目标 = 画面外随机处 (rand%3000-1500)
+                tg = []
+                for _ in range(144):
+                    rx, ry = random.randrange(3000) - 1500, random.randrange(3000) - 1500
+                    tg.append(((x0 - bw if rx < 0 else x1) + rx, (y0 - bh if ry < 0 else y1) + ry))
+                self.trans["targets"] = tg
+            else:
+                self.trans["targets"] = old["targets"]
 
     def _set_pal(self, rgb: tuple[int, int, int], alpha: float) -> None:
         self.pal_rgb, self.pal_alpha = rgb, alpha
@@ -929,37 +943,77 @@ class PrologueScene(Scene, EventHost):
             surf.blit(t, ((surf.get_width() - t.get_width()) // 2, 40))
 
     def _draw_transition(self) -> None:
+        """ef.xx 转场 (exe FUN_00498110 → 0x742874 每帧画法). a = 可见度: 收起 1→0, 展开 0→1 (FUN_004032f4 进度 / 0x754e).
+        画面区域 = 画面框 (0x742710); 收起结束后保持收起的样子, 直到下一次展开."""
         tr = self.trans
         if tr is None:
             return
         surf = self.surface
-        sw, sh = surf.get_size()
-        k = tr["t"] / tr["n"]                              # 0 → 1
-        a = self.actors.get(tr["fc"])
-        if a is not None:
-            cx, cy = self._screen_pos(a)
-            cy -= TILE_H                                     # 对象的"屏幕位置"是脚点上方一格 (FUN_00499095 的 -0x26)
-        else:
-            cx, cy = tr.get("cx", sw / 2), tr.get("cy", sh / 2)
-        cx = max(0.0, min(float(sw), cx)); cy = max(0.0, min(float(sh), cy))
-        shrink = k if tr["closing"] else 1.0 - k            # 0 = 全开, 1 = 全收
-        if tr["kind"] == 4:                                  # 圆形光圈 (FUN_00403b89): 半径从角距离收到 0
-            rmax = math.hypot(max(cx, sw - cx), max(cy, sh - cy))
-            r = rmax * (1.0 - shrink)
-            if r <= 0:
-                surf.fill((0, 0, 0))
-                return
-            mask = pygame.Surface((sw, sh))
-            mask.fill((0, 0, 0))
-            pygame.draw.circle(mask, (255, 0, 255), (int(cx), int(cy)), int(r))
-            mask.set_colorkey((255, 0, 255))
-            surf.blit(mask, (0, 0))
-        else:                                                # 缩放 (FUN_004031c2 ZoomBlt): 全屏矩形 → 对象处的小矩形
-            zoom = 1.0 + shrink * 7.0
-            w, h = sw / zoom, sh / zoom
-            x0 = max(0.0, min(sw - w, cx - w / 2)); y0 = max(0.0, min(sh - h, cy - h / 2))
-            sub = surf.subsurface(pygame.Rect(int(x0), int(y0), max(1, int(w)), max(1, int(h)))).copy()
-            surf.blit(pygame.transform.scale(sub, (sw, sh)), (0, 0))
+        k = min(1.0, tr["t"] / tr["n"])
+        a = 1.0 - k if tr["closing"] else k
+        x0, y0, x1, y1 = self._view_rect()
+        W, H = x1 - x0, y1 - y0
+        src = surf.subsurface(pygame.Rect(x0, y0, W, H)).copy()
+        kind = tr["kind"]
+        black = lambda: surf.fill((0, 0, 0), pygame.Rect(x0, y0, W, H))
+        if kind in (0, 4):
+            act = self.actors.get(tr["fc"])
+            if act is not None:
+                cx, cy = self._screen_pos(act)
+                cy -= TILE_H                                    # 对象的"屏幕位置"是脚点上方一格 (FUN_00499095 的 -0x26)
+            else:
+                cx, cy = tr.get("cx", x0 + W / 2), tr.get("cy", y0 + H / 2)
+            cx = max(float(x0), min(float(x1 - 1), cx)); cy = max(float(y0), min(float(y1 - 1), cy))
+        if kind == 0:                                           # FUN_004031c2: 整个画面缩进 [对象那一点 → 全框] 的矩形
+            dx0, dy0 = cx + (x0 - cx) * a, cy + (y0 - cy) * a
+            dx1, dy1 = cx + 1 + (x1 - cx - 1) * a, cy + 1 + (y1 - cy - 1) * a
+            black()
+            dw, dh = int(dx1) - int(dx0), int(dy1) - int(dy0)
+            if dw > 0 and dh > 0:
+                surf.blit(pygame.transform.scale(src, (dw, dh)), (int(dx0), int(dy0)))
+        elif kind == 1:                                         # FUN_004033bd: 缩到 W·a⁴ × H·a⁴ 再放大回全框 (马赛克)
+            e = a ** 4
+            sw, sh = max(1, int(W * e)), max(1, int(H * e))
+            surf.blit(pygame.transform.scale(pygame.transform.scale(src, (sw, sh)), (W, H)), (x0, y0))
+        elif kind == 2:                                         # FUN_00403600: 12×12 块从原处飞向画面外的目标, 缓出 1-(1-a)²
+            u = 1.0 - (1.0 - a) ** 2
+            bw, bh = W // 12, H // 12
+            black()
+            for r in range(12):
+                for c in range(12):
+                    hx, hy = x0 + c * bw, y0 + r * bh
+                    tx, ty = tr["targets"][r * 12 + c]
+                    px, py = tx - (tx - hx) * u, ty - (ty - hy) * u
+                    surf.blit(src, (int(px), int(py)), pygame.Rect(c * bw, r * bh, bw, bh))
+        elif kind == 3:                                         # FUN_00403809: 48 横带, 纵向往底边压, 横向上窄下宽
+            c = 1.0 - a
+            f = math.sin(c * math.pi / 2)
+            black()
+            prev = H
+            for i in range(47, -1, -1):
+                ya = H * i // 48
+                top = y0 + ya + int((H - ya) * f)
+                bot = y0 + prev + int((H - prev) * f)
+                inset = int(((48 - (i + 1)) * W // 96) * c)
+                dw, dh = W - 2 * inset, bot - top
+                if dw > 0 and dh > 0 and prev > ya:
+                    strip = src.subsurface(pygame.Rect(0, ya, W, prev - ya))
+                    surf.blit(pygame.transform.scale(strip, (dw, dh)), (x0 + inset, top))
+                prev = ya
+        elif kind == 4:                                         # FUN_00403b89: 以对象为圆心的圆, 半径 = a × R0
+            if tr["closing"]:                                   # R0: 收起 = 到最远边角, 展开 = 屏幕对角线 (FUN_0040398e)
+                r0 = math.hypot(max(cx - x0, x1 - cx), max(cy - y0, y1 - cy))
+            else:
+                r0 = math.hypot(*surf.get_size())
+            r = a * r0
+            black()
+            for y in range(0, H, 2):
+                dy = y0 + y - cy
+                if -r <= dy <= r:
+                    half = int(math.sqrt(max(0.0, r * r - dy * dy)))
+                    lx, rx = max(x0, int(cx) - half), min(x1, int(cx) + half)
+                    if rx > lx:
+                        surf.blit(src, (lx, y0 + y), pygame.Rect(lx - x0, y, rx - lx, 2))
 
     def _draw_actor(self, a: Actor, cx: int, cy: int) -> None:
         sp = self._actor_sprite(a)

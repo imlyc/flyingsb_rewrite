@@ -1518,8 +1518,8 @@ class EventVM:
             d = h.fc_get(fc, 0x110) & 7
             h.fc_anim(fc, 0x20000, (0, 6, 12, 18, 5, 11, 17, 23)[d], 0)
         elif op == 0xEF and len(o) >= 2:                 # 转场 (FUN_00498110): [1 收/0 放, 毫秒, 对象]; Shift 下跳过
-            # 00 以对象为中心缩放 (FUN_00403071) / 01 平移 / 02 碎块 / 03 百叶 (FUN_00403390/3497/378e, 全屏)
-            # 04 圆形光圈 (FUN_0040398e, 圆心 = 对象屏幕位置)
+            # 00 画面缩进对象那一点 (FUN_004031c2) / 01 马赛克 (FUN_004033bd) / 02 12×12 碎块飞散 (FUN_00403600)
+            # 03 横带折叠往底边压 (FUN_00403809) / 04 圆形光圈 (FUN_00403b89, 圆心 = 对象屏幕位置); 画法见 scenes.prologue._draw_transition
             if not fast_forward():
                 h.transition(sub, bool(R(o[0])), R(o[1]), self.fc(R(o[2])) if len(o) > 2 else -1)
         elif op in (0x80, 0xE6, 0x9C, 0xF1, 0x52, 0x4C, 0x4D):
