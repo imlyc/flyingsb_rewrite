@@ -213,3 +213,25 @@ def test_zihe_flicker_blocks_next_unit():
     U._tick_phase_transitions(sc, 10**6)
     U._tick_phase_transitions(sc, 10**6)
     assert not b._enemy_ai_pending                                 # 闪完 → 敌人开始行动
+
+
+def test_zihe_victory_revert_flickers_then_restores_human():
+    """FUN_004ac52d case 3/4: 胜利时还是兽形 → 闪 31t (同战中变回: 位 1 = 人形) 后才换回人形卡."""
+    from scenes.battle.update import _tick_flicker
+    z = _u('紫河', 15, 53, agile=99, acc=(0x12a, 0x144))
+    z.sprite_key = 'ps_CJAH000'
+    b = _battle([z], [_u('e', 18, 53, is_player=False, agile=1)])
+    z.flicker = None
+    b.phase = Phase.VICTORY
+    assert NA.victory_revert_pending(b) and b.victory_revert is z
+    assert z.flicker == dict(t=0, other='ps_CJAH300', to='ps_CJAH000')
+    assert NA.flicker_sprite(z) == 'ps_CJAH000'                   # 0xdeed5221 位 0 = 1 → 人形
+    z.flicker['t'] = 1
+    assert NA.flicker_sprite(z) == 'ps_CJAH300'                   # 位 1 = 0 → 兽形
+    z.flicker['t'] = 0
+    for _ in range(NA.FLICKER_TICKS - 1):
+        _tick_flicker(b)
+    assert z.zihe['transformed'] and NA.victory_revert_pending(b)
+    _tick_flicker(b)
+    assert not z.zihe['transformed'] and z.sprite_key == 'ps_CJAH000' and z.flicker is None and z.mp == 300
+    assert not NA.victory_revert_pending(b)

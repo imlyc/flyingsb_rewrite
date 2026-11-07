@@ -183,7 +183,8 @@ class BattleScene(Scene):
             self._menu.draw(self.surface)
         # 8) 胜负 (等死亡动画跑完再出 banner, 否则技能秒杀最后一个敌人会跳过死亡演出)
         if (self.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
-                and not update_mod.death_animations_pending(self)):
+                and not update_mod.death_animations_pending(self)
+                and getattr(self.battle, 'victory_revert', None) is None):
             hud_mod.draw_end_banner(self)
 
     def _draw_world(self, cam_x: int, cam_y: int) -> list:

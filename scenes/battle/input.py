@@ -27,8 +27,8 @@ def handle_event(scene: "BattleScene", event: pygame.event.Event) -> bool:
     if event.type != pygame.KEYDOWN:
         return True
     if scene.battle.phase in (Phase.VICTORY, Phase.DEFEAT):
-        if update_mod.death_animations_pending(scene):
-            return True   # 死亡动画跑完再接 banner 的输入
+        if update_mod.death_animations_pending(scene) or getattr(scene.battle, 'victory_revert', None) is not None:
+            return True   # 死亡动画 / 紫河变回跑完再接 banner 的输入
         _advance_end_screen(scene)
         return True
     if scene.battle.phase == Phase.ENEMY_TURN:

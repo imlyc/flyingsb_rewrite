@@ -19,6 +19,7 @@ import pygame
 from core.battle.data import Phase
 from core.battle.locomotion import WALK_TICKS, motion_tick, tick_pose
 from core.attack_seq import ATTACK_TICK_MS
+from core.normal_attack import victory_revert_pending
 from core.sprites.base import TILE_W, TILE_H
 from scenes.battle import input as input_mod
 from core.battle.float_digits import floats_animating
@@ -279,6 +280,7 @@ def _tick_anim_engine(scene: "BattleScene", dt_ms: int) -> None:
         enemy_panel.tick(scene)                  # 敌人状态面板展开/收起 (exe FUN_004cf98d, 每 tick 2px)
 
 
+
 def _tick_flicker(battle) -> None:
     """紫河变身闪烁 31t (core.normal_attack.FLICKER_MASK)."""
     from core.normal_attack import FLICKER_TICKS
@@ -288,6 +290,10 @@ def _tick_flicker(battle) -> None:
             fl['t'] += 1
             if fl['t'] >= FLICKER_TICKS:
                 u.flicker = None
+                if u is getattr(battle, 'victory_revert', None):   # 胜利时变回: 闪完才换回人形卡
+                    from core.normal_attack import zihe_switch
+                    zihe_switch(u, False, flicker=False)
+                    battle.victory_revert = None
                 battle.refresh_status_snapshot(working=False)   # exe 0xd/0xe 闪完 FUN_004a4e42(0)
 
 
@@ -295,7 +301,7 @@ def _camera_focus(scene: "BattleScene"):
     """镜头焦点 (原版录像 2026-11-01): 单位移动时跟单位; 一旦有瞄准光标 (玩家瞄准 / 敌人选定目标),
     对准单位与光标的中点, 并停在那里直到换下一个单位 (出招期间不回单位). 玩家退回移动则回到单位."""
     b = scene.battle
-    u = b.current
+    u = getattr(b, 'victory_revert', None) or b.current   # 胜利时紫河变回: 镜头转向她 (FUN_004b261b)
     ux, uy = scene._unit_draw_pos(u)
     if getattr(scene, '_focus_unit', None) is not u or b.phase == Phase.PLAYER_MOVE:
         scene._focus_unit, scene._aim_focus = u, None
@@ -360,7 +366,8 @@ def _tick_phase_transitions(scene: "BattleScene", now: int) -> None:
                     scene.battle.post_enemy_turn()
     elif (scene.battle.phase in (Phase.VICTORY, Phase.DEFEAT)
           and not scene._battle_over_signaled
-          and not death_animations_pending(scene)):
+          and not death_animations_pending(scene)
+          and not victory_revert_pending(scene.battle)):
         scene._battle_over_signaled = True
         wav = "Victory.wav" if scene.battle.phase == Phase.VICTORY else "Gameover.wav"
         try:

@@ -178,8 +178,8 @@ def zihe_setup(u: "BattleUnit", accessories) -> None:
                   beast=zihe_beast_stats(u, f), human=None)
 
 
-def zihe_switch(u: "BattleUnit", to_beast: bool) -> None:
-    """FUN_004a0753 / 4a078a: 换角色卡 (两套 HP 池各自保留)."""
+def zihe_switch(u: "BattleUnit", to_beast: bool, flicker: bool = True) -> None:
+    """FUN_004a0753 / 4a078a: 换角色卡 (两套 HP 池各自保留). flicker=False: 闪烁由调用方自己做 (胜利时变回)."""
     z = getattr(u, 'zihe', None)
     if z is None or z['transformed'] == to_beast:
         return
@@ -192,7 +192,26 @@ def zihe_switch(u: "BattleUnit", to_beast: bool) -> None:
     for k, v in other.items():
         setattr(u, k, v)
     z['transformed'] = to_beast
-    u.flicker = dict(t=0, other=cur['sprite_key'], to=u.sprite_key)
+    if flicker:
+        u.flicker = dict(t=0, other=cur['sprite_key'], to=u.sprite_key)
+
+
+def victory_revert_pending(battle) -> bool:
+    """胜利时紫河还是兽形 (FUN_004ac52d case 3/4): 镜头转向她, 闪 31t (与战中变回相同: FLICKER_MASK 位 0 兽形 / 位 1 人形,
+    0x54ee38 = 角色 12 人形), 然后 FUN_004a078a 换回人形卡, 之后才结算 (原版连拍 2026-11-06: 状态栏开始收起时就开始闪).
+    在胜利的死亡/飘字收完后调用; 变回期间返回 True."""
+    from core.battle.data import Phase
+    if battle.phase != Phase.VICTORY:
+        return False
+    if not getattr(battle, 'victory_revert_checked', False):
+        battle.victory_revert_checked = True
+        for z in battle.players:
+            zh = getattr(z, 'zihe', None)
+            if zh and zh['transformed'] and zh.get('human'):
+                battle.victory_revert = z
+                z.flicker = dict(t=0, other=z.sprite_key, to=zh['human']['sprite_key'])
+                break
+    return getattr(battle, 'victory_revert', None) is not None
 
 
 def flicker_sprite(u: "BattleUnit") -> str | None:
