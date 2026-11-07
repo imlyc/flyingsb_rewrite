@@ -232,7 +232,8 @@ def main(argv: list[str]) -> None:
         e = CD.enemy(t)
         if e and e.get('sprite'):
             enemies[t] = e['sprite']
-    bases = sorted({k[:-2] for k in list(players.values()) + list(enemies.values())})
+    # 紫河兽形 (core.normal_attack: 形态 f → ps_CJAH{f+1}00) 不是任何角色的走路图, 要单独带上
+    bases = sorted({k[:-2] for k in list(players.values()) + list(enemies.values())} | {f'ps_CJAH{f}' for f in (1, 2, 3)})
     ps_names = sorted(p.stem for b in bases for p in SPRITES_DIR.glob(f'{b}??.pcx'))
     ps_names += [n for n in ('ps_CUN00', 'ps_CDE00') if (SPRITES_DIR / f'{n}.pcx').exists() and n not in ps_names]   # 召喚精靈 (core.mina_skills)
     from tools.export_unity_tactics import export_seqs
