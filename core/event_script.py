@@ -425,6 +425,7 @@ class EventHost:
         """46 寻路: 从 fc 当前格到 (x,y) 的步骤码列表 (dir|0x8000 走一格 / dir|0x100 只转向, d = 到达后朝向);
         空 = 不可达 (瞬移)."""
         self.log(f"[ev] fc{fc} path→({x},{y}) face {d}"); return []
+    def fc_from_leader(self, fc: int, leader: int) -> None: pass         # 47.04/05: 放到队长身上并显示
     def fc_jump(self, fc: int, dx: int, dy: int, ticks: int, a: int, b: int, flag: int) -> int:
         self.log(f"[ev] fc{fc} jump ({dx},{dy}) {ticks}t"); return 0
     def fc_fly(self, fc: int, px: int, py: int, ticks: int) -> int:
@@ -1410,6 +1411,8 @@ class EventVM:
             else:
                 fc = self.fc(R(o[1]))
                 a = [signed(R(x)) for x in o[2:]] + [0] * 5
+                if sub in (4, 5):                    # 先放到队长身上并显示 (116 的小精灵从队伍里跳出来)
+                    h.fc_from_leader(fc, self.globals.get(G_PARTY_LEADER, -1))
                 if sub in (8, 9):
                     px, py = a[0] * 64 + 32, a[1] * 48 + 24
                     if sub == 9:

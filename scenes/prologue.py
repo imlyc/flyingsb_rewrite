@@ -450,6 +450,15 @@ class PrologueScene(Scene, EventHost):
     def fc_show(self, fc: int, visible: bool) -> None:
         self._actor(fc).visible = visible
 
+    def fc_from_leader(self, fc: int, leader: int) -> None:
+        """47.04/05 前置 (FUN_0047c920): FUN_0049926f 把对象放到队长身上 (像素坐标/高度/偏移/格/朝向), FUN_00498d14(obj,1) 显示."""
+        a, b = self._actor(fc), self.actors.get(leader)
+        if b is not None and b is not a:
+            a.px, a.py, a.z = b.px, b.py, b.z
+            a.off, a.off_to = list(b.off), list(b.off)
+            a.set_dir(b.dir)
+        a.visible = True
+
     def fc_dir(self, fc: int, d: int) -> None:
         self._actor(fc).set_dir(d)
 
