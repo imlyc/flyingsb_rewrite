@@ -91,7 +91,8 @@ def test_zihe_hit_trigger_and_revert():
     assert b._turn_order[b._turn_idx] is z                         # 新回合轮到紫河, 以兽形行动
     assert z.zihe['transformed'] and z.attack_normal == 89
     b.end_unit_turn()                                              # 紫河兽形行动完 → 变回人形
-    assert not z.zihe['transformed'] and z.hp == 590 and z.mp == 300
+    # FUN_004a06c0: 人形 HP 按兽形当前 HP 重算 = 1200*2/(1+3) = 600 (兽形卡开战按满血生成, 不是恢复变身前的 590)
+    assert not z.zihe['transformed'] and z.hp == beast_hp * 2 // 4 == 600 and z.mp == 300
     assert beast_hp == 600 * 4 // 2
 
 

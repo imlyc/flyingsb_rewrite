@@ -179,7 +179,8 @@ def zihe_setup(u: "BattleUnit", accessories) -> None:
 
 
 def zihe_switch(u: "BattleUnit", to_beast: bool, flicker: bool = True) -> None:
-    """FUN_004a0753 / 4a078a: 换角色卡 (两套 HP 池各自保留). flicker=False: 闪烁由调用方自己做 (胜利时变回)."""
+    """FUN_004a0753 / 4a078a: 换角色卡. 兽形卡开战生成一次 (FUN_004a0493) 整场保留; 变回人形时 FUN_004a06c0 按兽形当前 HP
+    重算人形 HP = 兽形 HP*2/(形态+3), 最少 1 (不是恢复变身前的人形 HP). flicker=False: 闪烁由调用方自己做 (胜利时变回)."""
     z = getattr(u, 'zihe', None)
     if z is None or z['transformed'] == to_beast:
         return
@@ -191,6 +192,8 @@ def zihe_switch(u: "BattleUnit", to_beast: bool, flicker: bool = True) -> None:
         z['beast'] = cur
     for k, v in other.items():
         setattr(u, k, v)
+    if not to_beast:
+        u.hp = max(1, cur['hp'] * 2 // (z['form'] + 3))
     z['transformed'] = to_beast
     if flicker:
         u.flicker = dict(t=0, other=cur['sprite_key'], to=u.sprite_key)
