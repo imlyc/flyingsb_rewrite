@@ -117,6 +117,8 @@ class Actor:
             if k >= 1.0:
                 if m["kind"] == "jump":
                     self.off[2] = 0.0
+                if m.get("hide"):                    # FUN_0049a818: +0x19c 落地后隐藏 (47.06)
+                    self.visible = False
                 self.motion = None
 
 
@@ -680,7 +682,9 @@ class PrologueScene(Scene, EventHost):
     def fc_jump(self, fc: int, dx: int, dy: int, ticks: int, a1: int, b1: int, flag: int) -> int:
         a = self._actor(fc)
         n = max(1, int(ticks * (1000 / 60) / TICK_MS)) if ticks > 0 else 1
-        return self._motion(a, "jump", a.px + dx * TILE_W, a.py + dy * TILE_H, n, h=TILE_H * (1.0 if a1 == 0 else abs(a1) / 48.0))
+        hd = self._motion(a, "jump", a.px + dx * TILE_W, a.py + dy * TILE_H, n, h=TILE_H * (1.0 if a1 == 0 else abs(a1) / 48.0))
+        a.motion["hide"] = flag == 0
+        return hd
 
     def fc_fly(self, fc: int, px: int, py: int, ticks: int) -> int:
         a = self._actor(fc)

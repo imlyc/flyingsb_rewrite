@@ -1418,11 +1418,16 @@ class EventVM:
                     if sub == 9:
                         px, py = h.fc_get(fc, 0x128) * 64 + 32 + a[0] * 64, h.fc_get(fc, 0x12C) * 48 + 24 + a[1] * 48
                     hd = h.fc_fly(fc, px, py, a[2])
+                elif sub == 6:                       # FUN_0047c920 case 6: 跳回队长所在格, 落地后隐藏 (无坐标参数)
+                    leader = self.globals.get(G_PARTY_LEADER, -1)
+                    dx = h.fc_get(leader, 0x128) - h.fc_get(fc, 0x128)
+                    dy = h.fc_get(leader, 0x12C) - h.fc_get(fc, 0x12C)
+                    hd = h.fc_jump(fc, dx, dy, a[0], a[1], a[2], 0)
                 else:
                     dx, dy = a[0], a[1]
                     if sub in (0, 4):
                         dx, dy = a[0] - h.fc_get(fc, 0x128), a[1] - h.fc_get(fc, 0x12C)
-                    hd = h.fc_jump(fc, dx, dy, a[2], a[3], a[4], 1 if sub in (0, 1, 4, 5) else 0)
+                    hd = h.fc_jump(fc, dx, dy, a[2], a[3], a[4], 1)
                 self._wait_or_store(mode, hd, o[0])
                 if mode == 1 and self._wait_handle(hd):
                     return True
